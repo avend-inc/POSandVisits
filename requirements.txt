@@ -1,8 +1,17 @@
+# ============================================================
+#  インストール方法
+#    pip install -r requirements.txt
+#    python -m playwright install chromium      ← ブラウザ本体（1回だけ）
+# ============================================================
+
+# CSVの読み書き・集計
 pandas>=2.2
 numpy>=1.26
+
+# HTTP通信（Supabaseへの読み書きもこれ）
 requests>=2.32
 
-# ログインの保険用。普段は使われません（requestsでログインできるため）。
+# ブラウザ操作（cashier / デジテール のログインに必須）
 playwright>=1.44
 
 # 以下は後で作るファイル用（push_sheets.py / push_slack.py）
