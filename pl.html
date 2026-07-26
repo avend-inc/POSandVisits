@@ -125,6 +125,31 @@ function g(k){const v=M[k];return Number.isFinite(v)?v:0;}
 function has(k){return Number.isFinite(M[k]);}
 function inp(k,step){return `<input class="num pin" data-k="${k}" type="number" step="${step||1}" value="${has(k)?M[k]:""}" placeholder="—">`;}
 
+// 総合（全店）は各店の入力値の合計。金額系は合計、比率は合計した基礎値から計算。
+function isAll(){return state.store==="all";}
+function storeMof(sid){try{const s=localStorage.getItem(`notime-pl-${sid}-${state.ym}`);return s?JSON.parse(s):{};}catch(e){return {};}}
+function sumStores(key){let t=0,any=false;for(const s of usableStores()){const m=storeMof(s.id);if(Number.isFinite(m[key])){t+=m[key];any=true;}}return any?t:null;}
+function effNum(key){ return isAll()? sumStores(key) : (Number.isFinite(M[key])?M[key]:null); }
+function E(key){const v=effNum(key);return Number.isFinite(v)?v:0;}
+function budKPI(k){
+  if(!isAll()) return Number.isFinite(M["b_"+k])?M["b_"+k]:null;
+  const S=x=>sumStores("b_"+x);
+  if(["inTax","in","ex","v","tx","it"].includes(k)) return S(k);
+  const inn=S("in"),tx=S("tx"),v=S("v"),ex=S("ex"),it=S("it");
+  if(k==="pr")  return (v&&tx!=null)? tx/v*100 : null;
+  if(k==="aov") return (tx&&inn!=null)? inn/tx : null;
+  if(k==="aup") return (it&&ex!=null)? ex/it : null;
+  if(k==="upt") return (tx&&it!=null)? it/tx : null;
+  return null;
+}
+// 金額の入力セル（総合は合計を読み取り専用表示）
+function amtCell(key){ if(!isAll()) return inp(key,1000);
+  const v=sumStores(key); return `<span class="auto">${v==null?"—":YEN(v)+"円"}</span>`; }
+// KPI予算の入力セル（総合は合計/派生を読み取り専用表示）
+function budCell(m){ if(!m.budget) return "";
+  if(!isAll()) return inp("b_"+m.k, m.k==="pr"?0.1:(m.k==="upt"?0.01:(["v","tx","it","bagq"].includes(m.k)?1:1000)));
+  const v=budKPI(m.k); return `<span class="auto">${v==null?"—":m.fmt(v)+m.u}</span>`; }
+
 function render(){
   const us=usableStores(), months=monthsInData();
   if(!state.ym||!months.includes(state.ym)) state.ym=(DATA._salesMax||months[months.length-1]).slice(0,7);
@@ -135,14 +160,14 @@ function render(){
 
   const kpiRows=KPIS.map(m=>{const av=m.av(A);
     return `<tr><td>${m.name}</td>
-      <td>${m.budget?inp("b_"+m.k, m.k==="pr"?0.1:(m.k==="upt"?0.01:(["v","tx","it","bagq"].includes(m.k)?1:1000))):""}</td>
+      <td>${budCell(m)}</td>
       <td class="auto">${av==null?"—":m.fmt(av)+m.u}</td>
       <td id="ach_${m.k}" class="mut">—</td>
       <td id="dif_${m.k}" class="mut">—</td></tr>`;}).join("");
 
-  const costRows=COSTS.map((c,i)=>`<tr><td>${esc(c)}</td><td>${inp("cb_"+i,1000)}</td><td>${inp("ca_"+i,1000)}</td><td id="cd_${i}" class="mut"></td></tr>`).join("");
+  const costRows=COSTS.map((c,i)=>`<tr><td>${esc(c)}</td><td>${amtCell("cb_"+i)}</td><td>${amtCell("ca_"+i)}</td><td id="cd_${i}" class="mut"></td></tr>`).join("");
 
-  const payRows=PAYS.map((p,i)=>`<tr><td>${p}</td><td>${inp("pay_"+i,1000)}</td></tr>`).join("");
+  const payRows=PAYS.map((p,i)=>`<tr><td>${p}</td><td>${amtCell("pay_"+i)}</td></tr>`).join("");
 
   document.getElementById("app").innerHTML=`
     <header>
@@ -156,8 +181,9 @@ function render(){
       <select id="store">${stores.map(s=>`<option value="${s.id}" ${String(s.id)===String(state.store)?"selected":""}>${s.name}</option>`).join("")}</select>
       <label class="lbl" style="margin-left:6px">対象月</label>
       <select id="ym">${months.slice().reverse().map(m=>{const[a,b]=m.split("-");return `<option value="${m}" ${m===state.ym?"selected":""}>${a}年${+b}月</option>`;}).join("")}</select>
-      <button class="chip" id="reset">この月の入力を消す</button>
+      ${isAll()?"":'<button class="chip" id="reset">この月の入力を消す</button>'}
     </div>
+    ${isAll()?'<p class="note" style="margin:2px 0 0">総合（全店）の予算・コストは<b>各店に入力した値の合計</b>です（自動）。編集は店舗を選んでください。</p>':''}
 
     <div class="panel">
       <h2>${y}年${+mm}月・${esc(storeName)} サマリー</h2>
@@ -183,8 +209,8 @@ function render(){
       <div class="tblwrap"><table>
         <thead><tr><th>項目</th><th>予算(記入)</th><th>実績</th><th>差異/率</th></tr></thead>
         <tbody>
-          <tr><td>税抜売上</td><td>${inp("pl_ex_b",1000)}</td><td class="auto" id="pl_ex_a">—</td><td id="pl_ex_d" class="mut"></td></tr>
-          <tr><td>売上原価</td><td>${inp("genka_b",1000)}</td><td>${inp("genka_a",1000)}</td><td id="genka_r" class="mut"></td></tr>
+          <tr><td>税抜売上</td><td>${amtCell("pl_ex_b")}</td><td class="auto" id="pl_ex_a">—</td><td id="pl_ex_d" class="mut"></td></tr>
+          <tr><td>売上原価</td><td>${amtCell("genka_b")}</td><td>${amtCell("genka_a")}</td><td id="genka_r" class="mut"></td></tr>
           <tr class="total"><td>粗利</td><td class="auto" id="gross_b">—</td><td class="auto" id="gross_a">—</td><td id="gross_d" class="mut"></td></tr>
           <tr class="sect"><td>販管費（内訳）</td><td>予算</td><td>実績</td><td></td></tr>
           ${costRows}
@@ -214,7 +240,8 @@ function render(){
   document.getElementById("store").onchange=e=>{state.store=e.target.value==="all"?"all":+e.target.value;render();};
   document.getElementById("ym").onchange=e=>{state.ym=e.target.value;render();};
   document.getElementById("themebtn").onclick=toggleTheme;
-  document.getElementById("reset").onclick=()=>{if(confirm("この店舗・この月の記入値を消しますか？")){try{localStorage.removeItem(mkey());}catch(e){}M={};render();}};
+  const rb=document.getElementById("reset");
+  if(rb)rb.onclick=()=>{if(confirm("この店舗・この月の記入値を消しますか？")){try{localStorage.removeItem(mkey());}catch(e){}M={};render();}};
   document.querySelectorAll(".pin").forEach(el=>el.oninput=()=>{const k=el.dataset.k;
     if(el.value===""){delete M[k];}else{const v=Number(el.value);if(Number.isFinite(v))M[k]=v;else delete M[k];}
     saveM();recompute();});
@@ -224,25 +251,24 @@ function render(){
 function setTxt(id,txt,cls){const el=document.getElementById(id);if(!el)return;el.textContent=txt;if(cls!==undefined)el.className=cls;}
 function recompute(){
   const AV={}; KPIS.forEach(m=>AV[m.k]=m.av(A));
-  // KPI 達成率・差異
-  KPIS.forEach(m=>{ if(!m.budget)return; const b=M["b_"+m.k], av=AV[m.k];
+  // KPI 達成率・差異（予算は店舗なら入力値、総合なら各店合計/派生）
+  KPIS.forEach(m=>{ if(!m.budget)return; const b=budKPI(m.k), av=AV[m.k];
     if(Number.isFinite(b)&&b!==0&&av!=null){ const ach=av/b*100, dif=av-b;
       setTxt("ach_"+m.k, F1(ach)+"%", ach>=100?"up":"down");
       setTxt("dif_"+m.k, (dif>=0?"+":"−")+m.fmt(Math.abs(dif))+m.u, dif>=0?"up":"down");
     }else{ setTxt("ach_"+m.k,"—","mut"); setTxt("dif_"+m.k,"—","mut"); } });
 
-  // 損益
-  const exA=A.ex, exB=g("pl_ex_b");
+  // 損益（金額は店舗なら入力値、総合なら各店合計）
+  const exA=A.ex, exB=E("pl_ex_b");
   setTxt("pl_ex_a", YEN(exA)+"円");
   setTxt("pl_ex_d", exB>0?diffStr(exA-exB):"", exB>0?dc(exA-exB):"mut");
-  const genA=g("genka_a"), genB=g("genka_b");
+  const genA=E("genka_a"), genB=E("genka_b");
   setTxt("genka_r", exA>0?("原価率 "+F1(genA/exA*100)+"%"):"", "mut");
   const grA=exA-genA, grB=exB-genB;
   setTxt("gross_a", YEN(grA)+"円"); setTxt("gross_b", exB||genB?YEN(grB)+"円":"—");
   setTxt("gross_d", (exB||genB)?diffStr(grA-grB):"", (exB||genB)?dc(grA-grB):"mut");
   let sgaA=0,sgaB=0;
-  COSTS.forEach((c,i)=>{ sgaA+=g("ca_"+i); sgaB+=g("cb_"+i);
-    const da=g("ca_"+i), db=g("cb_"+i);
+  COSTS.forEach((c,i)=>{ const da=E("ca_"+i), db=E("cb_"+i); sgaA+=da; sgaB+=db;
     setTxt("cd_"+i, (da||db)?diffStr(da-db):"", "mut"); });
   setTxt("sga_a", YEN(sgaA)+"円"); setTxt("sga_b", YEN(sgaB)+"円");
   setTxt("sga_d", diffStr(sgaA-sgaB), "mut");
@@ -253,14 +279,14 @@ function recompute(){
   setTxt("opr_b", exB>0?F1(opB/exB*100)+"%":"—");
 
   // 決済
-  let payT=0; PAYS.forEach((p,i)=>payT+=g("pay_"+i));
+  let payT=0; PAYS.forEach((p,i)=>payT+=E("pay_"+i));
   setTxt("pay_total", YEN(payT)+"円");
   const salesIn=A.in+A.bag;
-  setTxt("pay_diff", payT>0?diffStr(payT-salesIn):"—", payT>0?"mut":"mut");
+  setTxt("pay_diff", payT>0?diffStr(payT-salesIn):"—", "mut");
 
   // hero
   setTxt("h-sales", YEN(salesIn)+"円");
-  const bIn=M["b_inTax"];
+  const bIn=budKPI("inTax");
   if(Number.isFinite(bIn)&&bIn!==0){ setTxt("h-ach", F1(salesIn/bIn*100)+"%", salesIn>=bIn?"v up":"v down");
     setTxt("h-sales-s","予算 "+YEN(bIn)+"円"); }
   else{ setTxt("h-ach","—","v"); setTxt("h-sales-s","予算 未入力"); }
