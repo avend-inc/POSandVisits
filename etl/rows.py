@@ -49,10 +49,12 @@ def _normalize_date_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def parse_cashier_csv(csv_text: str, business_date: str) -> pd.DataFrame:
+def parse_cashier_csv(csv_text: str, business_date: str | None) -> pd.DataFrame:
     """
     cashier の明細CSV → 共通スキーマ（adapters.COMMON_COLUMNS）。
-    対象の営業日の行だけに絞る。
+
+    business_date を渡すとその営業日の行だけに絞る。
+    None を渡すと絞らず、CSVに入っている全期間の行を返す（backfill用）。
     """
     try:
         df = pd.read_csv(StringIO(csv_text), dtype=str)
@@ -79,10 +81,15 @@ def parse_cashier_csv(csv_text: str, business_date: str) -> pd.DataFrame:
 
     out = adapters.adapt_cashier(df, "cashier")
 
-    # 対象日だけに絞る（期間指定がうまく効いていなくても事故らないように）
-    out = out[out["date"] == business_date].copy()
+    # 対象日だけに絞る（期間指定がうまく効いていなくても事故らないように）。
+    # business_date=None のときは絞らない（backfillで全期間を入れる）。
+    if business_date is not None:
+        out = out[out["date"] == business_date].copy()
+    else:
+        out = out.copy()
 
     # 伝票の中での明細の並び順。これが一意キーの一部になる。
+    # 期間一括のときは伝票番号(tx_id)ごとに数えれば、日をまたいでも正しく並ぶ。
     out["line_no"] = out.groupby("tx_id").cumcount()
     return out
 
@@ -143,10 +150,13 @@ def _to_float(value):
         return None
 
 
-def visits_rows(csv_text: str, store_id: int, business_date: str) -> list[dict]:
+def visits_rows(csv_text: str, store_id: int,
+                business_date: str | None) -> list[dict]:
     """
     デジテールのCSV → visits テーブルに入れる行の一覧。
-    対象の営業日の行だけを返す。
+
+    business_date を渡すとその営業日の行だけを返す。
+    None を渡すと、CSVに入っている全期間の各日を返す（backfill用）。
     """
     try:
         df = pd.read_csv(StringIO(csv_text), dtype=str)
@@ -165,12 +175,17 @@ def visits_rows(csv_text: str, store_id: int, business_date: str) -> list[dict]:
             "etl/rows.py の DIGITEL_COLUMN_MAP を直してください。"
         )
 
-    df = df[df["business_date"].astype(str).str.strip() == business_date]
+    df["business_date"] = df["business_date"].astype(str).str.strip()
+    if business_date is not None:
+        df = df[df["business_date"] == business_date]
 
     rows = []
     for record in df.to_dict(orient="records"):
+        day = business_date or str(record.get("business_date") or "").strip()
+        if not day:
+            continue
         rows.append({
-            "business_date":   business_date,
+            "business_date":   day,
             "store_id":        store_id,
             "source":          "digitel",
             "visitors":        _to_int(record.get("visitors")),

@@ -27,7 +27,7 @@ on:
   workflow_dispatch:
     inputs:
       date:
-        description: "取り込む営業日 (YYYY-MM-DD)。空なら前日"
+        description: "取り込む営業日 (YYYY-MM-DD)。空なら前日。backfill時は開始日(from)"
         required: false
         default: ""
       only:
@@ -41,6 +41,15 @@ on:
         required: false
         default: false
         type: boolean
+      backfill:
+        description: "過去分の一括取り込み（dateを開始日、toを終了日にする）"
+        required: false
+        default: false
+        type: boolean
+      to:
+        description: "backfillの終了日 (YYYY-MM-DD)。空なら今日"
+        required: false
+        default: ""
 
 # 同時に2つ走らないようにする（二重取り込みの予防）
 concurrency:
@@ -95,13 +104,23 @@ jobs:
 
       - name: ETL を実行
         run: |
-          ARGS=""
-          if [ -n "${{ inputs.date }}" ]; then ARGS="$ARGS --date ${{ inputs.date }}"; fi
-          if [ "${{ inputs.only }}" = "cashier" ]; then ARGS="$ARGS --only cashier"; fi
-          if [ "${{ inputs.only }}" = "digitel" ]; then ARGS="$ARGS --only digitel"; fi
-          if [ "${{ inputs.force }}" = "true" ]; then ARGS="$ARGS --force"; fi
-          echo "実行: python -m etl.run_daily $ARGS"
-          python -m etl.run_daily $ARGS
+          if [ "${{ inputs.backfill }}" = "true" ]; then
+            ARGS=""
+            if [ -n "${{ inputs.date }}" ]; then ARGS="$ARGS --from ${{ inputs.date }}"; fi
+            if [ -n "${{ inputs.to }}" ];   then ARGS="$ARGS --to ${{ inputs.to }}"; fi
+            if [ "${{ inputs.only }}" = "cashier" ]; then ARGS="$ARGS --only cashier"; fi
+            if [ "${{ inputs.only }}" = "digitel" ]; then ARGS="$ARGS --only digitel"; fi
+            echo "実行(backfill): python -m etl.backfill $ARGS"
+            python -m etl.backfill $ARGS
+          else
+            ARGS=""
+            if [ -n "${{ inputs.date }}" ]; then ARGS="$ARGS --date ${{ inputs.date }}"; fi
+            if [ "${{ inputs.only }}" = "cashier" ]; then ARGS="$ARGS --only cashier"; fi
+            if [ "${{ inputs.only }}" = "digitel" ]; then ARGS="$ARGS --only digitel"; fi
+            if [ "${{ inputs.force }}" = "true" ]; then ARGS="$ARGS --force"; fi
+            echo "実行: python -m etl.run_daily $ARGS"
+            python -m etl.run_daily $ARGS
+          fi
 
       # 失敗したときだけ、原因調査用のファイルを残す（7日で自動削除）
       - name: 失敗時の調査用ファイルを保存

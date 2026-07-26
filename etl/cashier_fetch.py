@@ -234,15 +234,18 @@ def login(page, email: str, password: str) -> None:
 # ------------------------------------------------------------
 # 期間を指定する
 # ------------------------------------------------------------
-def set_date_range(page, business_date: str) -> None:
+def set_date_range(page, start_date: str, end_date: str | None = None) -> None:
     """
-    取引一覧の期間を「対象日 〜 対象日」にする。
+    取引一覧の期間を「start_date 〜 end_date」にする。
+    end_date を省略すると start_date と同じ（1日ぶん）にする。
 
     入力欄の形が type="date"（YYYY-MM-DD）か、テキスト（YYYY/MM/DD）かで
     書式が違うので、両方試す。
     """
-    print(f"  期間を {business_date} に設定します")
-    slash = business_date.replace("-", "/")
+    end_date = end_date or start_date
+    print(f"  期間を {start_date} 〜 {end_date} に設定します")
+    start_slash = start_date.replace("-", "/")
+    end_slash = end_date.replace("-", "/")
 
     # 期間欄は「検索オプション」の中に隠れていることがあるので、先に開く
     open_search_options(page)
@@ -267,8 +270,8 @@ def set_date_range(page, business_date: str) -> None:
             "     CASHIER_DATE_TO_SELECTOR で指定してください。"
         )
 
-    for field, value_pair in ((start, (business_date, slash)),
-                              (end, (business_date, slash))):
+    for field, value_pair in ((start, (start_date, start_slash)),
+                              (end, (end_date, end_slash))):
         if field is None:
             continue
         for value in value_pair:
@@ -525,10 +528,10 @@ def decode_csv(data: bytes) -> str:
 # ------------------------------------------------------------
 # まとめ
 # ------------------------------------------------------------
-def fetch(business_date: str, headless: bool = True) -> str:
+def fetch_range(start_date: str, end_date: str, headless: bool = True) -> str:
     """
-    対象日1日ぶんの売上明細CSVを取ってきて、文字列で返す。
-    失敗したら間隔を空けて3回まで試す。
+    start_date 〜 end_date の売上明細CSVを取ってきて、文字列で返す。
+    1回のログインで期間まとめて取れる（backfill用）。失敗時は3回まで試す。
     """
     email = require_env("CASHIER_ID", "cashier のログイン用メールアドレス")
     password = require_env("CASHIER_PW", "cashier のログイン用パスワード")
@@ -538,7 +541,7 @@ def fetch(business_date: str, headless: bool = True) -> str:
         try:
             with browser_page(headless=headless) as (page, context):
                 login(page, email, password)
-                set_date_range(page, business_date)
+                set_date_range(page, start_date, end_date)
                 return decode_csv(download_csv(page, context))
         except Exception as e:
             last_error = e
@@ -548,3 +551,8 @@ def fetch(business_date: str, headless: bool = True) -> str:
                 time.sleep(wait)
 
     raise EtlError(f"cashier のCSVを{RETRIES}回試しても取得できませんでした。\n{last_error}")
+
+
+def fetch(business_date: str, headless: bool = True) -> str:
+    """対象日1日ぶんの売上明細CSVを取ってきて、文字列で返す（日次用）。"""
+    return fetch_range(business_date, business_date, headless=headless)
