@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>NOTIME 月次予実</title>
+<style>
+  :root{ --bg:#f6f7f9;--surface:#fff;--surface2:#f0f2f5;--border:#e2e6ea;--ink:#1a1d21;--ink2:#5b636c;--muted:#8a929b;
+    --accent:#2f6fd0;--accent-weak:#dbe6f7;--good:#1a8a5a;--bad:#c0392b;--shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.04);--radius:14px;}
+  @media (prefers-color-scheme: dark){:root{ --bg:#0e1116;--surface:#161b22;--surface2:#1c232c;--border:#2a323c;--ink:#e7ebef;--ink2:#a3adb8;--muted:#727d89;
+    --accent:#5b9bff;--accent-weak:#1e2f4a;--good:#3fce8c;--bad:#ff6b5e;--shadow:0 1px 2px rgba(0,0,0,.4);}}
+  :root[data-theme="dark"]{ --bg:#0e1116;--surface:#161b22;--surface2:#1c232c;--border:#2a323c;--ink:#e7ebef;--ink2:#a3adb8;--muted:#727d89;--accent:#5b9bff;--accent-weak:#1e2f4a;--good:#3fce8c;--bad:#ff6b5e;--shadow:0 1px 2px rgba(0,0,0,.4);}
+  :root[data-theme="light"]{ --bg:#f6f7f9;--surface:#fff;--surface2:#f0f2f5;--border:#e2e6ea;--ink:#1a1d21;--ink2:#5b636c;--muted:#8a929b;--accent:#2f6fd0;--accent-weak:#dbe6f7;--good:#1a8a5a;--bad:#c0392b;--shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.04);}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,sans-serif;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;}
+  .wrap{max-width:900px;margin:0 auto;padding:18px 16px 60px;}
+  header{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;margin-bottom:2px;}
+  h1{font-size:20px;margin:0;font-weight:700;letter-spacing:.02em;}
+  .sub{color:var(--muted);font-size:12px;}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:12px 0 4px;}
+  select{appearance:none;background:var(--surface);color:var(--ink);border:1px solid var(--border);border-radius:10px;padding:8px 30px 8px 12px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;
+    background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);background-position:calc(100% - 16px) 55%,calc(100% - 11px) 55%;background-size:5px 5px,5px 5px;background-repeat:no-repeat;}
+  label.lbl{font-size:12px;color:var(--muted);}
+  .navlink{border:1px solid var(--border);background:var(--surface);color:var(--accent);border-radius:9px;padding:7px 11px;font-size:12px;font-weight:700;cursor:pointer;text-decoration:none;}
+  .navlink:hover{border-color:var(--accent);}
+  .themebtn{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:9px;padding:7px 10px;font-size:12px;cursor:pointer;}
+  .chip{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:8px;padding:7px 11px;font-size:12px;font-weight:600;cursor:pointer;}
+  .chip:hover{color:var(--ink);border-color:var(--accent);}
+  .panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px 16px 12px;margin:14px 0;}
+  .panel h2{font-size:14px;margin:0 0 8px;font-weight:700;}
+  .hero{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;}
+  .hcard{background:var(--surface2);border:1px solid var(--border);border-radius:11px;padding:11px 12px;}
+  .hcard .k{font-size:12px;color:var(--ink2);font-weight:600;}
+  .hcard .v{font-size:22px;font-weight:800;margin-top:3px;line-height:1.1;}
+  .hcard .s{font-size:11.5px;color:var(--muted);margin-top:3px;font-weight:600;}
+  .tblwrap{overflow-x:auto;}
+  table{width:100%;border-collapse:collapse;font-size:13px;min-width:520px;}
+  th,td{padding:7px 8px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--border);}
+  th:first-child,td:first-child{text-align:left;position:sticky;left:0;background:var(--surface);}
+  th{color:var(--ink2);font-weight:700;font-size:11px;background:var(--surface);}
+  tr.sect td{background:var(--surface2);font-weight:750;font-size:11.5px;color:var(--ink2);}
+  tr.total td{font-weight:750;border-top:2px solid var(--border);background:var(--surface2);}
+  input.num{width:104px;background:var(--surface);color:var(--ink);border:1px solid var(--border);border-radius:8px;padding:6px 8px;font-size:13px;font-weight:600;text-align:right;font-family:inherit;}
+  input.num:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-weak);}
+  .auto{color:var(--ink);font-weight:700;}
+  .up{color:var(--good);} .down{color:var(--bad);} .mut{color:var(--muted);}
+  .note{font-size:11.5px;color:var(--muted);margin:8px 0 0;line-height:1.7;}
+  .err{padding:20px;color:var(--bad);font-weight:600;}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"><div class="sub" style="padding:40px 0">読み込み中…</div></div>
+<script>
+"use strict";
+const YEN=n=>Math.round(n).toLocaleString("ja-JP");
+const NUM=n=>Math.round(n).toLocaleString("ja-JP");
+const F1=n=>(Math.round(n*10)/10).toLocaleString("ja-JP",{minimumFractionDigits:1,maximumFractionDigits:1});
+const F2=n=>(Math.round(n*100)/100).toLocaleString("ja-JP",{minimumFractionDigits:2,maximumFractionDigits:2});
+const state={store:"all",ym:null};
+let DATA=null, A=null, M={};
+
+const SUPA_URL="", SUPA_ANON="", PUBLIC_DATA_URL="https://rwfcsanmqvkxiuwdeddv.supabase.co/storage/v1/object/public/dashboard/data.json";
+const ALLOW_DOMAIN="@avend.co.jp"; let SB=null; const isPH=s=>!s||s.slice(0,2)==="__";
+function screen(h){document.getElementById("app").innerHTML=h;}
+function showError(e){screen('<div class="err">データを読み込めませんでした：'+esc(String(e&&e.message||e))+'</div>');}
+function prep(){ if(!DATA||!DATA.daily)throw new Error("データが空です");
+  const ds=DATA.daily.map(r=>r.d).sort(); DATA._min=ds[0];DATA._max=ds[ds.length-1];
+  const sd=DATA.daily.filter(r=>(r.tx||0)>0||(r.in||0)>0).map(r=>r.d).sort();
+  DATA._salesMax=sd.length?sd[sd.length-1]:DATA._max; }
+async function boot(){ try{
+  if(window.__DATA__){DATA=window.__DATA__;prep();render();return;}
+  if(!isPH(SUPA_URL)&&!isPH(SUPA_ANON)&&isPH(PUBLIC_DATA_URL)){await authBoot();return;}
+  const url=isPH(PUBLIC_DATA_URL)?"data.json":PUBLIC_DATA_URL;
+  DATA=await (await fetch(url,{cache:"no-store"})).json(); prep(); render();
+}catch(e){showError(e);} }
+async function ensureSupabase(){ if(window.supabase)return; await new Promise((res,rej)=>{const s=document.createElement("script");
+  s.src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2";s.onload=res;s.onerror=()=>rej(new Error("ログイン部品を読み込めませんでした"));document.head.appendChild(s);}); }
+async function authBoot(){ screen('<div class="sub" style="padding:40px 0">読み込み中…</div>'); await ensureSupabase();
+  SB=window.supabase.createClient(SUPA_URL,SUPA_ANON,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,flowType:"pkce",storageKey:"notime-auth"}});
+  const {data:{session}}=await SB.auth.getSession();
+  if(!session){screen('<div class="err">ログインが必要です。<a href="index.html">サマリー</a> からログインしてください。</div>');return;}
+  const email=(session.user&&session.user.email||"").toLowerCase();
+  if(!email.endsWith(ALLOW_DOMAIN)){screen('<div class="err">アクセス権がありません。</div>');return;}
+  const {data,error}=await SB.storage.from("dashboard-data").download("data.json");
+  if(error)throw new Error("データを取得できませんでした（"+error.message+"）");
+  DATA=JSON.parse(await data.text()); prep(); render(); }
+
+function esc(s){return String(s).replace(/[&<>]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[m]));}
+function monthsInData(){return [...new Set(DATA.daily.map(r=>r.d.slice(0,7)))].sort();}
+function usableStores(){const w=new Set(DATA.daily.map(r=>r.s));return DATA.stores.filter(s=>w.has(s.id));}
+function computeActual(store,ym){
+  const ids=store==="all"?new Set(usableStores().map(s=>s.id)):new Set([store]);
+  const a={in:0,ex:0,tx:0,it:0,v:0,bag:0,bagq:0,hasV:false};
+  for(const r of DATA.daily){ if(!ids.has(r.s))continue; if(r.d.slice(0,7)!==ym)continue;
+    a.in+=r.in||0;a.ex+=r.ex||0;a.tx+=r.tx||0;a.it+=r.it||0;a.bag+=r.bag||0;a.bagq+=r.bagq||0;
+    if(r.v!=null){a.v+=r.v;a.hasV=true;} }
+  if(!a.hasV)a.v=0; return a;
+}
+
+// 実績が自動で出るKPI（予算は記入式）
+const KPIS=[
+  {k:"inTax",name:"税込売上（レジ袋込）",fmt:YEN,u:"円",budget:true, av:a=>a.in+a.bag},
+  {k:"in",   name:"税込売上（レジ袋除）",fmt:YEN,u:"円",budget:true, av:a=>a.in},
+  {k:"ex",   name:"税抜売上",           fmt:YEN,u:"円",budget:true, av:a=>a.ex},
+  {k:"v",    name:"来店客数",           fmt:NUM,u:"人",budget:true, av:a=>a.v},
+  {k:"tx",   name:"購入客数（取引数）",  fmt:NUM,u:"件",budget:true, av:a=>a.tx},
+  {k:"pr",   name:"購入率",             fmt:F1, u:"%", budget:true, av:a=>a.v?a.tx/a.v*100:null},
+  {k:"aov",  name:"客単価",             fmt:YEN,u:"円",budget:true, av:a=>a.tx?a.in/a.tx:null},
+  {k:"it",   name:"販売数",             fmt:NUM,u:"点",budget:true, av:a=>a.it},
+  {k:"aup",  name:"商品単価",           fmt:YEN,u:"円",budget:true, av:a=>a.it?a.ex/a.it:null},
+  {k:"upt",  name:"平均購入数",         fmt:F2, u:"点",budget:true, av:a=>a.tx?a.it/a.tx:null},
+  {k:"bag",  name:"レジ袋売上",         fmt:YEN,u:"円",budget:false,av:a=>a.bag},
+  {k:"bagq", name:"レジ袋・クーポン数", fmt:NUM,u:"点",budget:false,av:a=>a.bagq},
+];
+// 販管費の項目（すべて記入式。予算/実績の2列）
+const COSTS=["家賃","人件費","広告費(Meta/LINE)","PR費用","決済手数料","配送料","タグ代","水光熱","通信・USEN",
+  "監視カメラ","本社配賦","火災保険","初期ローン","入店管理システム","レジ利用料","物件更新手数料","保証会社更新手数料","その他"];
+const PAYS=["現金","カード決済","QRコード","電子マネー"];
+
+function mkey(){return `notime-pl-${state.store}-${state.ym}`;}
+function loadM(){ try{const s=localStorage.getItem(mkey());return s?JSON.parse(s):{};}catch(e){return {};} }
+function saveM(){ try{localStorage.setItem(mkey(),JSON.stringify(M));}catch(e){} }
+function g(k){const v=M[k];return Number.isFinite(v)?v:0;}
+function has(k){return Number.isFinite(M[k]);}
+function inp(k,step){return `<input class="num pin" data-k="${k}" type="number" step="${step||1}" value="${has(k)?M[k]:""}" placeholder="—">`;}
+
+function render(){
+  const us=usableStores(), months=monthsInData();
+  if(!state.ym||!months.includes(state.ym)) state.ym=(DATA._salesMax||months[months.length-1]).slice(0,7);
+  A=computeActual(state.store,state.ym); M=loadM();
+  const stores=[{id:"all",name:"総合（全店）"},...us.map(s=>({id:s.id,name:s.name}))];
+  const storeName=state.store==="all"?"総合（全店）":(us.find(s=>s.id===state.store)||{}).name||"";
+  const[y,mm]=state.ym.split("-");
+
+  const kpiRows=KPIS.map(m=>{const av=m.av(A);
+    return `<tr><td>${m.name}</td>
+      <td>${m.budget?inp("b_"+m.k, m.k==="pr"?0.1:(m.k==="upt"?0.01:(["v","tx","it","bagq"].includes(m.k)?1:1000))):""}</td>
+      <td class="auto">${av==null?"—":m.fmt(av)+m.u}</td>
+      <td id="ach_${m.k}" class="mut">—</td>
+      <td id="dif_${m.k}" class="mut">—</td></tr>`;}).join("");
+
+  const costRows=COSTS.map((c,i)=>`<tr><td>${esc(c)}</td><td>${inp("cb_"+i,1000)}</td><td>${inp("ca_"+i,1000)}</td><td id="cd_${i}" class="mut"></td></tr>`).join("");
+
+  const payRows=PAYS.map((p,i)=>`<tr><td>${p}</td><td>${inp("pay_"+i,1000)}</td></tr>`).join("");
+
+  document.getElementById("app").innerHTML=`
+    <header>
+      <h1>NOTIME 月次予実</h1>
+      <a class="navlink" href="index.html" style="margin-left:auto">← サマリー</a>
+      <a class="navlink" href="forecast.html">🎯 着地見込み</a>
+      <button class="themebtn" id="themebtn">◐ 表示切替</button>
+    </header>
+    <div class="controls">
+      <label class="lbl">店舗</label>
+      <select id="store">${stores.map(s=>`<option value="${s.id}" ${String(s.id)===String(state.store)?"selected":""}>${s.name}</option>`).join("")}</select>
+      <label class="lbl" style="margin-left:6px">対象月</label>
+      <select id="ym">${months.slice().reverse().map(m=>{const[a,b]=m.split("-");return `<option value="${m}" ${m===state.ym?"selected":""}>${a}年${+b}月</option>`;}).join("")}</select>
+      <button class="chip" id="reset">この月の入力を消す</button>
+    </div>
+
+    <div class="panel">
+      <h2>${y}年${+mm}月・${esc(storeName)} サマリー</h2>
+      <div class="hero">
+        <div class="hcard"><div class="k">税込売上（レジ袋込）</div><div class="v" id="h-sales">—</div><div class="s" id="h-sales-s"></div></div>
+        <div class="hcard"><div class="k">売上 予実達成率</div><div class="v" id="h-ach">—</div><div class="s">予算に対して</div></div>
+        <div class="hcard"><div class="k">営業利益（実績）</div><div class="v" id="h-op">—</div><div class="s" id="h-op-s"></div></div>
+        <div class="hcard"><div class="k">営業利益率</div><div class="v" id="h-opr">—</div><div class="s">対 税抜売上</div></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>KPI 予実</h2>
+      <div class="tblwrap"><table>
+        <thead><tr><th>指標</th><th>予算(記入)</th><th>実績(自動)</th><th>達成率</th><th>差異</th></tr></thead>
+        <tbody>${kpiRows}</tbody>
+      </table></div>
+      <p class="note">実績はアプリの取込データから自動計算（レジ袋・クーポンはKPIから除外、レジ袋は別行で表示）。予算に数値を入れると達成率・差異が出ます。</p>
+    </div>
+
+    <div class="panel">
+      <h2>損益（P&amp;L）予実 <span class="sub" style="font-weight:500">※コストは記入式・空欄OK</span></h2>
+      <div class="tblwrap"><table>
+        <thead><tr><th>項目</th><th>予算(記入)</th><th>実績</th><th>差異/率</th></tr></thead>
+        <tbody>
+          <tr><td>税抜売上</td><td>${inp("pl_ex_b",1000)}</td><td class="auto" id="pl_ex_a">—</td><td id="pl_ex_d" class="mut"></td></tr>
+          <tr><td>売上原価</td><td>${inp("genka_b",1000)}</td><td>${inp("genka_a",1000)}</td><td id="genka_r" class="mut"></td></tr>
+          <tr class="total"><td>粗利</td><td class="auto" id="gross_b">—</td><td class="auto" id="gross_a">—</td><td id="gross_d" class="mut"></td></tr>
+          <tr class="sect"><td>販管費（内訳）</td><td>予算</td><td>実績</td><td></td></tr>
+          ${costRows}
+          <tr class="total"><td>販管費 合計</td><td class="auto" id="sga_b">—</td><td class="auto" id="sga_a">—</td><td id="sga_d" class="mut"></td></tr>
+          <tr class="total"><td>営業利益</td><td class="auto" id="op_b">—</td><td class="auto" id="op_a">—</td><td id="op_d" class="mut"></td></tr>
+          <tr><td>営業利益率</td><td class="auto" id="opr_b">—</td><td class="auto" id="opr_a">—</td><td></td></tr>
+        </tbody>
+      </table></div>
+      <p class="note">粗利＝税抜売上−売上原価／営業利益＝粗利−販管費合計／営業利益率＝営業利益÷税抜売上。税抜売上の実績は自動。原価率＝売上原価÷税抜売上（差異/率の欄に表示）。</p>
+    </div>
+
+    <div class="panel">
+      <h2>決済手段別売上（記入式）</h2>
+      <div class="tblwrap"><table style="min-width:360px">
+        <thead><tr><th>手段</th><th>金額(記入)</th></tr></thead>
+        <tbody>${payRows}
+          <tr class="total"><td>合計</td><td class="auto" id="pay_total">—</td></tr>
+          <tr><td>税込売上（込）との差</td><td id="pay_diff" class="mut">—</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+
+    <div class="foot sub" style="margin-top:16px;line-height:1.7">
+      実績＝アプリの取込データ（cashier売上・デジテール来店）から自動。予算・原価・販管費・決済手段別は<b>この端末に保存</b>されます（店舗×月ごと）。「この月の入力を消す」で空に戻せます。スプレッドシートの月次予実に合わせた項目立てです。
+    </div>`;
+
+  document.getElementById("store").onchange=e=>{state.store=e.target.value==="all"?"all":+e.target.value;render();};
+  document.getElementById("ym").onchange=e=>{state.ym=e.target.value;render();};
+  document.getElementById("themebtn").onclick=toggleTheme;
+  document.getElementById("reset").onclick=()=>{if(confirm("この店舗・この月の記入値を消しますか？")){try{localStorage.removeItem(mkey());}catch(e){}M={};render();}};
+  document.querySelectorAll(".pin").forEach(el=>el.oninput=()=>{const k=el.dataset.k;
+    if(el.value===""){delete M[k];}else{const v=Number(el.value);if(Number.isFinite(v))M[k]=v;else delete M[k];}
+    saveM();recompute();});
+  recompute();
+}
+
+function setTxt(id,txt,cls){const el=document.getElementById(id);if(!el)return;el.textContent=txt;if(cls!==undefined)el.className=cls;}
+function recompute(){
+  const AV={}; KPIS.forEach(m=>AV[m.k]=m.av(A));
+  // KPI 達成率・差異
+  KPIS.forEach(m=>{ if(!m.budget)return; const b=M["b_"+m.k], av=AV[m.k];
+    if(Number.isFinite(b)&&b!==0&&av!=null){ const ach=av/b*100, dif=av-b;
+      setTxt("ach_"+m.k, F1(ach)+"%", ach>=100?"up":"down");
+      setTxt("dif_"+m.k, (dif>=0?"+":"−")+m.fmt(Math.abs(dif))+m.u, dif>=0?"up":"down");
+    }else{ setTxt("ach_"+m.k,"—","mut"); setTxt("dif_"+m.k,"—","mut"); } });
+
+  // 損益
+  const exA=A.ex, exB=g("pl_ex_b");
+  setTxt("pl_ex_a", YEN(exA)+"円");
+  setTxt("pl_ex_d", exB>0?diffStr(exA-exB):"", exB>0?dc(exA-exB):"mut");
+  const genA=g("genka_a"), genB=g("genka_b");
+  setTxt("genka_r", exA>0?("原価率 "+F1(genA/exA*100)+"%"):"", "mut");
+  const grA=exA-genA, grB=exB-genB;
+  setTxt("gross_a", YEN(grA)+"円"); setTxt("gross_b", exB||genB?YEN(grB)+"円":"—");
+  setTxt("gross_d", (exB||genB)?diffStr(grA-grB):"", (exB||genB)?dc(grA-grB):"mut");
+  let sgaA=0,sgaB=0;
+  COSTS.forEach((c,i)=>{ sgaA+=g("ca_"+i); sgaB+=g("cb_"+i);
+    const da=g("ca_"+i), db=g("cb_"+i);
+    setTxt("cd_"+i, (da||db)?diffStr(da-db):"", "mut"); });
+  setTxt("sga_a", YEN(sgaA)+"円"); setTxt("sga_b", YEN(sgaB)+"円");
+  setTxt("sga_d", diffStr(sgaA-sgaB), "mut");
+  const opA=grA-sgaA, opB=grB-sgaB;
+  setTxt("op_a", YEN(opA)+"円"); setTxt("op_b", (exB||genB||sgaB)?YEN(opB)+"円":"—");
+  setTxt("op_d", (exB||genB||sgaB)?diffStr(opA-opB):"", (exB||genB||sgaB)?dc(opA-opB):"mut");
+  setTxt("opr_a", exA>0?F1(opA/exA*100)+"%":"—", opA>=0?"auto up":"auto down");
+  setTxt("opr_b", exB>0?F1(opB/exB*100)+"%":"—");
+
+  // 決済
+  let payT=0; PAYS.forEach((p,i)=>payT+=g("pay_"+i));
+  setTxt("pay_total", YEN(payT)+"円");
+  const salesIn=A.in+A.bag;
+  setTxt("pay_diff", payT>0?diffStr(payT-salesIn):"—", payT>0?"mut":"mut");
+
+  // hero
+  setTxt("h-sales", YEN(salesIn)+"円");
+  const bIn=M["b_inTax"];
+  if(Number.isFinite(bIn)&&bIn!==0){ setTxt("h-ach", F1(salesIn/bIn*100)+"%", salesIn>=bIn?"v up":"v down");
+    setTxt("h-sales-s","予算 "+YEN(bIn)+"円"); }
+  else{ setTxt("h-ach","—","v"); setTxt("h-sales-s","予算 未入力"); }
+  const showOp = exA>0 && (sgaA>0||genA>0);
+  setTxt("h-op", showOp?YEN(opA)+"円":"—", showOp?(opA>=0?"v up":"v down"):"v");
+  setTxt("h-op-s", showOp?("粗利 "+YEN(grA)+"円"):"原価・販管費を記入");
+  setTxt("h-opr", showOp?F1(opA/exA*100)+"%":"—", showOp?(opA>=0?"v up":"v down"):"v");
+}
+function diffStr(d){return (d>=0?"+":"−")+YEN(Math.abs(d))+"円";}
+function dc(d){return d>=0?"up":"down";}
+function toggleTheme(){const r=document.documentElement;const cur=r.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");
+  r.setAttribute("data-theme",cur==="dark"?"light":"dark");}
+boot();
+</script>
+</body>
+</html>
