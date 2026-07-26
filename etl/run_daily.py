@@ -221,20 +221,21 @@ def run_digitel(sb: Supabase, business_date: str, run_id: str,
                 results.append(StepResult(f"digitel/{name}", "no_data", message))
                 continue
 
-            inserted, duplicate = sb.insert_ignore_duplicates(
+            # 来店数は「その営業日の確定値」なので上書き（同じ日を取り直したら最新値へ）
+            affected = sb.upsert(
                 "visits", payload, on_conflict="business_date,store_id,source"
             )
             visitors = payload[0].get("visitors")
-            print(f"  【{name}】来店 {visitors}人 → 新規 {inserted}行 / 無視 {duplicate}行")
+            print(f"  【{name}】来店 {visitors}人 → 反映 {affected}行（新規/更新）")
 
             sb.log(run_id=run_id, source="digitel", business_date=business_date,
                    store_id=store_id, status="success",
-                   rows_fetched=len(payload), rows_inserted=inserted,
-                   rows_duplicate=duplicate, message=f"来店客数 {visitors}",
+                   rows_fetched=len(payload), rows_inserted=affected,
+                   rows_duplicate=0, message=f"来店客数 {visitors}",
                    started_at=started)
             results.append(StepResult(f"digitel/{name}", "success",
                                       f"来店 {visitors}人",
-                                      len(payload), inserted, duplicate))
+                                      len(payload), affected, 0))
 
         except Exception as e:
             detail = f"{type(e).__name__}: {e}"

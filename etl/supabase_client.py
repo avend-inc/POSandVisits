@@ -162,6 +162,32 @@ class Supabase:
 
         return inserted, len(rows) - inserted
 
+    def upsert(self, table: str, rows: list[dict], on_conflict: str) -> int:
+        """
+        一意キーが重なったら「最新の値で上書き（更新）」する。
+
+        来店数のように「その営業日の確定値」を入れ直したいものに使う。
+        （同じ日を取り直したとき、途中の値を最新の値へ更新できる。
+          売上の伝票のように確定・不変なものは insert_ignore_duplicates を使う）
+        戻り値: 反映した行数（新規＋更新の合計）
+        """
+        if not rows:
+            return 0
+        affected = 0
+        for start in range(0, len(rows), SUPABASE_CHUNK):
+            chunk = _clean_rows(rows[start:start + SUPABASE_CHUNK])
+            resp = self._send(
+                "POST",
+                self._endpoint(table),
+                params={"on_conflict": on_conflict},
+                data=json.dumps(chunk, ensure_ascii=False).encode("utf-8"),
+                headers={"Prefer": "resolution=merge-duplicates,return=representation"},
+            )
+            if resp.status_code >= 400:
+                self._raise(resp, f"書き込み（{table}）")
+            affected += len(resp.json())
+        return affected
+
     # --------------------------------------------------------
     # stores（店舗マスタ）
     # --------------------------------------------------------

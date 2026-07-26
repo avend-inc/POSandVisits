@@ -100,12 +100,12 @@ def run_digitel_backfill(sb: Supabase, start: str, end: str,
         if not payload:
             print(f"  【{name}】対象期間の来店データは0日でした")
             continue
-        inserted, duplicate = sb.insert_ignore_duplicates(
+        affected = sb.upsert(
             "visits", payload, on_conflict="business_date,store_id,source"
         )
         days = sorted(r["business_date"] for r in payload)
         print(f"  【{name}】{days[0]} 〜 {days[-1]}（{len(payload)}日）"
-              f" → 新規 {inserted}日 / 無視 {duplicate}日")
+              f" → 反映 {affected}日（新規/更新）")
 
 
 def main() -> int:
