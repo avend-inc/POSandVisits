@@ -343,6 +343,99 @@ def _diagnose_csv_buttons(page) -> None:
     print("  ----8<---- ここまで ----8<----")
 
 
+# CSV出力(明細)を押すと開くモーダル（ダウンロード形式の選択）
+DOWNLOAD_MODAL_SELECTORS = [
+    "#download-format-selector-modal",
+    ".modal.show", ".modal.in",
+]
+# モーダル内の「実際にダウンロードする」ボタンの文字候補
+MODAL_DOWNLOAD_TEXTS = ["ダウンロード", "CSVダウンロード", "ダウンロードする",
+                        "出力", "CSV出力", "確定", "決定", "OK", "実行"]
+
+
+def _diagnose_modal(page, modal_sel: str) -> None:
+    """モーダルの中身（ボタン・入力）を1度だけログに出す。"""
+    js = r"""
+    (sel) => {
+      const m = document.querySelector(sel);
+      if (!m) return null;
+      const pick = e => ({tag:e.tagName, type:e.type||null,
+        text:(e.innerText||e.value||'').trim().slice(0,40),
+        className:(e.className||'').toString().slice(0,80),
+        name:e.name||null, id:e.id||null,
+        href:e.getAttribute?e.getAttribute('href'):null});
+      return {
+        visible: !!(m.offsetWidth||m.offsetHeight),
+        buttons: [...m.querySelectorAll('button,a,[role=button]')].map(pick),
+        inputs:  [...m.querySelectorAll('input,select')].map(pick),
+      };
+    }
+    """
+    try:
+        info = page.evaluate(js, modal_sel)
+    except Exception as e:
+        print(f"  （モーダル調査に失敗: {e}）")
+        return
+    if not info:
+        return
+    import json as _json
+    print(f"  ----8<---- モーダル {modal_sel} の中身 ----8<----")
+    for line in _json.dumps(info, ensure_ascii=False, indent=2).splitlines():
+        print(f"  | {line}")
+    print("  ----8<---- ここまで ----8<----")
+
+
+def _confirm_download_modal(page) -> None:
+    """
+    ダウンロード形式選択モーダルが開いたら、中の実ダウンロードボタンを押す。
+    モーダルが無ければ何もしない（直接ダウンロードのサイトにも耐えるように）。
+    """
+    modal_sel = None
+    for sel in DOWNLOAD_MODAL_SELECTORS:
+        try:
+            loc = page.locator(sel).first
+            loc.wait_for(state="visible", timeout=8_000)
+            modal_sel = sel
+            break
+        except Exception:
+            continue
+    if modal_sel is None:
+        return
+
+    print(f"  ダウンロード形式モーダルを検出: {modal_sel}")
+    _diagnose_modal(page, modal_sel)
+
+    modal = page.locator(modal_sel).first
+    # モーダル内の実ダウンロードボタンを、文字候補で押す
+    for text in MODAL_DOWNLOAD_TEXTS:
+        try:
+            btn = modal.get_by_role("button", name=re.compile(re.escape(text)))
+            if btn.count() > 0 and btn.first.is_visible():
+                btn.first.click()
+                print(f"  モーダル内『{text}』を押しました")
+                return
+        except Exception:
+            continue
+    # ボタンで見つからなければ、モーダル内のリンクも試す
+    for text in MODAL_DOWNLOAD_TEXTS:
+        try:
+            lnk = modal.get_by_role("link", name=re.compile(re.escape(text)))
+            if lnk.count() > 0 and lnk.first.is_visible():
+                lnk.first.click()
+                print(f"  モーダル内リンク『{text}』を押しました")
+                return
+        except Exception:
+            continue
+    # 最後の手段: モーダル内の primary ボタン
+    try:
+        prim = modal.locator(".btn-primary, button[type=submit]").first
+        if prim.count() > 0 and prim.is_visible():
+            prim.click()
+            print("  モーダル内の主ボタン(.btn-primary)を押しました")
+    except Exception:
+        pass
+
+
 def download_csv(page, context) -> bytes:
     """
     CSV出力ボタンを押して、ダウンロードされた中身を返す。
@@ -364,9 +457,6 @@ def download_csv(page, context) -> bytes:
     _watch_page(page)
     context.on("page", lambda pg: (popups.append(pg), _watch_page(pg)))
 
-    # 調査: CSV出力ボタンの実体（HTML・所属フォーム・data属性）を1度だけ出す。
-    _diagnose_csv_buttons(page)
-
     try:
         _click_csv_button(page)
     except EtlError:
@@ -375,8 +465,12 @@ def download_csv(page, context) -> bytes:
         dump_page(page, "cashier_csv_click_failed")
         raise EtlError(f"cashier のCSV出力ボタンを押せませんでした: {e}")
 
-    # --- 1) ダウンロードイベントを最大40秒待つ（元ページ or ポップアップ） ---
-    deadline = time.time() + 40
+    # 「CSV出力(明細)」は data-toggle="modal" ＝ ダウンロード形式を選ぶモーダルを
+    # 開くだけ。開いたモーダルの中の実ダウンロードボタンを押して初めて落ちてくる。
+    _confirm_download_modal(page)
+
+    # --- 1) ダウンロードイベントを最大90秒待つ（元ページ or ポップアップ） ---
+    deadline = time.time() + 90
     while not downloads and time.time() < deadline:
         page.wait_for_timeout(500)
 
