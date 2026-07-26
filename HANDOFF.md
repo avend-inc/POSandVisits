@@ -34,6 +34,31 @@
 - **Shoさんの外部設定が必要**（下の「次にやること ★Google認証」を参照）。
   設定が済んで Secret を入れるまでは公開モードのままなので、いつ切り替えてもOK。
 
+## ✅ 配信は GitHub Pages（2026-07-26）
+- **重要**: Supabase Storage は本プロジェクトで HTML を text/plain でしか返せず、
+  ブラウザが「ソース文字列」を表示してしまう（公開URL・認証ダウンロードの両方で確認、
+  新バケットでも同じ＝CDNではなくSupabaseの配信仕様）。→ HTMLの配信は諦めた。
+- 代わりに **GitHub Pages** で配信。`gh-pages` ブランチの `index.html` をGitHubが直接配信。
+  - リポジトリを Public 化し、Settings→Pages→Deploy from a branch→`gh-pages`/`(root)` で有効化。
+  - 公開URL: `https://shonakano-jpg.github.io/POSandVisits/`（noindex入り）
+  - `index.html` は `web/dashboard.html` を元に生成（PUBLIC_DATA_URL=Supabaseの data.json）。
+  - **data.json は Supabase の `dashboard` バケット**（毎日のETLが更新）を fetch で読む。
+    JSONは fetch().json() で読むので Content-Type は問題にならない（CORSはSupabaseが許可）。
+  - dashboard.html の更新時は `gh-pages` の index.html を作り直して push する
+    （worktreeで `git worktree add -B gh-pages ... gh-pages` → 中身差し替え → force push）。
+- GitHub App権限では Pages/リポジトリ作成ができない（Actions自動デプロイも不可）。
+  そのため「ユーザーがSettingsで一度有効化 → 以後GitHubが配信」方式にしている。
+
+## ✅ レジ袋・クーポンをKPIから除外（2026-07-26）
+- `tools/export_dashboard.py` の集計で **レジ袋・クーポンを売上/点数/カテゴリ全てから除外**。
+  - 販売点数は tx_qty ではなく明細 line_qty の合計で数える（レジ袋を除く）。
+  - 税込/税抜売上からレジ袋・クーポンぶんを差し引く（税込は伝票税率で換算）。
+  - これで 平均購入数・平均商品単価・客単価も商品ベースになる。
+  - 「不明」は明細が無いだけの実売上なので**売上には残す**（設計どおり）。
+- **レジ袋のデータ自体は sales テーブルに従来どおり保存**（集計から外すだけ／ユーザー要望）。
+- 参考（全期間・除外後）: 税込¥46.8M / 税抜¥42.9M / 取引6,235 / 点数10,182 /
+  平均購入1.63点 / 平均商品単価¥4,214 / 客単価¥7,512。
+
 ## ✅ 過去分の一括取り込み（backfill）完了（2026-07-26）
 - `python -m etl.backfill --from 2026-03-13 --to 2026-07-26`（Actionsのbackfill入力でも可）。
 - cashier: 売上明細 2026-03-20〜07-26（129日・約11,000行）。3/20より前は売上0と確認。
