@@ -176,7 +176,9 @@ function categoryFor(periodKey_,grain){
 
 // ---------- 描画 ----------
 function render(){
-  const stores=[{id:"all",name:"総合（全店）"},...DATA.stores.map(s=>({id:s.id,name:s.name}))];
+  const withData=new Set(DATA.daily.map(r=>r.s));
+  const usable=DATA.stores.filter(s=>withData.has(s.id));
+  const stores=[{id:"all",name:"総合（全店）"},...usable.map(s=>({id:s.id,name:s.name}))];
   document.getElementById("app").innerHTML = `
     <header>
       <h1>NOTIME 売上ダッシュボード</h1>
