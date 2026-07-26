@@ -156,20 +156,22 @@ def _ensure_bucket(sb: Supabase, bucket: str, public: bool) -> None:
 
 def _upload(sb: Supabase, bucket: str, path: str, body: bytes,
             content_type: str, public: bool) -> str:
+    import requests
     url = f"{sb.url}/storage/v1/object/{bucket}/{path}"
-    # ⚠️ 上書き(x-upsert)だと最初に付いたContent-Typeが残り続けることがある
-    #    （その結果 index.html が text/plain のまま配信され、ブラウザが
-    #      「ページ」ではなく「ソース文字列」を表示してしまう不具合になる）。
-    #    確実に種類を付け直すため「一度消してから新規作成」する。
-    sb.session.delete(url, timeout=60)
-    resp = sb.session.post(
-        url, data=body,
-        headers={
-            "Content-Type": content_type,
-            "x-upsert": "true",
-            # 毎回最新を配信するためキャッシュさせない（更新が即反映されるように）
-            "cache-control": "no-cache, max-age=0",
-        },
+    # ⚠️ 生バイト(raw body)で送ると、こちらが Content-Type: text/html を指定しても
+    #    Supabase 側が text/plain のまま保存してしまい、ブラウザが「ページ」ではなく
+    #    「ソース文字列」を表示する不具合になる（実測で確認）。
+    #    公式クライアント(storage-js)と同じ multipart/form-data で「ファイルの種類」を
+    #    明示して送ると正しく text/html で保存・配信される。
+    #    念のため一度消してから新規作成し、古い種類情報が残らないようにする。
+    auth = {"apikey": sb.key, "Authorization": f"Bearer {sb.key}", "x-upsert": "true"}
+    requests.delete(url, headers=auth, timeout=60)
+    filename = path.split("/")[-1]
+    resp = requests.post(
+        url,
+        headers=auth,
+        data={"cacheControl": "0"},                        # キャッシュさせない
+        files={"": (filename, body, content_type)},        # ← ファイルの種類を明示
         timeout=120,
     )
     if resp.status_code not in (200, 201):
