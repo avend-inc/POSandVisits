@@ -40,7 +40,11 @@ if str(ROOT) not in sys.path:
 from etl.settings import JST, EtlError, load_dotenv  # noqa: E402
 from etl.supabase_client import Supabase  # noqa: E402
 
-BUCKET_PUBLIC = "dashboard"        # index.html（＋公開モードでは data.json も）
+# ⚠️ 'dashboard' バケットの index.html は、初回に誤って text/plain で保存された内容が
+#    SupabaseのCDNに残り続け（キャッシュがtext/plainを配信し続ける）、ブラウザで
+#    「ソース文字列」が表示される不具合になった。CDNは同じパスのキャッシュを
+#    握り続けるため、一度も使っていない新しいバケット 'web' に置き直して回避する。
+BUCKET_PUBLIC = "web"              # index.html（＋公開モードでは data.json も）
 BUCKET_PRIVATE = "dashboard-data"  # 認証モードの data.json（RLSで保護）
 PAGE = 1000
 
