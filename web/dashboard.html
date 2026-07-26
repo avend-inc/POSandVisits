@@ -13,15 +13,12 @@
     --shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.04);
     --radius:14px;
   }
-  @media (prefers-color-scheme: dark){
-    :root{
-      --bg:#0e1116; --surface:#161b22; --surface2:#1c232c; --border:#2a323c;
-      --ink:#e7ebef; --ink2:#a3adb8; --muted:#727d89;
-      --accent:#5b9bff; --accent-weak:#1e2f4a;
-      --good:#3fce8c; --bad:#ff6b5e;
-      --shadow:0 1px 2px rgba(0,0,0,.4);
-    }
-  }
+  @media (prefers-color-scheme: dark){:root{
+    --bg:#0e1116; --surface:#161b22; --surface2:#1c232c; --border:#2a323c;
+    --ink:#e7ebef; --ink2:#a3adb8; --muted:#727d89;
+    --accent:#5b9bff; --accent-weak:#1e2f4a; --good:#3fce8c; --bad:#ff6b5e;
+    --shadow:0 1px 2px rgba(0,0,0,.4);
+  }}
   :root[data-theme="dark"]{
     --bg:#0e1116; --surface:#161b22; --surface2:#1c232c; --border:#2a323c;
     --ink:#e7ebef; --ink2:#a3adb8; --muted:#727d89;
@@ -37,54 +34,53 @@
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--ink);
     font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,sans-serif;
-    -webkit-font-smoothing:antialiased;}
-  .wrap{max-width:1100px;margin:0 auto;padding:18px 16px 60px;}
-  header{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:baseline;margin-bottom:8px;}
+    -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;}
+  .wrap{max-width:1140px;margin:0 auto;padding:18px 16px 60px;}
+  header{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline;margin-bottom:2px;}
   h1{font-size:20px;margin:0;font-weight:700;letter-spacing:.02em;}
   .sub{color:var(--muted);font-size:12px;}
-  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:14px 0 6px;}
-  .seg{display:inline-flex;background:var(--surface2);border:1px solid var(--border);
-    border-radius:10px;padding:3px;gap:2px;}
-  .seg button{border:0;background:transparent;color:var(--ink2);font-size:13px;
-    padding:7px 13px;border-radius:8px;cursor:pointer;font-weight:600;}
+  .rangebar{font-size:13px;color:var(--ink2);margin:6px 0 2px;font-weight:600;}
+  .rangebar b{color:var(--ink);}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:12px 0 4px;}
+  .seg{display:inline-flex;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:3px;gap:2px;}
+  .seg button{border:0;background:transparent;color:var(--ink2);font-size:13px;padding:7px 13px;border-radius:8px;cursor:pointer;font-weight:600;}
   .seg button.on{background:var(--surface);color:var(--ink);box-shadow:var(--shadow);}
-  select{appearance:none;background:var(--surface);color:var(--ink);
-    border:1px solid var(--border);border-radius:10px;padding:8px 30px 8px 12px;
-    font-size:13px;font-weight:600;cursor:pointer;
+  select,input[type="date"]{appearance:none;background:var(--surface);color:var(--ink);
+    border:1px solid var(--border);border-radius:10px;padding:8px 12px;font-size:13px;font-weight:600;
+    cursor:pointer;font-family:inherit;}
+  select{padding-right:30px;
     background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);
-    background-position:calc(100% - 16px) 55%,calc(100% - 11px) 55%;
-    background-size:5px 5px,5px 5px;background-repeat:no-repeat;}
-  label.lbl{font-size:12px;color:var(--muted);margin-right:-4px;}
+    background-position:calc(100% - 16px) 55%,calc(100% - 11px) 55%;background-size:5px 5px,5px 5px;background-repeat:no-repeat;}
+  input[type="date"]{padding:7px 10px;}
+  label.lbl{font-size:12px;color:var(--muted);}
+  .chip{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:8px;
+    padding:7px 11px;font-size:12px;font-weight:600;cursor:pointer;}
+  .chip:hover{color:var(--ink);border-color:var(--accent);}
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin:12px 0;}
-  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
-    padding:13px 14px;box-shadow:var(--shadow);}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:13px 14px;box-shadow:var(--shadow);}
   .card .k{font-size:12px;color:var(--ink2);font-weight:600;margin-bottom:6px;}
   .card .val{font-size:22px;font-weight:750;letter-spacing:-.01em;line-height:1.1;}
-  .card .val small{font-size:13px;font-weight:600;color:var(--ink2);margin-left:2px;}
   .delta{font-size:12px;font-weight:700;margin-top:5px;display:inline-flex;gap:3px;align-items:center;}
   .delta.up{color:var(--good);} .delta.down{color:var(--bad);} .delta.flat{color:var(--muted);}
-  .panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
-    box-shadow:var(--shadow);padding:14px 16px 10px;margin:14px 0;}
+  .panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px 16px 12px;margin:14px 0;}
   .panel h2{font-size:14px;margin:0 0 2px;font-weight:700;}
   .panel .note{font-size:11.5px;color:var(--muted);margin:0 0 8px;}
   .row2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
-  @media (max-width:720px){.row2{grid-template-columns:1fr;}}
+  @media (max-width:760px){.row2{grid-template-columns:1fr;}}
   .chart{position:relative;width:100%;}
   svg{display:block;width:100%;height:auto;overflow:visible;}
-  .tip{position:absolute;pointer-events:none;background:var(--ink);color:var(--surface);
-    font-size:11.5px;line-height:1.4;padding:6px 8px;border-radius:8px;white-space:nowrap;
-    transform:translate(-50%,-115%);opacity:0;transition:opacity .08s;z-index:5;box-shadow:var(--shadow);}
-  .tip b{color:var(--surface);}
+  .tip{position:absolute;pointer-events:none;background:var(--ink);color:var(--surface);font-size:11.5px;line-height:1.4;
+    padding:6px 8px;border-radius:8px;white-space:nowrap;transform:translate(-50%,-115%);opacity:0;transition:opacity .08s;z-index:5;box-shadow:var(--shadow);}
   table{width:100%;border-collapse:collapse;font-size:12.5px;}
   .tblwrap{overflow-x:auto;}
   th,td{padding:7px 9px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--border);}
   th:first-child,td:first-child{text-align:left;position:sticky;left:0;background:var(--surface);}
-  th{color:var(--ink2);font-weight:700;font-size:11.5px;cursor:default;position:sticky;top:0;background:var(--surface);}
+  th{color:var(--ink2);font-weight:700;font-size:11.5px;position:sticky;top:0;background:var(--surface);}
   tbody tr:hover td{background:var(--surface2);}
+  tfoot td{font-weight:750;border-top:2px solid var(--border);background:var(--surface2);}
   .foot{color:var(--muted);font-size:11px;margin-top:18px;line-height:1.7;}
   .err{padding:20px;color:var(--bad);font-weight:600;}
-  .themebtn{margin-left:auto;border:1px solid var(--border);background:var(--surface);
-    color:var(--ink2);border-radius:9px;padding:7px 10px;font-size:12px;cursor:pointer;}
+  .themebtn{margin-left:auto;border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:9px;padding:7px 10px;font-size:12px;cursor:pointer;}
 </style>
 </head>
 <body>
@@ -92,266 +88,269 @@
 
 <script>
 "use strict";
+const YEN=n=>Math.round(n).toLocaleString("ja-JP");
+const NUM=n=>Math.round(n).toLocaleString("ja-JP");
+const F1 =n=>(Math.round(n*10)/10).toLocaleString("ja-JP",{minimumFractionDigits:1,maximumFractionDigits:1});
+const F2 =n=>(Math.round(n*100)/100).toLocaleString("ja-JP",{minimumFractionDigits:2,maximumFractionDigits:2});
 
-const YEN = n => Math.round(n).toLocaleString("ja-JP");
-const NUM = n => Math.round(n).toLocaleString("ja-JP");
-const F1  = n => (Math.round(n*10)/10).toLocaleString("ja-JP",{minimumFractionDigits:1,maximumFractionDigits:1});
-const F2  = n => (Math.round(n*100)/100).toLocaleString("ja-JP",{minimumFractionDigits:2,maximumFractionDigits:2});
-
-// ---- 指標の定義（後から直しやすいよう1か所に集約）----
-const METRICS = [
-  {key:"in",  name:"税込売上",     unit:"円",  fmt:v=>YEN(v)+"円",  calc:p=>p.in},
-  {key:"ex",  name:"税抜売上",     unit:"円",  fmt:v=>YEN(v)+"円",  calc:p=>p.ex},
-  {key:"v",   name:"来店客数",     unit:"人",  fmt:v=>NUM(v)+"人",  calc:p=>p.v},
-  {key:"tx",  name:"取引数",       unit:"件",  fmt:v=>NUM(v)+"件",  calc:p=>p.tx},
-  {key:"pr",  name:"購入率",       unit:"%",   fmt:v=>F1(v)+"%",    calc:p=>p.v>0?p.tx/p.v*100:null},
-  {key:"aov", name:"客単価",       unit:"円",  fmt:v=>YEN(v)+"円",  calc:p=>p.tx>0?p.in/p.tx:null},
-  {key:"upt", name:"平均購入数",   unit:"点",  fmt:v=>F2(v)+"点",   calc:p=>p.tx>0?p.it/p.tx:null},
-  {key:"aup", name:"平均商品単価", unit:"円",  fmt:v=>YEN(v)+"円",  calc:p=>p.it>0?p.ex/p.it:null},
+const METRICS=[
+  {key:"in", name:"税込売上",     fmt:v=>YEN(v)+"円", calc:p=>p.in},
+  {key:"ex", name:"税抜売上",     fmt:v=>YEN(v)+"円", calc:p=>p.ex},
+  {key:"v",  name:"来店客数",     fmt:v=>NUM(v)+"人", calc:p=>p.v},
+  {key:"tx", name:"取引数",       fmt:v=>NUM(v)+"件", calc:p=>p.tx},
+  {key:"qty",name:"販売数",       fmt:v=>NUM(v)+"点", calc:p=>p.it},
+  {key:"pr", name:"購入率",       fmt:v=>F1(v)+"%",   calc:p=>p.v>0?p.tx/p.v*100:null},
+  {key:"aov",name:"客単価",       fmt:v=>YEN(v)+"円", calc:p=>p.tx>0?p.in/p.tx:null},
+  {key:"upt",name:"平均購入数",   fmt:v=>F2(v)+"点",  calc:p=>p.tx>0?p.it/p.tx:null},
+  {key:"aup",name:"平均商品単価", fmt:v=>YEN(v)+"円", calc:p=>p.it>0?p.ex/p.it:null},
 ];
-// KPIカードに出す順（要望の9指標のうちスカラー8つ。カテゴリ2つは下段の棒グラフ）
-const KPI_ORDER = ["in","ex","v","pr","aov","upt","aup","tx"];
+const M=k=>METRICS.find(m=>m.key===k);
+const KPI_ORDER=["in","ex","v","tx","qty","pr","aov","upt","aup"];
 
-const state = {store:"all", grain:"week", metric:"in", focus:0};
-let DATA=null, EL=null;
+const state={store:"all",grain:"week",metric:"in",focus:0,from:null,to:null};
+let DATA=null;
 
-// ---------- データ取得（埋め込み or data.json）----------
 async function boot(){
   try{
-    DATA = window.__DATA__ || await (await fetch("data.json",{cache:"no-store"})).json();
-    if(!DATA || !DATA.daily) throw new Error("データが空です");
+    DATA=window.__DATA__||await (await fetch("data.json",{cache:"no-store"})).json();
+    if(!DATA||!DATA.daily)throw new Error("データが空です");
+    const ds=DATA.daily.map(r=>r.d).sort();
+    DATA._min=ds[0]; DATA._max=ds[ds.length-1];
+    state.from=DATA._min; state.to=DATA._max;
     render();
-  }catch(e){
-    document.getElementById("app").innerHTML =
-      '<div class="err">データを読み込めませんでした：'+String(e)+'</div>';
-  }
+  }catch(e){document.getElementById("app").innerHTML='<div class="err">データを読み込めませんでした：'+String(e)+'</div>';}
 }
 
-// ---------- 期間集約 ----------
-function mondayOf(dstr){
-  const dt=new Date(dstr+"T00:00:00Z");
-  const wd=dt.getUTCDay();            // 0=日..6=土
-  dt.setUTCDate(dt.getUTCDate()-((wd+6)%7));
-  return dt.toISOString().slice(0,10);
+// ---- 期間ヘルパ ----
+function mondayOf(d){const t=new Date(d+"T00:00:00Z");t.setUTCDate(t.getUTCDate()-((t.getUTCDay()+6)%7));return t.toISOString().slice(0,10);}
+function pKey(d,g){return g==="day"?d:g==="month"?d.slice(0,7):mondayOf(d);}
+function pLabel(k,g){
+  if(g==="month"){const[y,m]=k.split("-");return `${y}年${+m}月`;}
+  if(g==="day"){const[,m,dd]=k.split("-");return `${+m}/${+dd}`;}
+  const mon=new Date(k+"T00:00:00Z"),sun=new Date(mon);sun.setUTCDate(sun.getUTCDate()+6);
+  const f=x=>`${x.getUTCMonth()+1}/${x.getUTCDate()}`;return `${f(mon)}〜${f(sun)}`;
 }
-function periodKey(d,grain){
-  if(grain==="day")   return d;
-  if(grain==="month") return d.slice(0,7);
-  return mondayOf(d);
-}
-function periodLabel(key,grain){
-  if(grain==="month"){const[y,m]=key.split("-");return `${y}年${+m}月`;}
-  if(grain==="day"){const[y,m,dd]=key.split("-");return `${+m}/${+dd}`;}
-  // week: 月曜〜日曜
-  const mon=new Date(key+"T00:00:00Z"); const sun=new Date(mon); sun.setUTCDate(sun.getUTCDate()+6);
-  const f=x=>`${x.getUTCMonth()+1}/${x.getUTCDate()}`;
-  return `${f(mon)}〜${f(sun)}`;
-}
-function storeFilter(row){ return state.store==="all" || row.s===state.store; }
+function inRange(d){return (!state.from||d>=state.from)&&(!state.to||d<=state.to);}
+function addDays(d,n){const t=new Date(d+"T00:00:00Z");t.setUTCDate(t.getUTCDate()+n);return t.toISOString().slice(0,10);}
 
-function aggregate(grain){
+function sumRows(rows){
+  const p={in:0,ex:0,tx:0,it:0,v:0,hasV:false};
+  for(const r of rows){p.in+=r.in||0;p.ex+=r.ex||0;p.tx+=r.tx||0;p.it+=r.it||0;if(r.v!=null){p.v+=r.v;p.hasV=true;}}
+  if(!p.hasV)p.v=0; return p;
+}
+function aggregate(g,storeId){
   const map=new Map();
   for(const r of DATA.daily){
-    if(!storeFilter(r)) continue;
-    const k=periodKey(r.d,grain);
-    let p=map.get(k);
-    if(!p){p={key:k,in:0,ex:0,tx:0,it:0,v:0,hasV:false};map.set(k,p);}
-    p.in+=r.in||0; p.ex+=r.ex||0; p.tx+=r.tx||0; p.it+=r.it||0;
-    if(r.v!=null){p.v+=r.v; p.hasV=true;}
+    if(storeId!=="all"&&r.s!==storeId)continue;
+    if(!inRange(r.d))continue;
+    const k=pKey(r.d,g); if(!map.has(k))map.set(k,[]); map.get(k).push(r);
   }
-  const arr=[...map.values()].sort((a,b)=>a.key<b.key?-1:1);
-  for(const p of arr){ if(!p.hasV) p.v=0; p.label=periodLabel(p.key,grain); }
+  const arr=[...map.entries()].sort((a,b)=>a[0]<b[0]?-1:1).map(([k,rows])=>{
+    const p=sumRows(rows); p.key=k; p.label=pLabel(k,g); return p;
+  });
   return arr;
 }
-function categoryFor(periodKey_,grain){
+function categoryFor(pkey,g,storeId){
   const map=new Map();
   for(const r of DATA.cat){
-    if(!storeFilter(r)) continue;
-    if(periodKey(r.d,grain)!==periodKey_) continue;
+    if(storeId!=="all"&&r.s!==storeId)continue;
+    if(!inRange(r.d))continue;
+    if(pKey(r.d,g)!==pkey)continue;
     let c=map.get(r.c); if(!c){c={c:r.c,a:0,q:0};map.set(r.c,c);}
     c.a+=r.a||0; c.q+=r.q||0;
   }
   return [...map.values()];
 }
+// 店舗比較: 選択期間(pkey)を、店舗ごとに集計
+function storeComparison(pkey,g,stores){
+  return stores.map(s=>{
+    const rows=DATA.daily.filter(r=>r.s===s.id&&inRange(r.d)&&pKey(r.d,g)===pkey);
+    const p=sumRows(rows); p._name=s.name; return p;
+  });
+}
 
-// ---------- 描画 ----------
+function usableStores(){const w=new Set(DATA.daily.map(r=>r.s));return DATA.stores.filter(s=>w.has(s.id));}
+
 function render(){
-  const withData=new Set(DATA.daily.map(r=>r.s));
-  const usable=DATA.stores.filter(s=>withData.has(s.id));
-  const stores=[{id:"all",name:"総合（全店）"},...usable.map(s=>({id:s.id,name:s.name}))];
-  document.getElementById("app").innerHTML = `
+  const us=usableStores();
+  const stores=[{id:"all",name:"総合（全店）"},...us.map(s=>({id:s.id,name:s.name}))];
+  const app=document.getElementById("app");
+  app.innerHTML=`
     <header>
       <h1>NOTIME 売上ダッシュボード</h1>
       <span class="sub">更新: ${(DATA.generated_at||"").replace("T"," ").slice(0,16)}（日本時間）</span>
       <button class="themebtn" id="themebtn">◐ 表示切替</button>
     </header>
+    <div class="rangebar" id="rangebar"></div>
     <div class="controls">
       <label class="lbl">店舗</label>
       <select id="store">${stores.map(s=>`<option value="${s.id}" ${String(s.id)===String(state.store)?"selected":""}>${s.name}</option>`).join("")}</select>
-      <div class="seg" id="grain">
-        ${[["day","日次"],["week","週次"],["month","月次"]].map(([g,t])=>`<button data-g="${g}" class="${state.grain===g?"on":""}">${t}</button>`).join("")}
-      </div>
+      <div class="seg" id="grain">${[["day","日次"],["week","週次"],["month","月次"]].map(([g,t])=>`<button data-g="${g}" class="${state.grain===g?"on":""}">${t}</button>`).join("")}</div>
+    </div>
+    <div class="controls">
+      <label class="lbl">集計期間</label>
+      <input type="date" id="from" min="${DATA._min}" max="${DATA._max}" value="${state.from}">
+      <span class="sub">〜</span>
+      <input type="date" id="to" min="${DATA._min}" max="${DATA._max}" value="${state.to}">
+      <button class="chip" data-preset="all">全期間</button>
+      <button class="chip" data-preset="30">直近30日</button>
+      <button class="chip" data-preset="90">直近90日</button>
     </div>
     <div id="kpis" class="grid"></div>
     <div class="panel">
       <h2>推移</h2>
-      <div class="controls" style="margin:2px 0 6px">
-        <label class="lbl">指標</label>
+      <div class="controls" style="margin:2px 0 6px"><label class="lbl">指標</label>
         <select id="metric">${METRICS.map(m=>`<option value="${m.key}" ${state.metric===m.key?"selected":""}>${m.name}</option>`).join("")}</select>
-        <span class="sub" id="periodhint"></span>
-      </div>
+        <span class="sub" id="periodhint"></span></div>
       <div class="chart" id="trend"></div>
+    </div>
+    <div class="panel">
+      <h2>店舗比較</h2><p class="note" id="cmp-note"></p>
+      <div class="tblwrap"><table id="cmp"></table></div>
     </div>
     <div class="row2">
       <div class="panel"><h2>カテゴリ別売上</h2><p class="note" id="cat-a-note"></p><div class="chart" id="cat-a"></div></div>
       <div class="panel"><h2>カテゴリ別販売数</h2><p class="note" id="cat-q-note"></p><div class="chart" id="cat-q"></div></div>
     </div>
     <div class="panel">
-      <h2>一覧</h2><p class="note">行をタップ/クリックすると、その期間のカテゴリと指標カードが切り替わります。</p>
+      <h2>カテゴリ別 一覧</h2><p class="note" id="cat-t-note"></p>
+      <div class="tblwrap"><table id="cat-t"></table></div>
+    </div>
+    <div class="panel">
+      <h2>期間別 一覧</h2><p class="note">行をタップすると、その期間のカード・カテゴリ・店舗比較が切り替わります。</p>
       <div class="tblwrap"><table id="tbl"></table></div>
     </div>
     <div class="foot">
       指標の定義：購入率＝取引数÷来店客数 ／ 客単価＝税込売上÷取引数 ／ 平均購入数＝総点数÷取引数 ／ 平均商品単価＝税抜売上÷総点数。
-      税込/税抜売上は伝票単位、カテゴリは明細単位で集計。来店客数はデジテール、売上はcashier。
+      税込/税抜売上・取引数・販売数は伝票単位、カテゴリは明細単位で集計。来店客数はデジテール、売上はcashier。
       週次は月曜〜日曜。いわきはcashier上2店舗ぶんを合算。
     </div>`;
 
   document.getElementById("store").onchange=e=>{state.store=e.target.value==="all"?"all":+e.target.value;state.focus=0;draw();};
   document.getElementById("metric").onchange=e=>{state.metric=e.target.value;draw();};
-  document.querySelectorAll("#grain button").forEach(b=>b.onclick=()=>{state.grain=b.dataset.g;state.focus=0;render();});
+  document.querySelectorAll("#grain button").forEach(b=>b.onclick=()=>{state.grain=b.dataset.g;state.focus=0;draw();});
+  document.getElementById("from").onchange=e=>{state.from=e.target.value||DATA._min;state.focus=0;draw();};
+  document.getElementById("to").onchange=e=>{state.to=e.target.value||DATA._max;state.focus=0;draw();};
+  document.querySelectorAll(".chip[data-preset]").forEach(b=>b.onclick=()=>{
+    const p=b.dataset.preset;
+    if(p==="all"){state.from=DATA._min;state.to=DATA._max;}
+    else{state.to=DATA._max;state.from=addDays(DATA._max,-(+p-1));if(state.from<DATA._min)state.from=DATA._min;}
+    state.focus=0; render();
+  });
   document.getElementById("themebtn").onclick=toggleTheme;
   draw();
 }
 
 function draw(){
-  const periods=aggregate(state.grain);
-  if(!periods.length){document.getElementById("kpis").innerHTML='<div class="sub">データがありません</div>';
-    document.getElementById("trend").innerHTML="";return;}
-  if(state.focus<0||state.focus>=periods.length) state.focus=periods.length-1;
-  if(state.focus===0) state.focus=periods.length-1; // 既定は最新
-  const cur=periods[state.focus], prev=periods[state.focus-1];
+  const periods=aggregate(state.grain,state.store);
+  document.getElementById("rangebar").innerHTML =
+    `表示期間：<b>${state.from}</b> 〜 <b>${state.to}</b>　（${periods.length}${state.grain==="day"?"日":state.grain==="week"?"週":"ヶ月"}ぶん）`;
+  if(!periods.length){document.getElementById("kpis").innerHTML='<div class="sub">この期間のデータがありません</div>';
+    ["trend","cat-a","cat-q"].forEach(id=>document.getElementById(id).innerHTML="");
+    ["cmp","cat-t","tbl"].forEach(id=>document.getElementById(id).innerHTML="");return;}
+  if(state.focus<=0||state.focus>=periods.length)state.focus=periods.length-1;
+  const cur=periods[state.focus],prev=periods[state.focus-1];
 
-  // KPIカード
-  document.getElementById("kpis").innerHTML = KPI_ORDER.map(key=>{
-    const m=METRICS.find(x=>x.key===key);
-    const v=m.calc(cur), pv=prev?m.calc(prev):null;
-    let d="";
-    if(v!=null&&pv!=null&&pv!==0){
-      const pct=(v-pv)/Math.abs(pv)*100;
-      const cls=pct>0.05?"up":pct<-0.05?"down":"flat";
-      const ar=pct>0.05?"▲":pct<-0.05?"▼":"—";
-      d=`<div class="delta ${cls}">${ar} ${F1(Math.abs(pct))}%<span class="sub" style="color:inherit;font-weight:500">前期比</span></div>`;
-    }
-    return `<div class="card"><div class="k">${m.name}</div>
-      <div class="val">${v==null?"—":m.fmt(v)}</div>${d}</div>`;
+  document.getElementById("kpis").innerHTML=KPI_ORDER.map(k=>{
+    const m=M(k),v=m.calc(cur),pv=prev?m.calc(prev):null; let d="";
+    if(v!=null&&pv!=null&&pv!==0){const pct=(v-pv)/Math.abs(pv)*100;
+      const cls=pct>0.05?"up":pct<-0.05?"down":"flat",ar=pct>0.05?"▲":pct<-0.05?"▼":"—";
+      d=`<div class="delta ${cls}">${ar} ${F1(Math.abs(pct))}% <span class="sub" style="color:inherit;font-weight:500">前期比</span></div>`;}
+    return `<div class="card"><div class="k">${m.name}</div><div class="val">${v==null?"—":m.fmt(v)}</div>${d}</div>`;
   }).join("");
-  document.getElementById("periodhint").textContent =
-    `選択中の期間：${cur.label}（${cur.key}）`;
+  document.getElementById("periodhint").textContent=`選択中：${cur.label}（${cur.key}）`;
 
   drawTrend(periods);
-  // カテゴリ（選択期間）
-  const cats=categoryFor(cur.key,state.grain);
+
+  // 店舗比較（選択期間）
+  const us=usableStores();
+  const cmp=storeComparison(cur.key,state.grain,us);
+  const total=sumRows(us.flatMap(s=>DATA.daily.filter(r=>r.s===s.id&&inRange(r.d)&&pKey(r.d,state.grain)===cur.key)));
+  total._name="総合"; drawCompare([...cmp,total]);
+  document.getElementById("cmp-note").textContent=`${cur.label} の店舗別（総合は全店合計）`;
+
+  // カテゴリ（選択期間・選択店舗）
+  const cats=categoryFor(cur.key,state.grain,state.store);
   document.getElementById("cat-a-note").textContent=`${cur.label} ・ 上位カテゴリ`;
   document.getElementById("cat-q-note").textContent=`${cur.label} ・ 上位カテゴリ`;
   drawBars("cat-a",cats.slice().sort((a,b)=>b.a-a.a),c=>c.a,c=>YEN(c.a)+"円");
   drawBars("cat-q",cats.slice().sort((a,b)=>b.q-a.q),c=>c.q,c=>NUM(c.q)+"点");
+  drawCatTable(cats.slice().sort((a,b)=>b.a-a.a));
+  document.getElementById("cat-t-note").textContent=`${cur.label} ・ ${state.store==="all"?"総合":us.find(s=>s.id===state.store)?.name||""}`;
+
   drawTable(periods);
 }
 
-// ---------- 折れ線（単一系列・クロスヘア）----------
-function drawTrend(periods){
-  const box=document.getElementById("trend"); box.innerHTML="";
-  const m=METRICS.find(x=>x.key===state.metric);
-  const vals=periods.map(p=>({label:p.label,key:p.key,v:m.calc(p)}));
-  const W=Math.max(box.clientWidth||680,320), H=250, PADL=58,PADR=14,PADT=14,PADB=40;
-  const xs=(i)=>PADL+(W-PADL-PADR)*(vals.length<=1?0.5:i/(vals.length-1));
-  const nums=vals.map(d=>d.v).filter(v=>v!=null);
-  const maxV=Math.max(1,...nums), minV=Math.min(0,...nums);
-  const ys=(v)=>PADT+(H-PADT-PADB)*(1-(v-minV)/((maxV-minV)||1));
-  const grid=4, gy=[];
-  for(let i=0;i<=grid;i++){const val=minV+(maxV-minV)*i/grid;gy.push({y:ys(val),val});}
-  const pts=vals.map((d,i)=>d.v==null?null:[xs(i),ys(d.v)]);
-  const path=pts.map((p,i)=>p?`${i&&pts[i-1]?"L":"M"}${p[0].toFixed(1)} ${p[1].toFixed(1)}`:"").join(" ");
-  const svg=`<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${m.name}の推移">
-    ${gy.map(g=>`<line x1="${PADL}" y1="${g.y.toFixed(1)}" x2="${W-PADR}" y2="${g.y.toFixed(1)}" stroke="var(--border)" stroke-width="1"/>
-      <text x="${PADL-8}" y="${g.y+3}" text-anchor="end" font-size="10" fill="var(--muted)">${shortNum(g.val)}</text>`).join("")}
-    <path d="${path}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-    ${pts.map((p,i)=>p?`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3.2" fill="var(--surface)" stroke="var(--accent)" stroke-width="2"/>`:"").join("")}
-    ${vals.map((d,i)=> (vals.length<=14 || i%Math.ceil(vals.length/12)===0 || i===vals.length-1)
-        ?`<text x="${xs(i).toFixed(1)}" y="${H-PADB+16}" text-anchor="middle" font-size="9.5" fill="var(--muted)">${d.label}</text>`:"").join("")}
-    <rect id="hit" x="${PADL}" y="${PADT}" width="${W-PADL-PADR}" height="${H-PADT-PADB}" fill="transparent"/>
-    <line id="cross" x1="0" y1="${PADT}" x2="0" y2="${H-PADB}" stroke="var(--accent)" stroke-width="1" opacity="0"/>
-  </svg><div class="tip" id="ttip"></div>`;
-  box.innerHTML=svg;
-  const tip=box.querySelector("#ttip"), cross=box.querySelector("#cross"), hit=box.querySelector("#hit");
-  const svgEl=box.querySelector("svg");
-  function move(ev){
-    const r=svgEl.getBoundingClientRect(); const px=(ev.touches?ev.touches[0].clientX:ev.clientX)-r.left;
-    const sx=px/r.width*W;
-    let i=Math.round((sx-PADL)/((W-PADL-PADR)/(Math.max(1,vals.length-1))));
-    i=Math.max(0,Math.min(vals.length-1,i)); const d=vals[i]; if(d.v==null){tip.style.opacity=0;cross.setAttribute("opacity","0");return;}
-    const cx=xs(i);
-    cross.setAttribute("x1",cx);cross.setAttribute("x2",cx);cross.setAttribute("opacity",".5");
-    tip.style.opacity=1; tip.style.left=(cx/W*r.width)+"px"; tip.style.top=(ys(d.v)/H*r.height)+"px";
-    tip.innerHTML=`<b>${d.label}</b><br>${m.name}: ${m.fmt(d.v)}`;
-  }
-  hit.addEventListener("mousemove",move); hit.addEventListener("touchmove",e=>{move(e);},{passive:true});
-  hit.addEventListener("mouseleave",()=>{tip.style.opacity=0;cross.setAttribute("opacity","0");});
+function drawCompare(rows){
+  const cols=KPI_ORDER.map(M);
+  const head=`<thead><tr><th>店舗</th>${cols.map(c=>`<th>${c.name}</th>`).join("")}</tr></thead>`;
+  const body=rows.map(p=>`<tr${p._name==="総合"?' style="font-weight:750"':''}><td>${esc(p._name)}</td>${cols.map(c=>{const v=c.calc(p);return `<td>${v==null?"—":c.fmt(v)}</td>`;}).join("")}</tr>`).join("");
+  document.getElementById("cmp").innerHTML=head+"<tbody>"+body+"</tbody>";
 }
-function shortNum(v){
-  if(Math.abs(v)>=1e8)return(v/1e8).toFixed(1)+"億";
-  if(Math.abs(v)>=1e4)return(v/1e4).toFixed(v>=1e5?0:1)+"万";
-  return Math.round(v).toLocaleString("ja-JP");
+function drawCatTable(cats){
+  const head=`<thead><tr><th>カテゴリ</th><th>売上</th><th>販売数</th><th>点あたり</th></tr></thead>`;
+  const body=cats.map(c=>`<tr><td>${esc(c.c)}</td><td>${YEN(c.a)}円</td><td>${NUM(c.q)}点</td><td>${c.q>0?YEN(c.a/c.q)+"円":"—"}</td></tr>`).join("");
+  const ta=cats.reduce((s,c)=>s+c.a,0),tq=cats.reduce((s,c)=>s+c.q,0);
+  const foot=`<tfoot><tr><td>合計</td><td>${YEN(ta)}円</td><td>${NUM(tq)}点</td><td>${tq>0?YEN(ta/tq)+"円":"—"}</td></tr></tfoot>`;
+  document.getElementById("cat-t").innerHTML=head+"<tbody>"+body+"</tbody>"+foot;
 }
-
-// ---------- 横棒（単一色・ホバー）----------
-function drawBars(id,rows,getV,fmt){
-  const box=document.getElementById(id); box.innerHTML="";
-  rows=rows.slice(0,10);
-  if(!rows.length){box.innerHTML='<div class="sub" style="padding:8px 0">データなし</div>';return;}
-  const max=Math.max(1,...rows.map(getV));
-  const rowH=30, W=Math.max(box.clientWidth||420,300), PADL=8,PADR=12, LBL=96, H=rows.length*rowH+8;
-  const bx=LBL+PADL, bw=W-bx-PADR;
-  const svg=`<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-    ${rows.map((r,i)=>{const y=i*rowH+4, w=Math.max(2,bw*getV(r)/max);
-      return `<g class="barrow" data-i="${i}">
-        <text x="${LBL}" y="${y+rowH/2}" text-anchor="end" dominant-baseline="middle" font-size="11" fill="var(--ink2)">${esc(r.c).slice(0,7)}</text>
-        <rect x="${bx}" y="${y+5}" width="${bw}" height="${rowH-14}" rx="4" fill="var(--surface2)"/>
-        <rect x="${bx}" y="${y+5}" width="${w.toFixed(1)}" height="${rowH-14}" rx="4" fill="var(--accent)"/>
-        <text x="${bx+w+6}" y="${y+rowH/2}" dominant-baseline="middle" font-size="10.5" fill="var(--muted)">${fmt(r)}</text>
-      </g>`;}).join("")}
-  </svg><div class="tip" id="tip-${id}"></div>`;
-  box.innerHTML=svg;
-  const tip=box.querySelector("#tip-"+id), svgEl=box.querySelector("svg");
-  box.querySelectorAll(".barrow").forEach((g,i)=>{
-    g.addEventListener("mousemove",ev=>{const r=svgEl.getBoundingClientRect();
-      tip.style.opacity=1;tip.style.left=(ev.clientX-r.left)+"px";tip.style.top=((i+0.4)*rowH/H*r.height)+"px";
-      tip.innerHTML=`<b>${esc(rows[i].c)}</b><br>${fmt(rows[i])}`;});
-    g.addEventListener("mouseleave",()=>tip.style.opacity=0);
-  });
-}
-
-// ---------- 表 ----------
 function drawTable(periods){
-  const cols=KPI_ORDER.map(k=>METRICS.find(m=>m.key===k));
+  const cols=KPI_ORDER.map(M);
   const head=`<thead><tr><th>期間</th>${cols.map(c=>`<th>${c.name}</th>`).join("")}</tr></thead>`;
-  const body=periods.slice().reverse().map((p,ri)=>{
-    const idx=periods.length-1-ri;
+  const body=periods.slice().reverse().map((p,ri)=>{const idx=periods.length-1-ri;
     return `<tr data-i="${idx}" style="cursor:pointer;${idx===state.focus?"outline:2px solid var(--accent);outline-offset:-2px":""}">
-      <td>${p.label}</td>${cols.map(c=>{const v=c.calc(p);return `<td>${v==null?"—":c.fmt(v)}</td>`;}).join("")}</tr>`;
-  }).join("");
+      <td>${p.label}</td>${cols.map(c=>{const v=c.calc(p);return `<td>${v==null?"—":c.fmt(v)}</td>`;}).join("")}</tr>`;}).join("");
   const t=document.getElementById("tbl"); t.innerHTML=head+"<tbody>"+body+"</tbody>";
   t.querySelectorAll("tbody tr").forEach(tr=>tr.onclick=()=>{state.focus=+tr.dataset.i;draw();
     document.getElementById("kpis").scrollIntoView({behavior:"smooth",block:"start"});});
 }
 
-function esc(s){return String(s).replace(/[&<>]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[m]));}
-function toggleTheme(){
-  const root=document.documentElement;
-  const cur=root.getAttribute("data-theme")|| (matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");
-  const next=cur==="dark"?"light":"dark"; root.setAttribute("data-theme",next);
-  draw();
+// ---- charts ----
+function drawTrend(periods){
+  const box=document.getElementById("trend"); box.innerHTML="";
+  const m=M(state.metric), vals=periods.map(p=>({label:p.label,v:m.calc(p)}));
+  const W=Math.max(box.clientWidth||680,320),H=250,PADL=58,PADR=14,PADT=14,PADB=40;
+  const xs=i=>PADL+(W-PADL-PADR)*(vals.length<=1?0.5:i/(vals.length-1));
+  const nums=vals.map(d=>d.v).filter(v=>v!=null);
+  const maxV=Math.max(1,...nums),minV=Math.min(0,...nums);
+  const ys=v=>PADT+(H-PADT-PADB)*(1-(v-minV)/((maxV-minV)||1));
+  const gy=[];for(let i=0;i<=4;i++){const val=minV+(maxV-minV)*i/4;gy.push({y:ys(val),val});}
+  const pts=vals.map((d,i)=>d.v==null?null:[xs(i),ys(d.v)]);
+  const path=pts.map((p,i)=>p?`${i&&pts[i-1]?"L":"M"}${p[0].toFixed(1)} ${p[1].toFixed(1)}`:"").join(" ");
+  box.innerHTML=`<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${m.name}の推移">
+    ${gy.map(g=>`<line x1="${PADL}" y1="${g.y.toFixed(1)}" x2="${W-PADR}" y2="${g.y.toFixed(1)}" stroke="var(--border)" stroke-width="1"/><text x="${PADL-8}" y="${g.y+3}" text-anchor="end" font-size="10" fill="var(--muted)">${shortNum(g.val)}</text>`).join("")}
+    <path d="${path}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    ${pts.map(p=>p?`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3.2" fill="var(--surface)" stroke="var(--accent)" stroke-width="2"/>`:"").join("")}
+    ${vals.map((d,i)=>(vals.length<=14||i%Math.ceil(vals.length/12)===0||i===vals.length-1)?`<text x="${xs(i).toFixed(1)}" y="${H-PADB+16}" text-anchor="middle" font-size="9.5" fill="var(--muted)">${d.label}</text>`:"").join("")}
+    <rect id="hit" x="${PADL}" y="${PADT}" width="${W-PADL-PADR}" height="${H-PADT-PADB}" fill="transparent"/>
+    <line id="cross" x1="0" y1="${PADT}" x2="0" y2="${H-PADB}" stroke="var(--accent)" stroke-width="1" opacity="0"/>
+  </svg><div class="tip" id="ttip"></div>`;
+  const tip=box.querySelector("#ttip"),cross=box.querySelector("#cross"),hit=box.querySelector("#hit"),svgEl=box.querySelector("svg");
+  function move(ev){const r=svgEl.getBoundingClientRect();const px=((ev.touches?ev.touches[0].clientX:ev.clientX)-r.left)/r.width*W;
+    let i=Math.round((px-PADL)/((W-PADL-PADR)/Math.max(1,vals.length-1)));i=Math.max(0,Math.min(vals.length-1,i));
+    const d=vals[i];if(d.v==null){tip.style.opacity=0;cross.setAttribute("opacity","0");return;}
+    const cx=xs(i);cross.setAttribute("x1",cx);cross.setAttribute("x2",cx);cross.setAttribute("opacity",".5");
+    tip.style.opacity=1;tip.style.left=(cx/W*r.width)+"px";tip.style.top=(ys(d.v)/H*r.height)+"px";
+    tip.innerHTML=`<b>${d.label}</b><br>${m.name}: ${m.fmt(d.v)}`;}
+  hit.addEventListener("mousemove",move);hit.addEventListener("touchmove",move,{passive:true});
+  hit.addEventListener("mouseleave",()=>{tip.style.opacity=0;cross.setAttribute("opacity","0");});
 }
+function shortNum(v){if(Math.abs(v)>=1e8)return(v/1e8).toFixed(1)+"億";if(Math.abs(v)>=1e4)return(v/1e4).toFixed(v>=1e5?0:1)+"万";return Math.round(v).toLocaleString("ja-JP");}
+function drawBars(id,rows,getV,fmt){
+  const box=document.getElementById(id);box.innerHTML="";rows=rows.slice(0,10);
+  if(!rows.length){box.innerHTML='<div class="sub" style="padding:8px 0">データなし</div>';return;}
+  const max=Math.max(1,...rows.map(getV)),rowH=30,W=Math.max(box.clientWidth||420,300),PADR=12,LBL=96,H=rows.length*rowH+8,bx=LBL+8,bw=W-bx-PADR;
+  box.innerHTML=`<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${rows.map((r,i)=>{const y=i*rowH+4,w=Math.max(2,bw*getV(r)/max);
+    return `<g class="barrow"><text x="${LBL}" y="${y+rowH/2}" text-anchor="end" dominant-baseline="middle" font-size="11" fill="var(--ink2)">${esc(r.c).slice(0,7)}</text>
+      <rect x="${bx}" y="${y+5}" width="${bw}" height="${rowH-14}" rx="4" fill="var(--surface2)"/>
+      <rect x="${bx}" y="${y+5}" width="${w.toFixed(1)}" height="${rowH-14}" rx="4" fill="var(--accent)"/>
+      <text x="${bx+w+6}" y="${y+rowH/2}" dominant-baseline="middle" font-size="10.5" fill="var(--muted)">${fmt(r)}</text></g>`;}).join("")}</svg>`;
+}
+
+function esc(s){return String(s).replace(/[&<>]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[m]));}
+function toggleTheme(){const root=document.documentElement;
+  const cur=root.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");
+  root.setAttribute("data-theme",cur==="dark"?"light":"dark");draw();}
 window.addEventListener("resize",()=>{if(DATA)draw();});
 boot();
 </script>
