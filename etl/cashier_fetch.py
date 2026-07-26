@@ -57,7 +57,9 @@ from .settings import (
 # 「検索オプション」を開くためのラベル（閉じていることがある）
 SEARCH_OPTION_TEXTS = ["検索オプション", "詳細検索", "検索条件", "条件を開く"]
 
+# cashier の期間欄は name="since"（開始）/ name="until"（終了）だと実画面で確認済み。
 DATE_FROM_CANDIDATES = [
+    'input[name="since"]',
     'input[type="date"]',
     'input[name*="start" i]',
     'input[name*="from" i]',
@@ -69,6 +71,7 @@ DATE_FROM_CANDIDATES = [
     'input[placeholder*="日付"]',
 ]
 DATE_TO_CANDIDATES = [
+    'input[name="until"]',
     'input[type="date"]',
     'input[name*="end" i]',
     'input[name*="to" i]',
@@ -159,6 +162,24 @@ def _click_first_text(page, texts: list[str]) -> str | None:
             except Exception:
                 continue
     return None
+
+
+def _force_set_value(page, selector: str, value: str) -> None:
+    """指定の入力欄に値を確実にセットし、input/change を発火させる。"""
+    js = """
+    ([sel, val]) => {
+      const el = document.querySelector(sel);
+      if (!el) return false;
+      el.value = val;
+      el.dispatchEvent(new Event('input',  {bubbles: true}));
+      el.dispatchEvent(new Event('change', {bubbles: true}));
+      return true;
+    }
+    """
+    try:
+        page.evaluate(js, [selector, value])
+    except Exception:
+        pass
 
 
 def open_search_options(page) -> None:
@@ -257,9 +278,11 @@ def set_date_range(page, start_date: str, end_date: str | None = None) -> None:
         start = page.locator(from_sel).first
         end = page.locator(to_sel).first if to_sel else None
     else:
+        # since / until を名前で確実に取る。無ければ従来の候補で拾う。
         start = _first_visible(page, DATE_FROM_CANDIDATES, nth=0)
-        end = _first_visible(page, DATE_TO_CANDIDATES, nth=1) or \
-            _first_visible(page, DATE_TO_CANDIDATES, nth=0)
+        end = (_first_visible(page, ['input[name="until"]'], nth=0)
+               or _first_visible(page, DATE_TO_CANDIDATES, nth=1)
+               or _first_visible(page, DATE_TO_CANDIDATES, nth=0))
 
     if start is None:
         dump_page(page, "cashier_daterange_notfound")
@@ -284,6 +307,11 @@ def set_date_range(page, start_date: str, end_date: str | None = None) -> None:
             field.press("Escape")   # カレンダーが開いたら閉じる
         except Exception:
             pass
+
+    # 念のため: since / until を JS で直接セットし、input/change を発火させる。
+    # （日付ピッカーが .fill() を巻き戻すことがあるため、確実に効かせる）
+    _force_set_value(page, 'input[name="since"]', start_date)
+    _force_set_value(page, 'input[name="until"]', end_date)
 
     # 診断: 日付欄に実際に何が入ったか（name/id/value）を出す。
     try:
