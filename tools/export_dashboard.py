@@ -214,6 +214,14 @@ def _verify_served(sb: Supabase, bucket: str, path: str,
         print(f"  保存種類[info]: HTTP {r.status_code} / {r.text[:500]}")
     except Exception as e:
         print(f"  保存種類[info]をスキップ: {e}")
+    # ③ 原本の配信種類（認証ダウンロード＝公開CDNを通さない）
+    try:
+        au = f"{sb.url}/storage/v1/object/authenticated/{bucket}/{path}"
+        r = requests.get(au, headers={"apikey": sb.key,
+                         "Authorization": f"Bearer {sb.key}"}, timeout=60)
+        print(f"  原本配信[auth]: HTTP {r.status_code} / CT={r.headers.get('Content-Type')}")
+    except Exception as e:
+        print(f"  原本配信[auth]をスキップ: {e}")
 
 
 def _delete(sb: Supabase, bucket: str, path: str) -> None:
