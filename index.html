@@ -118,9 +118,9 @@ let DATA=null;
 //  ・公開モード : プレースホルダのまま → data.json を素直に読む（従来動作）
 //  ・認証モード : SUPA_URL / SUPA_ANON が入り PUBLIC_DATA_URL が空
 //                → Googleログイン（社内@avend.co.jpのみ）後に非公開データを読む
-const SUPA_URL="__SUPABASE_URL__";
-const SUPA_ANON="__SUPABASE_ANON_KEY__";
-const PUBLIC_DATA_URL="__PUBLIC_DATA_URL__";
+const SUPA_URL="";
+const SUPA_ANON="";
+const PUBLIC_DATA_URL="https://rwfcsanmqvkxiuwdeddv.supabase.co/storage/v1/object/public/web/data.json";
 const ALLOW_DOMAIN="@avend.co.jp";
 let SB=null;                          // Supabase クライアント（認証モードのみ）
 const isPH=s=>!s||s.slice(0,2)==="__";   // 未置換のプレースホルダか？
