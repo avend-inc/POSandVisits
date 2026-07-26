@@ -313,20 +313,6 @@ def set_date_range(page, start_date: str, end_date: str | None = None) -> None:
     _force_set_value(page, 'input[name="since"]', start_date)
     _force_set_value(page, 'input[name="until"]', end_date)
 
-    # 診断: 日付欄に実際に何が入ったか（name/id/value）を出す。
-    try:
-        import json as _json
-        vals = page.evaluate(
-            """() => [...document.querySelectorAll('input')]
-                 .filter(e => {const r=e.getBoundingClientRect();
-                               return r.width>0 && r.height>0;})
-                 .map(e => ({name:e.name||null, id:e.id||null, type:e.type,
-                             ph:e.placeholder||null, val:e.value}))"""
-        )
-        print("  [日付欄デバッグ] " + _json.dumps(vals, ensure_ascii=False))
-    except Exception as _e:
-        print(f"  （日付欄デバッグに失敗: {_e}）")
-
     # 検索（絞り込み）を実行。「検索」は「検索オプション」に部分一致して
     # パネルを閉じてしまう恐れがあるので、まず完全一致で押す。
     if _click_exact(page, SEARCH_TEXTS) or _click_by_text(page, ["絞り込み", "適用", "この条件で検索", "表示"]):
@@ -358,40 +344,6 @@ def _click_csv_button(page) -> str:
         time.sleep(1)
         _click_by_text(page, DETAIL_TEXTS)
     return clicked
-
-
-_CSV_DIAG_JS = r"""
-() => {
-  const hit = [...document.querySelectorAll('button, a, input')]
-    .filter(e => /CSV出力/.test((e.innerText || e.value || '')));
-  return hit.map(b => {
-    const form = b.closest('form');
-    return {
-      text: (b.innerText || b.value || '').trim().slice(0, 40),
-      tag: b.tagName,
-      type: b.type || null,
-      outerHTML: b.outerHTML.slice(0, 400),
-      attrs: Object.fromEntries([...b.attributes].map(a => [a.name, a.value])),
-      formAction: form ? form.getAttribute('action') : null,
-      formMethod: form ? form.getAttribute('method') : null,
-    };
-  });
-}
-"""
-
-
-def _diagnose_csv_buttons(page) -> None:
-    """CSV出力ボタンの実体を1度だけログに出す（押下方式の特定用）。"""
-    try:
-        info = page.evaluate(_CSV_DIAG_JS)
-    except Exception as e:
-        print(f"  （CSVボタンの調査に失敗: {e}）")
-        return
-    import json as _json
-    print("  ----8<---- CSV出力ボタンの実体 ----8<----")
-    for line in _json.dumps(info, ensure_ascii=False, indent=2).splitlines():
-        print(f"  | {line}")
-    print("  ----8<---- ここまで ----8<----")
 
 
 # CSV出力(明細)を押すと開くモーダル（ダウンロード形式の選択）
