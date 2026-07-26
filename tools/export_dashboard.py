@@ -2,15 +2,23 @@
 ダッシュボード用データの集計と配信
 
 Supabase の sales / visits を集計して data.json を作り、
-ダッシュボードHTML(index.html) と一緒に Supabase Storage の公開バケット
-「dashboard」へアップロードする。
+ダッシュボードHTML(index.html) と一緒に Supabase Storage へアップロードする。
 
   python -m tools.export_dashboard              # 集計 → data.json/index.html を配信
   python -m tools.export_dashboard --print-json # data.json を標準出力にも出す
 
-配信後の公開URL:
-  {SUPABASE_URL}/storage/v1/object/public/dashboard/index.html
-  {SUPABASE_URL}/storage/v1/object/public/dashboard/data.json
+【2つのモード（環境変数 SUPABASE_ANON_KEY の有無で自動切替）】
+  ● 公開モード（SUPABASE_ANON_KEY なし＝従来）
+      公開バケット 'dashboard' に index.html と data.json を置く。
+      URLを知っていれば誰でも見られる。
+        {SUPABASE_URL}/storage/v1/object/public/dashboard/index.html
+  ● 認証モード（SUPABASE_ANON_KEY あり）
+      index.html は公開バケット 'dashboard'（URLは変わらない）。
+      data.json は非公開バケット 'dashboard-data' に置き、
+      Googleログイン（社内 @avend.co.jp のみ）した人だけが読める。
+      HTMLにはログインに必要な公開情報(URL/anonキー)を埋め込む。
+      ※ anonキーは公開して問題ない鍵。実データはRLSで保護される。
+      公開バケット側の古い data.json は削除して漏れを防ぐ。
 
 ※ data.json は「日別×店舗」の素の合計だけを持ち、週次(月〜日)/月次への集約や
    比率(購入率・客単価など)の計算は、画面側(dashboard.html)で行う。
@@ -20,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -31,7 +40,8 @@ if str(ROOT) not in sys.path:
 from etl.settings import JST, EtlError, load_dotenv  # noqa: E402
 from etl.supabase_client import Supabase  # noqa: E402
 
-BUCKET = "dashboard"
+BUCKET_PUBLIC = "dashboard"        # index.html（＋公開モードでは data.json も）
+BUCKET_PRIVATE = "dashboard-data"  # 認証モードの data.json（RLSで保護）
 PAGE = 1000
 
 
@@ -131,20 +141,22 @@ def build_data(sb: Supabase) -> dict:
 # ------------------------------------------------------------
 # Supabase Storage への配信
 # ------------------------------------------------------------
-def _ensure_bucket(sb: Supabase) -> None:
+def _ensure_bucket(sb: Supabase, bucket: str, public: bool) -> None:
     url = f"{sb.url}/storage/v1/bucket"
     resp = sb.session.post(url, data=json.dumps(
-        {"id": BUCKET, "name": BUCKET, "public": True}), timeout=60)
+        {"id": bucket, "name": bucket, "public": public}), timeout=60)
+    kind = "公開" if public else "非公開"
     if resp.status_code in (200, 201):
-        print(f"  公開バケット '{BUCKET}' を作成しました")
+        print(f"  {kind}バケット '{bucket}' を作成しました")
     elif resp.status_code in (400, 409):
-        print(f"  公開バケット '{BUCKET}' は既にあります")
+        print(f"  {kind}バケット '{bucket}' は既にあります")
     else:
         raise EtlError(f"バケット作成に失敗（HTTP {resp.status_code}）: {resp.text[:300]}")
 
 
-def _upload(sb: Supabase, path: str, body: bytes, content_type: str) -> str:
-    url = f"{sb.url}/storage/v1/object/{BUCKET}/{path}"
+def _upload(sb: Supabase, bucket: str, path: str, body: bytes,
+            content_type: str, public: bool) -> str:
+    url = f"{sb.url}/storage/v1/object/{bucket}/{path}"
     resp = sb.session.post(
         url, data=body,
         headers={
@@ -157,9 +169,30 @@ def _upload(sb: Supabase, path: str, body: bytes, content_type: str) -> str:
     )
     if resp.status_code not in (200, 201):
         raise EtlError(f"{path} のアップロードに失敗（HTTP {resp.status_code}）: {resp.text[:300]}")
-    public = f"{sb.url}/storage/v1/object/public/{BUCKET}/{path}"
-    print(f"  配信: {public}")
-    return public
+    if public:
+        loc = f"{sb.url}/storage/v1/object/public/{bucket}/{path}"
+    else:
+        loc = f"{bucket}/{path}（非公開・ログインした社内メンバーのみ）"
+    print(f"  配信: {loc}")
+    return loc
+
+
+def _delete(sb: Supabase, bucket: str, path: str) -> None:
+    """公開バケットに残った古いファイルを消す（認証モードで漏れを防ぐ）。"""
+    url = f"{sb.url}/storage/v1/object/{bucket}/{path}"
+    resp = sb.session.delete(url, timeout=60)
+    if resp.status_code in (200, 204):
+        print(f"  削除: 公開側の {bucket}/{path} を消しました（非公開へ移行）")
+    # 404（元々ない）等は無視でよい
+
+
+def _inject_config(html: str, supa_url: str, anon: str, public_data_url: str) -> bytes:
+    """HTMLのプレースホルダを実値に置き換える。"""
+    return (html
+            .replace("__SUPABASE_URL__", supa_url)
+            .replace("__SUPABASE_ANON_KEY__", anon)
+            .replace("__PUBLIC_DATA_URL__", public_data_url)
+            ).encode("utf-8")
 
 
 def main() -> int:
@@ -177,6 +210,10 @@ def main() -> int:
         print(f"❌ {e}", file=sys.stderr)
         return 1
 
+    anon = (os.environ.get("SUPABASE_ANON_KEY") or "").strip()
+    auth_mode = bool(anon)
+    print(f"配信モード: {'認証（Googleログイン制・社内のみ）' if auth_mode else '公開（URLを知っていれば閲覧可）'}")
+
     print("ダッシュボード用データを集計しています...")
     data = build_data(sb)
     print(f"  日別×店舗: {len(data['daily'])}件 / カテゴリ日別: {len(data['cat'])}件")
@@ -189,12 +226,32 @@ def main() -> int:
         print("----DATA_JSON_END----")
 
     if not args.no_deploy:
-        html_path = ROOT / "web" / "dashboard.html"
-        html = html_path.read_bytes()
-        _ensure_bucket(sb)
-        _upload(sb, "data.json", data_bytes, "application/json; charset=utf-8")
-        _upload(sb, "index.html", html, "text/html; charset=utf-8")
-        print("\n✅ 配信しました。ブラウザで下の index.html を開いてください。")
+        html_text = (ROOT / "web" / "dashboard.html").read_text(encoding="utf-8")
+
+        # index.html は常に公開バケット（URLを変えないため）
+        _ensure_bucket(sb, BUCKET_PUBLIC, public=True)
+
+        if auth_mode:
+            # data.json は非公開バケットへ。HTMLに公開情報を埋め込む。
+            _ensure_bucket(sb, BUCKET_PRIVATE, public=False)
+            _upload(sb, BUCKET_PRIVATE, "data.json", data_bytes,
+                    "application/json; charset=utf-8", public=False)
+            html = _inject_config(html_text, sb.url, anon, "")
+            _upload(sb, BUCKET_PUBLIC, "index.html", html,
+                    "text/html; charset=utf-8", public=True)
+            _delete(sb, BUCKET_PUBLIC, "data.json")  # 公開側の実データを消す
+            page = f"{sb.url}/storage/v1/object/public/{BUCKET_PUBLIC}/index.html"
+            print(f"\n✅ 配信しました（認証モード）。社内の方は下のURLを開き、"
+                  f"@avend.co.jp の Google でログインしてください。\n  {page}")
+        else:
+            # 従来どおり：公開バケットに両方置く
+            html = _inject_config(html_text, "", "", "")
+            _upload(sb, BUCKET_PUBLIC, "data.json", data_bytes,
+                    "application/json; charset=utf-8", public=True)
+            _upload(sb, BUCKET_PUBLIC, "index.html", html,
+                    "text/html; charset=utf-8", public=True)
+            page = f"{sb.url}/storage/v1/object/public/{BUCKET_PUBLIC}/index.html"
+            print(f"\n✅ 配信しました（公開モード）。ブラウザで下のURLを開いてください。\n  {page}")
 
     return 0
 

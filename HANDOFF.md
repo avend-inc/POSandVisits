@@ -16,8 +16,23 @@
 - 非公開スナップショット(Artifact)も別途発行（claude.ai、埋め込みデータ）。
 - 集計は data.json に「日別×店舗」の素の合計だけを持たせ、週/月集約と比率計算は
   画面側で行う（比率の平均という誤りを避けるため）。
-- 注意: ライブURLは公開バケット（推測困難だが公開）。完全非公開が必要なら
-  Supabase Auth ログインを足す拡張が要る（未実装）。
+
+## ✅ Googleログイン制（社内@avend.co.jpのみ）の実装（2026-07-26）
+- `web/dashboard.html` と `tools/export_dashboard.py` を**二段モード**化した。
+  切替は環境変数 **`SUPABASE_ANON_KEY`（GitHub Secret）の有無**だけで自動。
+  - 未登録＝**公開モード（従来どおり）**。何も壊れない。
+  - 登録＝**認証モード**。data.json を非公開バケット `dashboard-data` に置き、
+    `@avend.co.jp` の Google でログインした人だけがダウンロードできる（RLSで保護）。
+    index.html は公開バケットのまま（URLは変わらない）。公開側の data.json は削除。
+- HTMLは `__SUPABASE_URL__` / `__SUPABASE_ANON_KEY__` / `__PUBLIC_DATA_URL__` の
+  プレースホルダを持ち、配信時に `_inject_config()` が実値へ置換する。
+  boot() は ①window.__DATA__(スナップショット) ②認証モード ③公開モード を自動判定。
+- ログイン部品(@supabase/supabase-js)は認証モードのみCDNから遅延読込。
+  Artifactスナップショットは①で完結するのでCSPの影響を受けない。
+- セッションは localStorage 永続＋自動更新（一度ログインすれば当面再ログイン不要）。
+- **RLSポリシーSQL**: `sql/003_dashboard_auth.sql`（Supabase SQL Editorで貼ってRun）。
+- **Shoさんの外部設定が必要**（下の「次にやること ★Google認証」を参照）。
+  設定が済んで Secret を入れるまでは公開モードのままなので、いつ切り替えてもOK。
 
 ## ✅ 過去分の一括取り込み（backfill）完了（2026-07-26）
 - `python -m etl.backfill --from 2026-03-13 --to 2026-07-26`（Actionsのbackfill入力でも可）。

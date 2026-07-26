@@ -75,6 +75,16 @@
   .foot{color:var(--muted);font-size:11px;margin-top:18px;line-height:1.7;}
   .err{padding:20px;color:var(--bad);font-weight:600;}
   .themebtn{margin-left:auto;border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:9px;padding:7px 10px;font-size:12px;cursor:pointer;}
+  .gate{max-width:440px;margin:14vh auto;text-align:center;padding:0 22px;}
+  .gate .logo{font-size:22px;font-weight:750;letter-spacing:.02em;}
+  .gate .t{font-size:16px;font-weight:700;margin:18px 0 6px;}
+  .gate .m{color:var(--ink2);font-size:14px;line-height:1.8;}
+  .gbtn{display:inline-flex;align-items:center;gap:10px;background:var(--surface);color:var(--ink);
+    border:1px solid var(--border);border-radius:11px;padding:12px 20px;font-size:15px;font-weight:700;
+    cursor:pointer;box-shadow:var(--shadow);margin-top:20px;}
+  .gbtn:hover{border-color:var(--accent);}
+  .gbtn .g{width:18px;height:18px;display:inline-block;border-radius:50%;
+    background:conic-gradient(#ea4335 0 25%,#fbbc05 0 50%,#34a853 0 75%,#4285f4 0);}
 </style>
 </head>
 <body>
@@ -103,20 +113,98 @@ const KPI_ORDER=["in","ex","v","tx","qty","pr","aov","upt","aup"];
 const state={store:"all",grain:"week",metric:"in",from:null,to:null};
 let DATA=null;
 
+// ---- 配信設定（アップロード時に export_dashboard.py が置き換える）----
+//  ・公開モード : プレースホルダのまま → data.json を素直に読む（従来動作）
+//  ・認証モード : SUPA_URL / SUPA_ANON が入り PUBLIC_DATA_URL が空
+//                → Googleログイン（社内@avend.co.jpのみ）後に非公開データを読む
+const SUPA_URL="__SUPABASE_URL__";
+const SUPA_ANON="__SUPABASE_ANON_KEY__";
+const PUBLIC_DATA_URL="__PUBLIC_DATA_URL__";
+const ALLOW_DOMAIN="@avend.co.jp";
+let SB=null;                          // Supabase クライアント（認証モードのみ）
+const isPH=s=>!s||s.slice(0,2)==="__";   // 未置換のプレースホルダか？
+
+function prep(){
+  if(!DATA||!DATA.daily)throw new Error("データが空です");
+  const ds=DATA.daily.map(r=>r.d).sort();
+  DATA._min=ds[0]; DATA._max=ds[ds.length-1];
+  const sd=DATA.daily.filter(r=>(r.tx||0)>0||(r.in||0)>0).map(r=>r.d).sort();
+  const vd=DATA.daily.filter(r=>r.v!=null).map(r=>r.d).sort();
+  DATA._salesMax=sd.length?sd[sd.length-1]:DATA._max;
+  DATA._visitMax=vd.length?vd[vd.length-1]:DATA._max;
+  state.from=DATA._min; state.to=DATA._max;
+}
+
+function screen(html){document.getElementById("app").innerHTML=html;}
+function showError(e){screen('<div class="err">データを読み込めませんでした：'+esc(String(e&&e.message||e))+'</div>');}
+
 async function boot(){
   try{
-    DATA=window.__DATA__||await (await fetch("data.json",{cache:"no-store"})).json();
-    if(!DATA||!DATA.daily)throw new Error("データが空です");
-    const ds=DATA.daily.map(r=>r.d).sort();
-    DATA._min=ds[0]; DATA._max=ds[ds.length-1];
-    const sd=DATA.daily.filter(r=>(r.tx||0)>0||(r.in||0)>0).map(r=>r.d).sort();
-    const vd=DATA.daily.filter(r=>r.v!=null).map(r=>r.d).sort();
-    DATA._salesMax=sd.length?sd[sd.length-1]:DATA._max;
-    DATA._visitMax=vd.length?vd[vd.length-1]:DATA._max;
-    state.from=DATA._min; state.to=DATA._max;
-    render();
-  }catch(e){document.getElementById("app").innerHTML='<div class="err">データを読み込めませんでした：'+String(e)+'</div>';}
+    // ① 非公開スナップショット（Artifact等）：埋め込み済みデータをそのまま表示
+    if(window.__DATA__){DATA=window.__DATA__;prep();render();return;}
+    // ② 認証モード：Googleログインの後に非公開データを読む
+    if(!isPH(SUPA_URL)&&!isPH(SUPA_ANON)&&isPH(PUBLIC_DATA_URL)){await authBoot();return;}
+    // ③ 公開モード（従来）：data.json を読む
+    const url=isPH(PUBLIC_DATA_URL)?"data.json":PUBLIC_DATA_URL;
+    DATA=await (await fetch(url,{cache:"no-store"})).json();
+    prep();render();
+  }catch(e){showError(e);}
 }
+
+// ---- 認証モード ----
+async function ensureSupabase(){
+  if(window.supabase)return;
+  await new Promise((res,rej)=>{
+    const s=document.createElement("script");
+    s.src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2";
+    s.onload=res;s.onerror=()=>rej(new Error("ログイン部品を読み込めませんでした（通信環境をご確認ください）"));
+    document.head.appendChild(s);
+  });
+}
+async function authBoot(){
+  screen('<div class="sub" style="padding:40px 0">読み込み中…</div>');
+  await ensureSupabase();
+  SB=window.supabase.createClient(SUPA_URL,SUPA_ANON,{
+    auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,
+      flowType:"pkce",storageKey:"notime-auth"},
+  });
+  const {data:{session}}=await SB.auth.getSession();
+  if(!session){showLogin();return;}
+  const email=(session.user&&session.user.email||"").toLowerCase();
+  if(!email.endsWith(ALLOW_DOMAIN)){showDenied(email);return;}
+  screen('<div class="sub" style="padding:40px 0">データを読み込み中…</div>');
+  const {data,error}=await SB.storage.from("dashboard-data").download("data.json");
+  if(error)throw new Error("データを取得できませんでした（"+error.message+"）");
+  DATA=JSON.parse(await data.text());
+  prep();render();
+}
+function showLogin(){
+  screen(`<div class="gate">
+    <div class="logo">NOTIME 売上ダッシュボード</div>
+    <div class="t">社内メンバー専用</div>
+    <div class="m">${ALLOW_DOMAIN} の Google アカウントでログインしてください。<br>
+      一度ログインすれば、その端末では約1か月は再ログイン不要です。</div>
+    <button class="gbtn" id="glogin"><span class="g"></span>Google でログイン</button>
+  </div>`);
+  document.getElementById("glogin").onclick=doLogin;
+}
+function showDenied(email){
+  screen(`<div class="gate">
+    <div class="logo">NOTIME 売上ダッシュボード</div>
+    <div class="t">アクセス権がありません</div>
+    <div class="m"><b>${esc(email)}</b> ではアクセスできません。<br>
+      ${ALLOW_DOMAIN} のアカウントでログインし直してください。</div>
+    <button class="gbtn" id="grelogin"><span class="g"></span>別のアカウントでログイン</button>
+  </div>`);
+  document.getElementById("grelogin").onclick=doLogout;
+}
+async function doLogin(){
+  const redirectTo=location.origin+location.pathname;   // ?code等を残さないURLへ戻す
+  const {error}=await SB.auth.signInWithOAuth({provider:"google",
+    options:{redirectTo,queryParams:{hd:"avend.co.jp",prompt:"select_account"}}});
+  if(error)showError(error);
+}
+async function doLogout(){try{await SB.auth.signOut();}catch(e){}location.reload();}
 
 function mondayOf(d){const t=new Date(d+"T00:00:00Z");t.setUTCDate(t.getUTCDate()-((t.getUTCDay()+6)%7));return t.toISOString().slice(0,10);}
 function pKey(d,g){return g==="day"?d:g==="month"?d.slice(0,7):mondayOf(d);}
@@ -184,6 +272,7 @@ function render(){
     <header>
       <h1>NOTIME 売上ダッシュボード</h1>
       <button class="themebtn" id="themebtn">◐ 表示切替</button>
+      ${SB?'<button class="themebtn" id="logoutbtn" style="margin-left:8px">ログアウト</button>':''}
     </header>
     <div class="sub" style="margin:2px 0 2px">
       最新データ — 売上: <b style="color:var(--ink)">${DATA._salesMax}</b> ／ 来店: <b style="color:var(--ink)">${DATA._visitMax}</b>
@@ -247,6 +336,7 @@ function render(){
   document.querySelectorAll(".chip[data-preset]").forEach(b=>b.onclick=()=>{
     const[f,t]=presetRange(b.dataset.preset);state.from=f;state.to=t;render();});
   document.getElementById("themebtn").onclick=toggleTheme;
+  if(SB){const lb=document.getElementById("logoutbtn");if(lb)lb.onclick=doLogout;}
   draw();
 }
 

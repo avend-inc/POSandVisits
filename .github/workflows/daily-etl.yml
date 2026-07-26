@@ -75,6 +75,9 @@ jobs:
       DIGITAIL_PW: ${{ secrets.DIGITAIL_PW }}
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      # 任意：これを登録するとダッシュボードが「Googleログイン制(社内のみ)」になる。
+      #       未登録なら従来どおり公開URL（知っていれば誰でも閲覧可）。
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
 
     steps:
       - name: リポジトリを取得
