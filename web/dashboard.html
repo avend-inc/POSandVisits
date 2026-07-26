@@ -160,17 +160,19 @@ function periodSpan(key,g){
 }
 function monthSpan(ym){const[y,m]=ym.split("-").map(Number);const last=new Date(Date.UTC(y,m,0)).getUTCDate();return[`${ym}-01`,`${ym}-${String(last).padStart(2,"0")}`];}
 function clampRange(f,t){if(f<DATA._min)f=DATA._min;if(t>DATA._max)t=DATA._max;if(f>t)f=t;return[f,t];}
-// 各ボタンの期間は「最新データ日(_max)」を基準に決める（常にデータのある範囲に収める）
+// 実際の今日（端末＝日本時間）を基準にボタンの期間を決める。
+// 前日＝昨日、今週＝今日を含む週(月〜日) …。常にデータのある範囲へ収める。
+function todayStr(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;}
 function presetRange(kind){
-  const mx=DATA._max;
+  const today=todayStr(), y1=addDays(today,-1);
   if(kind==="all")return[DATA._min,DATA._max];
-  if(kind==="d30")return clampRange(addDays(mx,-29),mx);
-  if(kind==="d90")return clampRange(addDays(mx,-89),mx);
-  if(kind==="prevday")return[mx,mx];
-  if(kind==="thisweek"){const mon=mondayOf(mx);return clampRange(mon,addDays(mon,6));}
-  if(kind==="lastweek"){const mon=addDays(mondayOf(mx),-7);return clampRange(mon,addDays(mon,6));}
-  if(kind==="thismonth")return clampRange(...monthSpan(mx.slice(0,7)));
-  if(kind==="lastmonth"){const[y,m]=mx.split("-").map(Number);let py=y,pm=m-1;if(pm===0){pm=12;py--;}
+  if(kind==="d30")return clampRange(addDays(today,-29),today);
+  if(kind==="d90")return clampRange(addDays(today,-89),today);
+  if(kind==="prevday")return clampRange(y1,y1);
+  if(kind==="thisweek"){const mon=mondayOf(today);return clampRange(mon,addDays(mon,6));}
+  if(kind==="lastweek"){const mon=addDays(mondayOf(today),-7);return clampRange(mon,addDays(mon,6));}
+  if(kind==="thismonth")return clampRange(...monthSpan(today.slice(0,7)));
+  if(kind==="lastmonth"){const[y,m]=today.split("-").map(Number);let py=y,pm=m-1;if(pm===0){pm=12;py--;}
     return clampRange(...monthSpan(`${py}-${String(pm).padStart(2,"0")}`));}
   return[DATA._min,DATA._max];
 }
