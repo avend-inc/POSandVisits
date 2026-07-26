@@ -76,6 +76,8 @@
   .foot{color:var(--muted);font-size:11px;margin-top:18px;line-height:1.7;}
   .err{padding:20px;color:var(--bad);font-weight:600;}
   .themebtn{margin-left:auto;border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:9px;padding:7px 10px;font-size:12px;cursor:pointer;}
+  .navlink{border:1px solid var(--border);background:var(--surface);color:var(--accent);border-radius:9px;padding:7px 11px;font-size:12px;font-weight:700;cursor:pointer;text-decoration:none;}
+  .navlink:hover{border-color:var(--accent);}
   .gate{max-width:440px;margin:14vh auto;text-align:center;padding:0 22px;}
   .gate .logo{font-size:22px;font-weight:750;letter-spacing:.02em;}
   .gate .t{font-size:16px;font-weight:700;margin:18px 0 6px;}
@@ -272,7 +274,8 @@ function render(){
   document.getElementById("app").innerHTML=`
     <header>
       <h1>NOTIME 売上ダッシュボード</h1>
-      <button class="themebtn" id="themebtn">◐ 表示切替</button>
+      <a class="navlink" href="trends.html" style="margin-left:auto">📈 KPI推移</a>
+      <button class="themebtn" id="themebtn" style="margin-left:8px">◐ 表示切替</button>
       ${SB?'<button class="themebtn" id="logoutbtn" style="margin-left:8px">ログアウト</button>':''}
     </header>
     <div class="sub" style="margin:2px 0 2px">

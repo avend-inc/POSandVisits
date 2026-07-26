@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>NOTIME KPI推移</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --surface:#ffffff; --surface2:#f0f2f5; --border:#e2e6ea;
+    --ink:#1a1d21; --ink2:#5b636c; --muted:#8a929b;
+    --accent:#2f6fd0; --accent-weak:#dbe6f7; --good:#1a8a5a; --bad:#c0392b;
+    --shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.04); --radius:14px;
+  }
+  @media (prefers-color-scheme: dark){:root{
+    --bg:#0e1116; --surface:#161b22; --surface2:#1c232c; --border:#2a323c;
+    --ink:#e7ebef; --ink2:#a3adb8; --muted:#727d89;
+    --accent:#5b9bff; --accent-weak:#1e2f4a; --good:#3fce8c; --bad:#ff6b5e; --shadow:0 1px 2px rgba(0,0,0,.4);
+  }}
+  :root[data-theme="dark"]{
+    --bg:#0e1116; --surface:#161b22; --surface2:#1c232c; --border:#2a323c;
+    --ink:#e7ebef; --ink2:#a3adb8; --muted:#727d89;
+    --accent:#5b9bff; --accent-weak:#1e2f4a; --good:#3fce8c; --bad:#ff6b5e; --shadow:0 1px 2px rgba(0,0,0,.4);
+  }
+  :root[data-theme="light"]{
+    --bg:#f6f7f9; --surface:#ffffff; --surface2:#f0f2f5; --border:#e2e6ea;
+    --ink:#1a1d21; --ink2:#5b636c; --muted:#8a929b;
+    --accent:#2f6fd0; --accent-weak:#dbe6f7; --good:#1a8a5a; --bad:#c0392b;
+    --shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.04);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,sans-serif;
+    -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;}
+  .wrap{max-width:1140px;margin:0 auto;padding:18px 16px 60px;}
+  header{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;margin-bottom:2px;}
+  h1{font-size:20px;margin:0;font-weight:700;letter-spacing:.02em;}
+  .sub{color:var(--muted);font-size:12px;}
+  .rangebar{font-size:13px;color:var(--ink2);margin:8px 0 2px;font-weight:600;}
+  .rangebar b{color:var(--ink);} .rangebar .store{color:var(--accent);}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:12px 0 4px;}
+  .seg{display:inline-flex;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:3px;gap:2px;}
+  .seg button{border:0;background:transparent;color:var(--ink2);font-size:13px;padding:7px 13px;border-radius:8px;cursor:pointer;font-weight:600;}
+  .seg button.on{background:var(--surface);color:var(--ink);box-shadow:var(--shadow);}
+  select,input[type="date"]{appearance:none;background:var(--surface);color:var(--ink);
+    border:1px solid var(--border);border-radius:10px;padding:8px 12px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;}
+  select{padding-right:30px;
+    background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);
+    background-position:calc(100% - 16px) 55%,calc(100% - 11px) 55%;background-size:5px 5px,5px 5px;background-repeat:no-repeat;}
+  input[type="date"]{padding:7px 10px;}
+  label.lbl{font-size:12px;color:var(--muted);}
+  .chip{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:8px;padding:7px 11px;font-size:12px;font-weight:600;cursor:pointer;}
+  .chip:hover{color:var(--ink);border-color:var(--accent);}
+  .navlink{border:1px solid var(--border);background:var(--surface);color:var(--accent);border-radius:9px;padding:7px 11px;font-size:12px;font-weight:700;cursor:pointer;text-decoration:none;}
+  .navlink:hover{border-color:var(--accent);}
+  .themebtn{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:9px;padding:7px 10px;font-size:12px;cursor:pointer;}
+  .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px;margin:12px 0 4px;}
+  @media (max-width:520px){.cards{grid-template-columns:1fr;}}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:13px 14px 8px;box-shadow:var(--shadow);}
+  .card .top{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:2px;}
+  .card .k{font-size:13px;color:var(--ink2);font-weight:700;}
+  .card .val{font-size:19px;font-weight:750;letter-spacing:-.01em;margin-left:auto;}
+  .delta{font-size:11.5px;font-weight:700;display:inline-flex;gap:3px;align-items:center;}
+  .delta.up{color:var(--good);} .delta.down{color:var(--bad);} .delta.flat{color:var(--muted);}
+  .chart{position:relative;width:100%;margin-top:4px;}
+  svg{display:block;width:100%;height:auto;overflow:visible;}
+  .tip{position:absolute;pointer-events:none;background:var(--ink);color:var(--surface);font-size:11.5px;line-height:1.4;
+    padding:6px 8px;border-radius:8px;white-space:nowrap;transform:translate(-50%,-115%);opacity:0;transition:opacity .08s;z-index:5;box-shadow:var(--shadow);}
+  .foot{color:var(--muted);font-size:11px;margin-top:18px;line-height:1.7;}
+  .err{padding:20px;color:var(--bad);font-weight:600;}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"><div class="sub" style="padding:40px 0">読み込み中…</div></div>
+
+<script>
+"use strict";
+const YEN=n=>Math.round(n).toLocaleString("ja-JP");
+const NUM=n=>Math.round(n).toLocaleString("ja-JP");
+const F1 =n=>(Math.round(n*10)/10).toLocaleString("ja-JP",{minimumFractionDigits:1,maximumFractionDigits:1});
+const F2 =n=>(Math.round(n*100)/100).toLocaleString("ja-JP",{minimumFractionDigits:2,maximumFractionDigits:2});
+
+const METRICS=[
+  {key:"in", name:"税込売上",     fmt:v=>YEN(v)+"円", calc:p=>p.in},
+  {key:"ex", name:"税抜売上",     fmt:v=>YEN(v)+"円", calc:p=>p.ex},
+  {key:"v",  name:"来店客数",     fmt:v=>NUM(v)+"人", calc:p=>p.v},
+  {key:"tx", name:"取引数",       fmt:v=>NUM(v)+"件", calc:p=>p.tx},
+  {key:"qty",name:"販売数",       fmt:v=>NUM(v)+"点", calc:p=>p.it},
+  {key:"pr", name:"購入率",       fmt:v=>F1(v)+"%",   calc:p=>p.v>0?p.tx/p.v*100:null},
+  {key:"aov",name:"客単価",       fmt:v=>YEN(v)+"円", calc:p=>p.tx>0?p.in/p.tx:null},
+  {key:"upt",name:"平均購入数",   fmt:v=>F2(v)+"点",  calc:p=>p.tx>0?p.it/p.tx:null},
+  {key:"aup",name:"平均商品単価", fmt:v=>YEN(v)+"円", calc:p=>p.it>0?p.ex/p.it:null},
+];
+const state={store:"all",grain:"week",from:null,to:null};
+let DATA=null;
+
+// ---- 配信設定（アップロード時に export_dashboard.py / Pages生成が置き換える）----
+const SUPA_URL="";
+const SUPA_ANON="";
+const PUBLIC_DATA_URL="https://rwfcsanmqvkxiuwdeddv.supabase.co/storage/v1/object/public/dashboard/data.json";
+const ALLOW_DOMAIN="@avend.co.jp";
+let SB=null;
+const isPH=s=>!s||s.slice(0,2)==="__";
+
+function prep(){
+  if(!DATA||!DATA.daily)throw new Error("データが空です");
+  const ds=DATA.daily.map(r=>r.d).sort();
+  DATA._min=ds[0]; DATA._max=ds[ds.length-1];
+  const sd=DATA.daily.filter(r=>(r.tx||0)>0||(r.in||0)>0).map(r=>r.d).sort();
+  const vd=DATA.daily.filter(r=>r.v!=null).map(r=>r.d).sort();
+  DATA._salesMax=sd.length?sd[sd.length-1]:DATA._max;
+  DATA._visitMax=vd.length?vd[vd.length-1]:DATA._max;
+  state.from=DATA._min; state.to=DATA._max;
+}
+function screen(html){document.getElementById("app").innerHTML=html;}
+function showError(e){screen('<div class="err">データを読み込めませんでした：'+esc(String(e&&e.message||e))+'</div>');}
+
+async function boot(){
+  try{
+    if(window.__DATA__){DATA=window.__DATA__;prep();render();return;}
+    if(!isPH(SUPA_URL)&&!isPH(SUPA_ANON)&&isPH(PUBLIC_DATA_URL)){await authBoot();return;}
+    const url=isPH(PUBLIC_DATA_URL)?"data.json":PUBLIC_DATA_URL;
+    DATA=await (await fetch(url,{cache:"no-store"})).json();
+    prep();render();
+  }catch(e){showError(e);}
+}
+async function ensureSupabase(){
+  if(window.supabase)return;
+  await new Promise((res,rej)=>{const s=document.createElement("script");
+    s.src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2";
+    s.onload=res;s.onerror=()=>rej(new Error("ログイン部品を読み込めませんでした"));document.head.appendChild(s);});
+}
+async function authBoot(){
+  screen('<div class="sub" style="padding:40px 0">読み込み中…</div>');
+  await ensureSupabase();
+  SB=window.supabase.createClient(SUPA_URL,SUPA_ANON,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,flowType:"pkce",storageKey:"notime-auth"}});
+  const {data:{session}}=await SB.auth.getSession();
+  if(!session){screen('<div class="err">ログインが必要です。<a href="index.html">サマリー</a> からログインしてください。</div>');return;}
+  const email=(session.user&&session.user.email||"").toLowerCase();
+  if(!email.endsWith(ALLOW_DOMAIN)){screen('<div class="err">アクセス権がありません。</div>');return;}
+  const {data,error}=await SB.storage.from("dashboard-data").download("data.json");
+  if(error)throw new Error("データを取得できませんでした（"+error.message+"）");
+  DATA=JSON.parse(await data.text());prep();render();
+}
+
+function mondayOf(d){const t=new Date(d+"T00:00:00Z");t.setUTCDate(t.getUTCDate()-((t.getUTCDay()+6)%7));return t.toISOString().slice(0,10);}
+function pKey(d,g){return g==="day"?d:g==="month"?d.slice(0,7):mondayOf(d);}
+function pLabel(k,g){
+  if(g==="month"){const[y,m]=k.split("-");return `${y}年${+m}月`;}
+  if(g==="day"){const[,m,dd]=k.split("-");return `${+m}/${+dd}`;}
+  const mon=new Date(k+"T00:00:00Z"),sun=new Date(mon);sun.setUTCDate(sun.getUTCDate()+6);
+  const f=x=>`${x.getUTCMonth()+1}/${x.getUTCDate()}`;return `${f(mon)}〜${f(sun)}`;
+}
+function addDays(d,n){const t=new Date(d+"T00:00:00Z");t.setUTCDate(t.getUTCDate()+n);return t.toISOString().slice(0,10);}
+function daysBetween(a,b){return Math.round((Date.parse(b)-Date.parse(a))/86400000)+1;}
+function clampLo(d){return d<DATA._min?DATA._min:d;} function clampHi(d){return d>DATA._max?DATA._max:d;}
+function sumRows(rows){const p={in:0,ex:0,tx:0,it:0,v:0,hasV:false};
+  for(const r of rows){p.in+=r.in||0;p.ex+=r.ex||0;p.tx+=r.tx||0;p.it+=r.it||0;if(r.v!=null){p.v+=r.v;p.hasV=true;}}
+  if(!p.hasV)p.v=0;return p;}
+function rowsIn(from,to,storeId){return DATA.daily.filter(r=>(storeId==="all"||r.s===storeId)&&r.d>=from&&r.d<=to);}
+function periods(from,to,g,storeId){
+  const map=new Map();
+  for(const r of rowsIn(from,to,storeId)){const k=pKey(r.d,g);if(!map.has(k))map.set(k,[]);map.get(k).push(r);}
+  return [...map.entries()].sort((a,b)=>a[0]<b[0]?-1:1).map(([k,rows])=>{const p=sumRows(rows);p.key=k;p.label=pLabel(k,g);return p;});
+}
+function usableStores(){const w=new Set(DATA.daily.map(r=>r.s));return DATA.stores.filter(s=>w.has(s.id));}
+function monthSpan(ym){const[y,m]=ym.split("-").map(Number);const last=new Date(Date.UTC(y,m,0)).getUTCDate();return[`${ym}-01`,`${ym}-${String(last).padStart(2,"0")}`];}
+function clampRange(f,t){if(f<DATA._min)f=DATA._min;if(t>DATA._max)t=DATA._max;if(f>t)f=t;return[f,t];}
+function todayStr(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;}
+function presetRange(kind){
+  const today=todayStr();
+  if(kind==="all")return[DATA._min,DATA._max];
+  if(kind==="d30")return clampRange(addDays(today,-29),today);
+  if(kind==="d90")return clampRange(addDays(today,-89),today);
+  if(kind==="d180")return clampRange(addDays(today,-179),today);
+  if(kind==="thismonth")return clampRange(...monthSpan(today.slice(0,7)));
+  if(kind==="lastmonth"){const[y,m]=today.split("-").map(Number);let py=y,pm=m-1;if(pm===0){pm=12;py--;}
+    return clampRange(...monthSpan(`${py}-${String(pm).padStart(2,"0")}`));}
+  return[DATA._min,DATA._max];
+}
+
+function render(){
+  const us=usableStores();
+  const stores=[{id:"all",name:"総合（全店）"},...us.map(s=>({id:s.id,name:s.name}))];
+  document.getElementById("app").innerHTML=`
+    <header>
+      <h1>NOTIME KPI推移</h1>
+      <a class="navlink" href="index.html" style="margin-left:auto">← サマリー</a>
+      <button class="themebtn" id="themebtn">◐ 表示切替</button>
+    </header>
+    <div class="sub" style="margin:2px 0 2px">
+      最新データ — 売上: <b style="color:var(--ink)">${DATA._salesMax}</b> ／ 来店: <b style="color:var(--ink)">${DATA._visitMax}</b>
+      　｜　集計更新: ${(DATA.generated_at||"").replace("T"," ").slice(0,16)}（日本時間）
+    </div>
+    <div class="rangebar" id="rangebar"></div>
+    <div class="controls">
+      <label class="lbl">店舗</label>
+      <select id="store">${stores.map(s=>`<option value="${s.id}" ${String(s.id)===String(state.store)?"selected":""}>${s.name}</option>`).join("")}</select>
+      <div class="seg" id="grain">${[["day","日別"],["week","週別"],["month","月別"]].map(([g,t])=>`<button data-g="${g}" class="${state.grain===g?"on":""}">${t}</button>`).join("")}</div>
+      <label class="lbl" style="margin-left:6px">対象期間</label>
+      <input type="date" id="from" min="${DATA._min}" max="${DATA._max}" value="${state.from}">
+      <span class="sub">〜</span>
+      <input type="date" id="to" min="${DATA._min}" max="${DATA._max}" value="${state.to}">
+      <button class="chip" data-preset="thismonth">今月</button>
+      <button class="chip" data-preset="lastmonth">前月</button>
+      <button class="chip" data-preset="d30">直近30日</button>
+      <button class="chip" data-preset="d90">直近90日</button>
+      <button class="chip" data-preset="d180">直近180日</button>
+      <button class="chip" data-preset="all">全期間</button>
+    </div>
+    <div class="cards" id="cards"></div>
+    <div class="foot">
+      各グラフは「${state.grain==="day"?"日別":state.grain==="week"?"週別":"月別"}」の推移です。右上の数字は対象期間ぜんぶの合計／平均、前期比は同じ長さの直前期間との比較。
+      指標：購入率＝取引数÷来店客数／客単価＝税込売上÷取引数／平均購入数＝総点数÷取引数／平均商品単価＝税抜売上÷総点数。
+      週別は月曜〜日曜。レジ袋・クーポンは売上・点数・カテゴリから除外。来店客数はデジテール、売上はcashier。いわきは2店舗ぶんを合算。
+    </div>`;
+
+  document.getElementById("store").onchange=e=>{state.store=e.target.value==="all"?"all":+e.target.value;draw();};
+  document.querySelectorAll("#grain button").forEach(b=>b.onclick=()=>{state.grain=b.dataset.g;render();});
+  document.getElementById("from").onchange=e=>{state.from=clampLo(e.target.value||DATA._min);if(state.from>state.to)state.to=state.from;draw();};
+  document.getElementById("to").onchange=e=>{state.to=clampHi(e.target.value||DATA._max);if(state.to<state.from)state.from=state.to;draw();};
+  document.querySelectorAll(".chip[data-preset]").forEach(b=>b.onclick=()=>{const[f,t]=presetRange(b.dataset.preset);state.from=f;state.to=t;render();});
+  document.getElementById("themebtn").onclick=toggleTheme;
+  draw();
+}
+
+function draw(){
+  const us=usableStores();
+  const storeName=state.store==="all"?"総合（全店）":(us.find(s=>s.id===state.store)?.name||"");
+  const ndays=daysBetween(state.from,state.to);
+  document.getElementById("rangebar").innerHTML=
+    `対象期間：<b>${state.from}</b> 〜 <b>${state.to}</b>（${ndays}日間）　店舗：<span class="store">${esc(storeName)}</span>`;
+
+  const ps=periods(state.from,state.to,state.grain,state.store);
+  const total=sumRows(rowsIn(state.from,state.to,state.store));
+  const pTo=addDays(state.from,-1), pFrom=addDays(pTo,-(ndays-1));
+  const hasPrev=pTo>=DATA._min;
+  const ptotal=hasPrev?sumRows(rowsIn(pFrom<DATA._min?DATA._min:pFrom,pTo,state.store)):null;
+
+  const box=document.getElementById("cards");
+  box.innerHTML=METRICS.map(m=>{
+    const v=m.calc(total),pv=ptotal?m.calc(ptotal):null;let d="";
+    if(v!=null&&pv!=null&&pv!==0){const pct=(v-pv)/Math.abs(pv)*100;
+      const cls=pct>0.05?"up":pct<-0.05?"down":"flat",ar=pct>0.05?"▲":pct<-0.05?"▼":"—";
+      d=`<span class="delta ${cls}">${ar} ${F1(Math.abs(pct))}%</span>`;}
+    return `<div class="card">
+      <div class="top"><span class="k">${m.name}</span>${d}<span class="val">${v==null?"—":m.fmt(v)}</span></div>
+      <div class="chart" data-k="${m.key}"></div></div>`;
+  }).join("");
+
+  METRICS.forEach(m=>drawMini(box.querySelector(`.chart[data-k="${m.key}"]`),ps,m));
+}
+
+function shortNum(v){if(Math.abs(v)>=1e8)return(v/1e8).toFixed(1)+"億";if(Math.abs(v)>=1e4)return(v/1e4).toFixed(v>=1e5?0:1)+"万";
+  if(Number.isInteger(v))return v.toLocaleString("ja-JP");return (Math.round(v*10)/10).toLocaleString("ja-JP");}
+
+function drawMini(boxEl,ps,m){
+  boxEl.innerHTML="";
+  const vals=ps.map(p=>({label:p.label,v:m.calc(p)}));
+  const nums=vals.map(d=>d.v).filter(v=>v!=null);
+  if(!nums.length){boxEl.innerHTML='<div class="sub" style="padding:14px 0">データなし</div>';return;}
+  const W=Math.max(boxEl.clientWidth||300,240),H=132,PADL=46,PADR=10,PADT=10,PADB=20;
+  const n=vals.length;
+  const xs=i=>PADL+(W-PADL-PADR)*(n<=1?0.5:i/(n-1));
+  let maxV=Math.max(...nums),minV=Math.min(...nums);
+  const span=(maxV-minV)||Math.abs(maxV)||1;
+  let lo=minV-span*0.15, hi=maxV+span*0.15;
+  if(lo<0&&minV>=0)lo=0;                 // 非負データで軸を負に見せない
+  if(hi===lo)hi=lo+1;
+  const ys=v=>PADT+(H-PADT-PADB)*(1-(v-lo)/(hi-lo));
+  const gy=[lo,(lo+hi)/2,hi].map(val=>({y:ys(val),val}));
+  const pts=vals.map((d,i)=>d.v==null?null:[xs(i),ys(d.v)]);
+  // 面（薄い塗り）用のパス
+  const first=pts.findIndex(p=>p),last=(()=>{for(let i=pts.length-1;i>=0;i--)if(pts[i])return i;return -1;})();
+  const linePath=pts.map((p,i)=>p?`${i&&pts[i-1]?"L":"M"}${p[0].toFixed(1)} ${p[1].toFixed(1)}`:"").join(" ");
+  let area="";
+  if(first>=0){const base=ys(lo);
+    area=`M${pts[first][0].toFixed(1)} ${base.toFixed(1)} `+
+      pts.map(p=>p?`L${p[0].toFixed(1)} ${p[1].toFixed(1)}`:"").join(" ")+
+      ` L${pts[last][0].toFixed(1)} ${base.toFixed(1)} Z`;}
+  const endP=last>=0?pts[last]:null;
+  const step=Math.max(1,Math.ceil(n/6));
+  boxEl.innerHTML=`<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${m.name}の推移">
+    ${gy.map(g=>`<line x1="${PADL}" y1="${g.y.toFixed(1)}" x2="${W-PADR}" y2="${g.y.toFixed(1)}" stroke="var(--border)" stroke-width="1"/><text x="${PADL-7}" y="${(g.y+3).toFixed(1)}" text-anchor="end" font-size="9.5" fill="var(--muted)">${shortNum(g.val)}</text>`).join("")}
+    <path d="${area}" fill="var(--accent)" opacity="0.10"/>
+    <path d="${linePath}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    ${endP?`<circle cx="${endP[0].toFixed(1)}" cy="${endP[1].toFixed(1)}" r="3.4" fill="var(--accent)"/>`:""}
+    ${vals.map((d,i)=>(i%step===0||i===n-1)?`<text x="${xs(i).toFixed(1)}" y="${H-PADB+15}" text-anchor="middle" font-size="9" fill="var(--muted)">${d.label}</text>`:"").join("")}
+    <rect id="hit" x="${PADL}" y="${PADT}" width="${(W-PADL-PADR).toFixed(1)}" height="${(H-PADT-PADB).toFixed(1)}" fill="transparent"/>
+    <line id="cross" x1="0" y1="${PADT}" x2="0" y2="${H-PADB}" stroke="var(--accent)" stroke-width="1" opacity="0"/>
+    <circle id="dot" r="3.4" fill="var(--surface)" stroke="var(--accent)" stroke-width="2" opacity="0"/>
+  </svg><div class="tip"></div>`;
+  const tip=boxEl.querySelector(".tip"),cross=boxEl.querySelector("#cross"),dot=boxEl.querySelector("#dot"),hit=boxEl.querySelector("#hit"),svgEl=boxEl.querySelector("svg");
+  function move(ev){const r=svgEl.getBoundingClientRect();const px=((ev.touches?ev.touches[0].clientX:ev.clientX)-r.left)/r.width*W;
+    let i=Math.round((px-PADL)/((W-PADL-PADR)/Math.max(1,n-1)));i=Math.max(0,Math.min(n-1,i));
+    const d=vals[i];if(!d||d.v==null){tip.style.opacity=0;cross.setAttribute("opacity","0");dot.setAttribute("opacity","0");return;}
+    const cx=xs(i),cy=ys(d.v);cross.setAttribute("x1",cx);cross.setAttribute("x2",cx);cross.setAttribute("opacity",".45");
+    dot.setAttribute("cx",cx);dot.setAttribute("cy",cy);dot.setAttribute("opacity","1");
+    tip.style.opacity=1;tip.style.left=(cx/W*r.width)+"px";tip.style.top=(cy/H*r.height)+"px";
+    tip.innerHTML=`<b>${d.label}</b><br>${m.name}: ${m.fmt(d.v)}`;}
+  hit.addEventListener("mousemove",move);hit.addEventListener("touchmove",move,{passive:true});
+  hit.addEventListener("mouseleave",()=>{tip.style.opacity=0;cross.setAttribute("opacity","0");dot.setAttribute("opacity","0");});
+}
+
+function esc(s){return String(s).replace(/[&<>]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[m]));}
+function toggleTheme(){const root=document.documentElement;
+  const cur=root.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");
+  root.setAttribute("data-theme",cur==="dark"?"light":"dark");draw();}
+window.addEventListener("resize",()=>{if(DATA)draw();});
+boot();
+</script>
+</body>
+</html>
