@@ -93,9 +93,10 @@ def build_data(sb: Supabase) -> dict:
 
     def _new() -> dict:
         # in/ex=伝票の税込/税抜合計、tx=伝票数、it=販売点数(レジ袋等を除く)、
-        # bag_in/bag_ex=レジ袋等の税込/税抜ぶん（あとで売上から差し引く）
+        # bag_in/bag_ex=レジ袋等の税込/税抜ぶん（KPIからは除外し、別枠で表示する）、
+        # bag_q=レジ袋・クーポンの点数
         return {"in": 0.0, "ex": 0.0, "tx": 0, "it": 0.0, "v": None,
-                "bag_in": 0.0, "bag_ex": 0.0}
+                "bag_in": 0.0, "bag_ex": 0.0, "bag_q": 0.0}
 
     def _num(v):
         try:
@@ -132,6 +133,7 @@ def build_data(sb: Supabase) -> dict:
             rec["bag_ex"] += amt
             ratio = (in_tax / ex_tax) if ex_tax else 1.0   # 伝票の税率で税込換算
             rec["bag_in"] += amt * ratio
+            rec["bag_q"] += qty
             continue
 
         rec["it"] += qty                       # 販売点数（レジ袋・クーポンを除く）
@@ -157,7 +159,8 @@ def build_data(sb: Supabase) -> dict:
          "in": round(max(v["in"] - v["bag_in"], 0)),
          "ex": round(max(v["ex"] - v["bag_ex"], 0)),
          "tx": v["tx"], "it": round(v["it"]),
-         "v": v["v"]}
+         "v": v["v"],
+         "bag": round(v["bag_in"]), "bagq": round(v["bag_q"])}
         for (d, sid), v in sorted(daily.items())
     ]
     cat_rows = [
