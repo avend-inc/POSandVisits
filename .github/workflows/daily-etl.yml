@@ -3,7 +3,16 @@
 #
 #  ・自動実行 : 毎日 朝6時（日本時間）
 #               GitHub は世界標準時(UTC)で動くので "21:00 UTC" = 翌朝6時(JST)
+#               ※ 自動実行はデフォルトブランチのこのファイルとコードで動きます。
 #  ・手動実行 : GitHubの Actions タブ →「NOTIME 日次ETL」→ Run workflow
+#
+#  はじめの準備（最初の1回）:
+#    1. Supabase の SQL Editor で sql/setup_all.sql を貼って Run（表を作る）
+#    2. 下記6つを Settings → Secrets and variables → Actions に登録
+#
+#  cashier の期間欄・CSVボタンの目印が未確定でも、この Actions を1回動かせば、
+#  失敗時に debug/ へ「入力欄・ボタンの一覧」が自動保存され、実行ログにも出ます。
+#  → それを見て目印（セレクタ）を確定できます（手元PCでのログイン調査は不要）。
 #
 #  ID・パスワード類は、このファイルには書きません。
 #  リポジトリの Settings → Secrets and variables → Actions に登録した値を使います。
