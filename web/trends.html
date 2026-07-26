@@ -291,22 +291,41 @@ function drawMini(boxEl,ps,m){
     <circle id="dot" r="3.4" fill="var(--surface)" stroke="var(--accent)" stroke-width="2" opacity="0"/>
   </svg><div class="tip"></div>`;
   const tip=boxEl.querySelector(".tip"),cross=boxEl.querySelector("#cross"),dot=boxEl.querySelector("#dot"),hit=boxEl.querySelector("#hit"),svgEl=boxEl.querySelector("svg");
+  function hide(){tip.style.opacity=0;cross.setAttribute("opacity","0");dot.setAttribute("opacity","0");}
   function move(ev){const r=svgEl.getBoundingClientRect();const px=((ev.touches?ev.touches[0].clientX:ev.clientX)-r.left)/r.width*W;
     let i=Math.round((px-PADL)/((W-PADL-PADR)/Math.max(1,n-1)));i=Math.max(0,Math.min(n-1,i));
-    const d=vals[i];if(!d||d.v==null){tip.style.opacity=0;cross.setAttribute("opacity","0");dot.setAttribute("opacity","0");return;}
+    const d=vals[i];if(!d||d.v==null){hide();return;}
     const cx=xs(i),cy=ys(d.v);cross.setAttribute("x1",cx);cross.setAttribute("x2",cx);cross.setAttribute("opacity",".45");
     dot.setAttribute("cx",cx);dot.setAttribute("cy",cy);dot.setAttribute("opacity","1");
     tip.style.opacity=1;tip.style.left=(cx/W*r.width)+"px";tip.style.top=(cy/H*r.height)+"px";
     tip.innerHTML=`<b>${d.label}</b><br>${m.name}: ${m.fmt(d.v)}`;}
-  hit.addEventListener("mousemove",move);hit.addEventListener("touchmove",move,{passive:true});
-  hit.addEventListener("mouseleave",()=>{tip.style.opacity=0;cross.setAttribute("opacity","0");dot.setAttribute("opacity","0");});
+  hit.addEventListener("mousemove",move);
+  hit.addEventListener("mouseleave",hide);
+  // タッチは「横方向のなぞり」だけ反応。縦スクロールでは何もしない（カクつき防止）。
+  let sx=0,sy=0,lock=null;
+  hit.addEventListener("touchstart",ev=>{sx=ev.touches[0].clientX;sy=ev.touches[0].clientY;lock=null;},{passive:true});
+  hit.addEventListener("touchmove",ev=>{
+    if(lock==="v")return;
+    const dx=ev.touches[0].clientX-sx, dy=ev.touches[0].clientY-sy;
+    if(lock===null&&(Math.abs(dx)>6||Math.abs(dy)>6))lock=Math.abs(dy)>Math.abs(dx)?"v":"h";
+    if(lock==="v"){hide();return;}
+    move(ev);
+  },{passive:true});
+  hit.addEventListener("touchend",hide);
 }
 
 function esc(s){return String(s).replace(/[&<>]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[m]));}
 function toggleTheme(){const root=document.documentElement;
   const cur=root.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");
   root.setAttribute("data-theme",cur==="dark"?"light":"dark");draw();}
-window.addEventListener("resize",()=>{if(DATA)draw();});
+// 横幅が変わったときだけ描き直す（スマホのアドレスバー伸縮＝高さ変化では描き直さない）
+let _lastW=window.innerWidth,_rt=null;
+window.addEventListener("resize",()=>{
+  if(!DATA)return;
+  if(window.innerWidth===_lastW)return;   // 高さだけの変化は無視（カクつき防止）
+  _lastW=window.innerWidth;
+  clearTimeout(_rt);_rt=setTimeout(draw,150);
+});
 boot();
 </script>
 </body>
