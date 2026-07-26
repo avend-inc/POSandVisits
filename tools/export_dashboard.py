@@ -165,7 +165,9 @@ def _upload(sb: Supabase, bucket: str, path: str, body: bytes,
     #    明示して送ると正しく text/html で保存・配信される。
     #    念のため一度消してから新規作成し、古い種類情報が残らないようにする。
     auth = {"apikey": sb.key, "Authorization": f"Bearer {sb.key}", "x-upsert": "true"}
-    requests.delete(url, headers=auth, timeout=60)
+    dresp = requests.delete(url, headers={"apikey": sb.key,
+                            "Authorization": f"Bearer {sb.key}"}, timeout=60)
+    print(f"  （削除: HTTP {dresp.status_code} {dresp.text[:80]}）")
     filename = path.split("/")[-1]
     resp = requests.post(
         url,
@@ -205,7 +207,7 @@ def _verify_served(sb: Supabase, bucket: str, path: str,
         info_url = f"{sb.url}/storage/v1/object/info/public/{bucket}/{path}"
         r = requests.get(info_url, headers={"apikey": sb.key,
                          "Authorization": f"Bearer {sb.key}"}, timeout=60)
-        print(f"  保存種類[info]: HTTP {r.status_code} / {r.text[:200]}")
+        print(f"  保存種類[info]: HTTP {r.status_code} / {r.text[:500]}")
     except Exception as e:
         print(f"  保存種類[info]をスキップ: {e}")
 
