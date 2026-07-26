@@ -147,7 +147,12 @@ def _upload(sb: Supabase, path: str, body: bytes, content_type: str) -> str:
     url = f"{sb.url}/storage/v1/object/{BUCKET}/{path}"
     resp = sb.session.post(
         url, data=body,
-        headers={"Content-Type": content_type, "x-upsert": "true"},
+        headers={
+            "Content-Type": content_type,
+            "x-upsert": "true",
+            # 毎回最新を配信するためキャッシュさせない（更新が即反映されるように）
+            "cache-control": "no-cache, max-age=0",
+        },
         timeout=120,
     )
     if resp.status_code not in (200, 201):
