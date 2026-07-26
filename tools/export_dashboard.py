@@ -168,15 +168,18 @@ def _upload(sb: Supabase, bucket: str, path: str, body: bytes,
     #    公式クライアント(storage-js)と同じ multipart/form-data で「ファイルの種類」を
     #    明示して送ると正しく text/html で保存・配信される。
     #    念のため一度消してから新規作成し、古い種類情報が残らないようにする。
-    auth = {"apikey": sb.key, "Authorization": f"Bearer {sb.key}", "x-upsert": "true"}
     dresp = requests.delete(url, headers={"apikey": sb.key,
                             "Authorization": f"Bearer {sb.key}"}, timeout=60)
     print(f"  （削除: HTTP {dresp.status_code} {dresp.text[:80]}）")
     filename = path.split("/")[-1]
+    # 公式クライアント(storage-js/storage3)と同じ形にする：
+    #   ・cache-control は「ヘッダ」で渡す（フォーム項目にしない）
+    #   ・本文はファイル1つだけの multipart（種類を明示）
+    # こうしないと保存メタデータの mimetype が空になり、配信が text/plain になる。
     resp = requests.post(
         url,
-        headers=auth,
-        data={"cacheControl": "0"},                        # キャッシュさせない
+        headers={"apikey": sb.key, "Authorization": f"Bearer {sb.key}",
+                 "x-upsert": "true", "cache-control": "max-age=0"},
         files={"file": (filename, body, content_type)},    # ← ファイルの種類を明示
         timeout=120,
     )
