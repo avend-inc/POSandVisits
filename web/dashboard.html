@@ -109,6 +109,10 @@ async function boot(){
     if(!DATA||!DATA.daily)throw new Error("データが空です");
     const ds=DATA.daily.map(r=>r.d).sort();
     DATA._min=ds[0]; DATA._max=ds[ds.length-1];
+    const sd=DATA.daily.filter(r=>(r.tx||0)>0||(r.in||0)>0).map(r=>r.d).sort();
+    const vd=DATA.daily.filter(r=>r.v!=null).map(r=>r.d).sort();
+    DATA._salesMax=sd.length?sd[sd.length-1]:DATA._max;
+    DATA._visitMax=vd.length?vd[vd.length-1]:DATA._max;
     state.from=DATA._min; state.to=DATA._max;
     render();
   }catch(e){document.getElementById("app").innerHTML='<div class="err">データを読み込めませんでした：'+String(e)+'</div>';}
@@ -154,6 +158,22 @@ function periodSpan(key,g){
   const[y,m]=key.split("-").map(Number);const last=new Date(Date.UTC(y,m,0)).getUTCDate();
   return[`${key}-01`,`${key}-${String(last).padStart(2,"0")}`];
 }
+function monthSpan(ym){const[y,m]=ym.split("-").map(Number);const last=new Date(Date.UTC(y,m,0)).getUTCDate();return[`${ym}-01`,`${ym}-${String(last).padStart(2,"0")}`];}
+function clampRange(f,t){if(f<DATA._min)f=DATA._min;if(t>DATA._max)t=DATA._max;if(f>t)f=t;return[f,t];}
+// 各ボタンの期間は「最新データ日(_max)」を基準に決める（常にデータのある範囲に収める）
+function presetRange(kind){
+  const mx=DATA._max;
+  if(kind==="all")return[DATA._min,DATA._max];
+  if(kind==="d30")return clampRange(addDays(mx,-29),mx);
+  if(kind==="d90")return clampRange(addDays(mx,-89),mx);
+  if(kind==="prevday")return[mx,mx];
+  if(kind==="thisweek"){const mon=mondayOf(mx);return clampRange(mon,addDays(mon,6));}
+  if(kind==="lastweek"){const mon=addDays(mondayOf(mx),-7);return clampRange(mon,addDays(mon,6));}
+  if(kind==="thismonth")return clampRange(...monthSpan(mx.slice(0,7)));
+  if(kind==="lastmonth"){const[y,m]=mx.split("-").map(Number);let py=y,pm=m-1;if(pm===0){pm=12;py--;}
+    return clampRange(...monthSpan(`${py}-${String(pm).padStart(2,"0")}`));}
+  return[DATA._min,DATA._max];
+}
 
 function render(){
   const us=usableStores();
@@ -161,9 +181,12 @@ function render(){
   document.getElementById("app").innerHTML=`
     <header>
       <h1>NOTIME 売上ダッシュボード</h1>
-      <span class="sub">更新: ${(DATA.generated_at||"").replace("T"," ").slice(0,16)}（日本時間）</span>
       <button class="themebtn" id="themebtn">◐ 表示切替</button>
     </header>
+    <div class="sub" style="margin:2px 0 2px">
+      最新データ — 売上: <b style="color:var(--ink)">${DATA._salesMax}</b> ／ 来店: <b style="color:var(--ink)">${DATA._visitMax}</b>
+      　｜　集計更新: ${(DATA.generated_at||"").replace("T"," ").slice(0,16)}（日本時間）
+    </div>
     <div class="rangebar" id="rangebar"></div>
     <div class="controls">
       <label class="lbl">店舗</label>
@@ -172,9 +195,14 @@ function render(){
       <input type="date" id="from" min="${DATA._min}" max="${DATA._max}" value="${state.from}">
       <span class="sub">〜</span>
       <input type="date" id="to" min="${DATA._min}" max="${DATA._max}" value="${state.to}">
+      <button class="chip" data-preset="prevday">前日</button>
+      <button class="chip" data-preset="thisweek">今週</button>
+      <button class="chip" data-preset="lastweek">前週</button>
+      <button class="chip" data-preset="thismonth">今月</button>
+      <button class="chip" data-preset="lastmonth">前月</button>
+      <button class="chip" data-preset="d30">直近30日</button>
+      <button class="chip" data-preset="d90">直近90日</button>
       <button class="chip" data-preset="all">全期間</button>
-      <button class="chip" data-preset="30">直近30日</button>
-      <button class="chip" data-preset="90">直近90日</button>
     </div>
     <div id="kpis" class="grid"></div>
     <div class="panel">
@@ -214,9 +242,8 @@ function render(){
   document.querySelectorAll("#grain button").forEach(b=>b.onclick=()=>{state.grain=b.dataset.g;render();});
   document.getElementById("from").onchange=e=>{state.from=clampLo(e.target.value||DATA._min);if(state.from>state.to)state.to=state.from;draw();};
   document.getElementById("to").onchange=e=>{state.to=clampHi(e.target.value||DATA._max);if(state.to<state.from)state.from=state.to;draw();};
-  document.querySelectorAll(".chip[data-preset]").forEach(b=>b.onclick=()=>{const p=b.dataset.preset;
-    if(p==="all"){state.from=DATA._min;state.to=DATA._max;}else{state.to=DATA._max;state.from=clampLo(addDays(DATA._max,-(+p-1)));}
-    render();});
+  document.querySelectorAll(".chip[data-preset]").forEach(b=>b.onclick=()=>{
+    const[f,t]=presetRange(b.dataset.preset);state.from=f;state.to=t;render();});
   document.getElementById("themebtn").onclick=toggleTheme;
   draw();
 }
