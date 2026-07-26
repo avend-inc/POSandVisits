@@ -110,7 +110,21 @@ def browser_page(headless: bool = True, accept_downloads: bool = True):
         )
         context.set_default_timeout(BROWSER_TIMEOUT_MS)
         page = context.new_page()
-        attach_request_log(page)
+        main_log = attach_request_log(page)
+
+        # 別タブ（ポップアップ）で開くCSV出力などの通信も、同じログにためる。
+        def _hook_popup(popup) -> None:
+            try:
+                popup.on("request",
+                         lambda r: main_log.append(f"[popup] {r.method} {r.url}"))
+                popup.on("download",
+                         lambda d: main_log.append(f"[popup] DOWNLOAD {d.url}"))
+            except Exception:
+                pass
+        try:
+            context.on("page", _hook_popup)
+        except Exception:
+            pass
         try:
             yield page, context
         finally:

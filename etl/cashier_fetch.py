@@ -289,43 +289,84 @@ def set_date_range(page, business_date: str) -> None:
 # ------------------------------------------------------------
 # CSVをダウンロードする
 # ------------------------------------------------------------
-def download_csv(page) -> bytes:
-    """CSVボタンを押して、ダウンロードされた中身をそのまま返す。"""
+def _click_csv_button(page) -> str:
+    """CSV出力ボタンを押す。押した文字を返す（見つからなければ例外）。"""
     csv_sel = _env_selector("CASHIER_CSV_SELECTOR")
-
-    try:
-        with page.expect_download(timeout=120_000) as download_info:
-            if csv_sel:
-                page.locator(csv_sel).first.click()
-            else:
-                # 「CSV出力(明細)」を最優先。押した文字に「明細」が入っていれば
-                # そのまま明細CSVが落ちてくるので、種類選択の追加クリックはしない。
-                clicked = _click_first_text(page, CSV_TEXTS)
-                if clicked is None:
-                    raise EtlError("CSVボタンが見つかりません")
-                if "明細" not in clicked:
-                    # 種類を選ぶメニューが出た場合だけ「明細」を選ぶ
-                    time.sleep(1)
-                    _click_by_text(page, DETAIL_TEXTS)
-        download = download_info.value
-    except EtlError:
+    if csv_sel:
+        page.locator(csv_sel).first.click()
+        return csv_sel
+    clicked = _click_first_text(page, CSV_TEXTS)
+    if clicked is None:
         dump_page(page, "cashier_csv_button_notfound")
         raise EtlError(
-            "cashier の「CSVダウンロード」ボタンが見つかりませんでした。\n"
-            "  → debug/cashier_csv_button_notfound.png を見て、\n"
-            "     ボタンの目印を環境変数 CASHIER_CSV_SELECTOR で指定してください。"
+            "cashier の「CSV出力」ボタンが見つかりませんでした。\n"
+            "  → debug/cashier_csv_button_notfound_report.txt を確認してください。"
         )
-    except Exception as e:
-        dump_page(page, "cashier_csv_download_failed")
-        raise EtlError(
-            f"cashier のCSVダウンロードが完了しませんでした: {e}\n"
-            "  → debug/cashier_csv_download_failed.png を確認してください。"
-        )
+    if "明細" not in clicked:
+        # 種類を選ぶメニューが出た場合だけ「明細」を選ぶ
+        time.sleep(1)
+        _click_by_text(page, DETAIL_TEXTS)
+    return clicked
 
-    path = download.path()
-    if path is None:
-        raise EtlError("cashier のCSVを受け取れませんでした（ファイルが空）。")
-    return open(path, "rb").read()
+
+def download_csv(page, context) -> bytes:
+    """
+    CSV出力ボタンを押して、ダウンロードされた中身を返す。
+
+    cashier の「CSV出力(明細)」は別タブ（ポップアップ）で開くことがあるため、
+      1) 元ページ・ポップアップ どちらのダウンロードイベントも拾う
+      2) それでも来なければ、ポップアップが開いたCSVのURLを直接取りに行く
+    の2段構えにしている（デジテールと同じ直接取得の考え方）。
+    """
+    downloads: list = []
+    popups: list = []
+
+    def _watch_page(pg) -> None:
+        try:
+            pg.on("download", lambda d: downloads.append(d))
+        except Exception:
+            pass
+
+    _watch_page(page)
+    context.on("page", lambda pg: (popups.append(pg), _watch_page(pg)))
+
+    try:
+        _click_csv_button(page)
+    except EtlError:
+        raise
+    except Exception as e:
+        dump_page(page, "cashier_csv_click_failed")
+        raise EtlError(f"cashier のCSV出力ボタンを押せませんでした: {e}")
+
+    # --- 1) ダウンロードイベントを最大120秒待つ（元ページ or ポップアップ） ---
+    deadline = time.time() + 120
+    while not downloads and time.time() < deadline:
+        page.wait_for_timeout(500)
+
+    if downloads:
+        path = downloads[0].path()
+        if path:
+            return open(path, "rb").read()
+
+    # --- 2) ダウンロードが発火しない場合: ポップアップが指すCSVのURLを直接取得 ---
+    for pg in popups:
+        try:
+            url = pg.url
+        except Exception:
+            continue
+        if url and any(k in url.lower() for k in ("csv", "export", "download", "/trade/")):
+            resp = context.request.get(url, timeout=120_000)
+            if resp.ok:
+                body = resp.body()
+                if body:
+                    return body
+
+    dump_page(page, "cashier_csv_download_failed")
+    raise EtlError(
+        "cashier のCSVダウンロードが完了しませんでした（ダウンロードもURL取得も不発）。\n"
+        "  → debug/cashier_csv_download_failed_report.txt の通信記録で\n"
+        "     CSV出力のURL（[popup] 行など）を確認してください。"
+    )
 
 
 def decode_csv(data: bytes) -> str:
@@ -358,10 +399,10 @@ def fetch(business_date: str, headless: bool = True) -> str:
     last_error: Exception | None = None
     for attempt in range(1, RETRIES + 1):
         try:
-            with browser_page(headless=headless) as (page, _context):
+            with browser_page(headless=headless) as (page, context):
                 login(page, email, password)
                 set_date_range(page, business_date)
-                return decode_csv(download_csv(page))
+                return decode_csv(download_csv(page, context))
         except Exception as e:
             last_error = e
             if attempt < RETRIES:
