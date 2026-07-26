@@ -68,8 +68,10 @@ def _select_all(sb: Supabase, table: str, select: str,
 
 
 def build_data(sb: Supabase) -> dict:
-    stores = sb.select("stores", {"select": "id,name", "order": "id"})
+    # "*" で全列取得。ownership 列が未追加でも動くよう .get で既定「直営」にする。
+    stores = sb.select("stores", {"select": "*", "order": "id"})
     name_by_id = {s["id"]: s["name"] for s in stores}
+    own_by_id = {s["id"]: (s.get("ownership") or "直営") for s in stores}
 
     # --- sales: 伝票(税込/税抜/点数)は明細行に繰り返し入っているので、
     #     伝票単位では tx_id ごとに1回だけ数える。明細(金額/点数)は行ごとに合計。
@@ -165,7 +167,8 @@ def build_data(sb: Supabase) -> dict:
 
     return {
         "generated_at": datetime.now(JST).isoformat(timespec="seconds"),
-        "stores": [{"id": s["id"], "name": name_by_id.get(s["id"], str(s["id"]))}
+        "stores": [{"id": s["id"], "name": name_by_id.get(s["id"], str(s["id"])),
+                    "own": own_by_id.get(s["id"], "直営")}
                    for s in stores],
         "daily": daily_rows,
         "cat": cat_rows,

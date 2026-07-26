@@ -54,6 +54,9 @@
   .navlink{border:1px solid var(--border);background:var(--surface);color:var(--accent);border-radius:9px;padding:7px 11px;font-size:12px;font-weight:700;cursor:pointer;text-decoration:none;}
   .navlink:hover{border-color:var(--accent);}
   .themebtn{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:9px;padding:7px 10px;font-size:12px;cursor:pointer;}
+  .legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:8px 2px 0;font-size:12px;color:var(--ink2);font-weight:600;}
+  .legend span{display:inline-flex;align-items:center;gap:6px;}
+  .legend i{width:11px;height:11px;border-radius:3px;display:inline-block;}
   .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px;margin:12px 0 4px;}
   @media (max-width:520px){.cards{grid-template-columns:1fr;}}
   .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:13px 14px 8px;box-shadow:var(--shadow);}
@@ -91,7 +94,7 @@ const METRICS=[
   {key:"upt",name:"平均購入数",   fmt:v=>F2(v)+"点",  calc:p=>p.tx>0?p.it/p.tx:null},
   {key:"aup",name:"平均商品単価", fmt:v=>YEN(v)+"円", calc:p=>p.it>0?p.ex/p.it:null},
 ];
-const state={store:"all",grain:"week",from:null,to:null};
+const state={view:"total",own:"all",grain:"week",from:null,to:null};
 let DATA=null;
 
 // ---- 配信設定（アップロード時に export_dashboard.py / Pages生成が置き換える）----
@@ -179,9 +182,28 @@ function presetRange(kind){
   return[DATA._min,DATA._max];
 }
 
+// 店舗比較の色（色覚多様性に配慮した Okabe–Ito 配色）。店舗ごとに固定色。
+const STORE_COLORS=["#0072B2","#E69F00","#009E73","#D55E00","#CC79A7","#56B4E9","#8E44AD","#555555"];
+function colorMap(){const m={};usableStores().forEach((s,i)=>m[s.id]=STORE_COLORS[i%STORE_COLORS.length]);return m;}
+function ownsInData(){const set=[];for(const s of usableStores()){const o=s.own||"直営";if(!set.includes(o))set.push(o);}return set;}
+function allowedStores(){const us=usableStores();return state.own==="all"?us:us.filter(s=>(s.own||"直営")===state.own);}
+function rowsForIds(from,to,idset){return DATA.daily.filter(r=>idset.has(r.s)&&r.d>=from&&r.d<=to);}
+function pmap(rows,g){const map=new Map();
+  for(const r of rows){const k=pKey(r.d,g);let a=map.get(k);if(!a){a=[];map.set(k,a);}a.push(r);}
+  const out=new Map();for(const[k,rs] of map)out.set(k,sumRows(rs));return out;}
+function primaryIds(){
+  if(state.view==="total"||state.view==="compare")return allowedStores().map(s=>s.id);
+  return [Number(state.view)];
+}
+
 function render(){
-  const us=usableStores();
-  const stores=[{id:"all",name:"総合（全店）"},...us.map(s=>({id:s.id,name:s.name}))];
+  const owns=ownsInData();
+  const allowed=allowedStores();
+  const totalLabel=state.own==="all"?"総合（全店）":`総合（${state.own}）`;
+  const viewOpts=[["total",totalLabel],["compare","店舗別に比較"],...allowed.map(s=>[String(s.id),s.name])];
+  const ownSeg=owns.length>1?`
+      <label class="lbl" style="margin-left:6px">区分</label>
+      <div class="seg" id="own">${[...owns.map(o=>[o,o]),["all","全店"]].map(([v,t])=>`<button data-own="${v}" class="${state.own===v?"on":""}">${t}</button>`).join("")}</div>`:"";
   document.getElementById("app").innerHTML=`
     <header>
       <h1>NOTIME KPI推移</h1>
@@ -194,8 +216,9 @@ function render(){
     </div>
     <div class="rangebar" id="rangebar"></div>
     <div class="controls">
-      <label class="lbl">店舗</label>
-      <select id="store">${stores.map(s=>`<option value="${s.id}" ${String(s.id)===String(state.store)?"selected":""}>${s.name}</option>`).join("")}</select>
+      <label class="lbl">表示</label>
+      <select id="view">${viewOpts.map(([v,t])=>`<option value="${v}" ${String(state.view)===v?"selected":""}>${t}</option>`).join("")}</select>
+      ${ownSeg}
       <div class="seg" id="grain">${[["day","日別"],["week","週別"],["month","月別"]].map(([g,t])=>`<button data-g="${g}" class="${state.grain===g?"on":""}">${t}</button>`).join("")}</div>
       <label class="lbl" style="margin-left:6px">対象期間</label>
       <input type="date" id="from" min="${DATA._min}" max="${DATA._max}" value="${state.from}">
@@ -208,14 +231,20 @@ function render(){
       <button class="chip" data-preset="d180">直近180日</button>
       <button class="chip" data-preset="all">全期間</button>
     </div>
+    <div class="legend" id="legend"></div>
     <div class="cards" id="cards"></div>
     <div class="foot">
-      各グラフは「${state.grain==="day"?"日別":state.grain==="week"?"週別":"月別"}」の推移です。右上の数字は対象期間ぜんぶの合計／平均、前期比は同じ長さの直前期間との比較。
+      各グラフは「${state.grain==="day"?"日別":state.grain==="week"?"週別":"月別"}」の推移。「店舗別に比較」を選ぶと店舗ごとの折れ線が色分けで重なります。
+      右上の数字は対象期間ぜんぶの合計／平均（比較時は総合）、前期比は同じ長さの直前期間との比較。
       指標：購入率＝取引数÷来店客数／客単価＝税込売上÷取引数／平均購入数＝総点数÷取引数／平均商品単価＝税抜売上÷総点数。
-      週別は月曜〜日曜。レジ袋・クーポンは売上・点数・カテゴリから除外。来店客数はデジテール、売上はcashier。いわきは2店舗ぶんを合算。
+      週別は月曜〜日曜。レジ袋・クーポンは売上・点数・カテゴリから除外。いわきは2店舗ぶんを合算。${owns.length>1?"「区分」で直営／FCを切替。":"（FC店を追加すると直営／FCの切替が出ます）"}
     </div>`;
 
-  document.getElementById("store").onchange=e=>{state.store=e.target.value==="all"?"all":+e.target.value;draw();};
+  document.getElementById("view").onchange=e=>{state.view=e.target.value;draw();};
+  if(owns.length>1)document.querySelectorAll("#own button").forEach(b=>b.onclick=()=>{
+    state.own=b.dataset.own;
+    if(!["total","compare"].includes(state.view)&&!allowedStores().some(s=>String(s.id)===String(state.view)))state.view="total";
+    render();});
   document.querySelectorAll("#grain button").forEach(b=>b.onclick=()=>{state.grain=b.dataset.g;render();});
   document.getElementById("from").onchange=e=>{state.from=clampLo(e.target.value||DATA._min);if(state.from>state.to)state.to=state.from;draw();};
   document.getElementById("to").onchange=e=>{state.to=clampHi(e.target.value||DATA._max);if(state.to<state.from)state.from=state.to;draw();};
@@ -225,17 +254,37 @@ function render(){
 }
 
 function draw(){
-  const us=usableStores();
-  const storeName=state.store==="all"?"総合（全店）":(us.find(s=>s.id===state.store)?.name||"");
+  const g=state.grain, allowed=allowedStores(), cmap=colorMap();
+  const ids=primaryIds(), idset=new Set(ids);
+  const viewName=state.view==="total"?`総合（${state.own==="all"?"全店":state.own}）`
+    :state.view==="compare"?`店舗別に比較（${allowed.length}店）`
+    :(usableStores().find(s=>s.id===Number(state.view))||{}).name||"";
   const ndays=daysBetween(state.from,state.to);
   document.getElementById("rangebar").innerHTML=
-    `対象期間：<b>${state.from}</b> 〜 <b>${state.to}</b>（${ndays}日間）　店舗：<span class="store">${esc(storeName)}</span>`;
+    `対象期間：<b>${state.from}</b> 〜 <b>${state.to}</b>（${ndays}日間）　表示：<span class="store">${esc(viewName)}</span>`;
 
-  const ps=periods(state.from,state.to,state.grain,state.store);
-  const total=sumRows(rowsIn(state.from,state.to,state.store));
+  // 期間キー（棒の並び）は主対象の行から作る
+  const prows=rowsForIds(state.from,state.to,idset);
+  const pm=pmap(prows,g);
+  const keys=[...pm.keys()].sort();
+  const labels=keys.map(k=>pLabel(k,g));
+
+  let series;
+  if(state.view==="compare"){
+    series=allowed.map(s=>{const sm=pmap(rowsForIds(state.from,state.to,new Set([s.id])),g);
+      return {name:s.name,color:cmap[s.id],area:false,vals:keys.map(k=>sm.get(k)||null)};});
+  }else{
+    series=[{name:viewName,color:"var(--accent)",area:true,vals:keys.map(k=>pm.get(k)||null)}];
+  }
+
+  // 右上サマリー（主対象の合計）＋前期比
+  const total=sumRows(prows);
   const pTo=addDays(state.from,-1), pFrom=addDays(pTo,-(ndays-1));
-  const hasPrev=pTo>=DATA._min;
-  const ptotal=hasPrev?sumRows(rowsIn(pFrom<DATA._min?DATA._min:pFrom,pTo,state.store)):null;
+  const ptotal=(pTo>=DATA._min)?sumRows(rowsForIds(pFrom<DATA._min?DATA._min:pFrom,pTo,idset)):null;
+
+  document.getElementById("legend").innerHTML=state.view==="compare"
+    ? allowed.map(s=>`<span><i style="background:${cmap[s.id]}"></i>${esc(s.name)}</span>`).join("")
+    : "";
 
   const box=document.getElementById("cards");
   box.innerHTML=METRICS.map(m=>{
@@ -247,70 +296,67 @@ function draw(){
       <div class="top"><span class="k">${m.name}</span>${d}<span class="val">${v==null?"—":m.fmt(v)}</span></div>
       <div class="chart" data-k="${m.key}"></div></div>`;
   }).join("");
-
-  METRICS.forEach(m=>drawMini(box.querySelector(`.chart[data-k="${m.key}"]`),ps,m));
+  METRICS.forEach(m=>drawMiniMulti(box.querySelector(`.chart[data-k="${m.key}"]`),labels,series,m));
 }
 
 function shortNum(v){if(Math.abs(v)>=1e8)return(v/1e8).toFixed(1)+"億";if(Math.abs(v)>=1e4)return(v/1e4).toFixed(v>=1e5?0:1)+"万";
   if(Number.isInteger(v))return v.toLocaleString("ja-JP");return (Math.round(v*10)/10).toLocaleString("ja-JP");}
 
-function drawMini(boxEl,ps,m){
+// labels: 期間ラベル配列 ／ series: [{name,color,area,vals:(pオブジェクト or null)[]}]
+function drawMiniMulti(boxEl,labels,series,m){
   boxEl.innerHTML="";
-  const vals=ps.map(p=>({label:p.label,v:m.calc(p)}));
-  const nums=vals.map(d=>d.v).filter(v=>v!=null);
+  const n=labels.length;
+  const S=series.map(s=>({name:s.name,color:s.color,area:s.area,vals:s.vals.map(p=>p?m.calc(p):null)}));
+  const nums=[];S.forEach(s=>s.vals.forEach(v=>{if(v!=null)nums.push(v);}));
   if(!nums.length){boxEl.innerHTML='<div class="sub" style="padding:14px 0">データなし</div>';return;}
+  const single=S.length===1;
   const W=Math.max(boxEl.clientWidth||300,240),H=132,PADL=46,PADR=10,PADT=10,PADB=20;
-  const n=vals.length;
   const xs=i=>PADL+(W-PADL-PADR)*(n<=1?0.5:i/(n-1));
-  let maxV=Math.max(...nums),minV=Math.min(...nums);
+  const maxV=Math.max(...nums),minV=Math.min(...nums);
   const span=(maxV-minV)||Math.abs(maxV)||1;
-  let lo=minV-span*0.15, hi=maxV+span*0.15;
-  if(lo<0&&minV>=0)lo=0;                 // 非負データで軸を負に見せない
-  if(hi===lo)hi=lo+1;
+  let lo=minV-span*0.15,hi=maxV+span*0.15;if(lo<0&&minV>=0)lo=0;if(hi===lo)hi=lo+1;
   const ys=v=>PADT+(H-PADT-PADB)*(1-(v-lo)/(hi-lo));
   const gy=[lo,(lo+hi)/2,hi].map(val=>({y:ys(val),val}));
-  const pts=vals.map((d,i)=>d.v==null?null:[xs(i),ys(d.v)]);
-  // 面（薄い塗り）用のパス
-  const first=pts.findIndex(p=>p),last=(()=>{for(let i=pts.length-1;i>=0;i--)if(pts[i])return i;return -1;})();
-  const linePath=pts.map((p,i)=>p?`${i&&pts[i-1]?"L":"M"}${p[0].toFixed(1)} ${p[1].toFixed(1)}`:"").join(" ");
-  let area="";
-  if(first>=0){const base=ys(lo);
-    area=`M${pts[first][0].toFixed(1)} ${base.toFixed(1)} `+
-      pts.map(p=>p?`L${p[0].toFixed(1)} ${p[1].toFixed(1)}`:"").join(" ")+
-      ` L${pts[last][0].toFixed(1)} ${base.toFixed(1)} Z`;}
-  const endP=last>=0?pts[last]:null;
   const step=Math.max(1,Math.ceil(n/6));
+  function lineOf(s){
+    const pts=s.vals.map((v,i)=>v==null?null:[xs(i),ys(v)]);
+    let last=-1;for(let i=pts.length-1;i>=0;i--)if(pts[i]){last=i;break;}
+    const path=pts.map((p,i)=>p?`${i&&pts[i-1]?"L":"M"}${p[0].toFixed(1)} ${p[1].toFixed(1)}`:"").join(" ");
+    let area="";
+    if(s.area&&single){const first=pts.findIndex(p=>p);
+      if(first>=0){const base=ys(lo);area=`<path d="M${pts[first][0].toFixed(1)} ${base.toFixed(1)} `+
+        pts.map(p=>p?`L${p[0].toFixed(1)} ${p[1].toFixed(1)}`:"").join(" ")+
+        ` L${pts[last][0].toFixed(1)} ${base.toFixed(1)} Z" fill="${s.color}" opacity="0.10"/>`;}}
+    const endDot=last>=0?`<circle cx="${pts[last][0].toFixed(1)}" cy="${pts[last][1].toFixed(1)}" r="3.2" fill="${s.color}"/>`:"";
+    return area+`<path d="${path}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`+endDot;
+  }
   boxEl.innerHTML=`<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${m.name}の推移">
-    ${gy.map(g=>`<line x1="${PADL}" y1="${g.y.toFixed(1)}" x2="${W-PADR}" y2="${g.y.toFixed(1)}" stroke="var(--border)" stroke-width="1"/><text x="${PADL-7}" y="${(g.y+3).toFixed(1)}" text-anchor="end" font-size="9.5" fill="var(--muted)">${shortNum(g.val)}</text>`).join("")}
-    <path d="${area}" fill="var(--accent)" opacity="0.10"/>
-    <path d="${linePath}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-    ${endP?`<circle cx="${endP[0].toFixed(1)}" cy="${endP[1].toFixed(1)}" r="3.4" fill="var(--accent)"/>`:""}
-    ${vals.map((d,i)=>(i%step===0||i===n-1)?`<text x="${xs(i).toFixed(1)}" y="${H-PADB+15}" text-anchor="middle" font-size="9" fill="var(--muted)">${d.label}</text>`:"").join("")}
+    ${gy.map(gg=>`<line x1="${PADL}" y1="${gg.y.toFixed(1)}" x2="${W-PADR}" y2="${gg.y.toFixed(1)}" stroke="var(--border)" stroke-width="1"/><text x="${PADL-7}" y="${(gg.y+3).toFixed(1)}" text-anchor="end" font-size="9.5" fill="var(--muted)">${shortNum(gg.val)}</text>`).join("")}
+    ${S.map(lineOf).join("")}
+    ${labels.map((lb,i)=>(i%step===0||i===n-1)?`<text x="${xs(i).toFixed(1)}" y="${H-PADB+15}" text-anchor="middle" font-size="9" fill="var(--muted)">${lb}</text>`:"").join("")}
     <rect id="hit" x="${PADL}" y="${PADT}" width="${(W-PADL-PADR).toFixed(1)}" height="${(H-PADT-PADB).toFixed(1)}" fill="transparent"/>
-    <line id="cross" x1="0" y1="${PADT}" x2="0" y2="${H-PADB}" stroke="var(--accent)" stroke-width="1" opacity="0"/>
-    <circle id="dot" r="3.4" fill="var(--surface)" stroke="var(--accent)" stroke-width="2" opacity="0"/>
+    <line id="cross" x1="0" y1="${PADT}" x2="0" y2="${H-PADB}" stroke="var(--muted)" stroke-width="1" opacity="0"/>
   </svg><div class="tip"></div>`;
-  const tip=boxEl.querySelector(".tip"),cross=boxEl.querySelector("#cross"),dot=boxEl.querySelector("#dot"),hit=boxEl.querySelector("#hit"),svgEl=boxEl.querySelector("svg");
-  function hide(){tip.style.opacity=0;cross.setAttribute("opacity","0");dot.setAttribute("opacity","0");}
+  const tip=boxEl.querySelector(".tip"),cross=boxEl.querySelector("#cross"),hit=boxEl.querySelector("#hit"),svgEl=boxEl.querySelector("svg");
+  function hide(){tip.style.opacity=0;cross.setAttribute("opacity","0");}
   function move(ev){const r=svgEl.getBoundingClientRect();const px=((ev.touches?ev.touches[0].clientX:ev.clientX)-r.left)/r.width*W;
     let i=Math.round((px-PADL)/((W-PADL-PADR)/Math.max(1,n-1)));i=Math.max(0,Math.min(n-1,i));
-    const d=vals[i];if(!d||d.v==null){hide();return;}
-    const cx=xs(i),cy=ys(d.v);cross.setAttribute("x1",cx);cross.setAttribute("x2",cx);cross.setAttribute("opacity",".45");
-    dot.setAttribute("cx",cx);dot.setAttribute("cy",cy);dot.setAttribute("opacity","1");
-    tip.style.opacity=1;tip.style.left=(cx/W*r.width)+"px";tip.style.top=(cy/H*r.height)+"px";
-    tip.innerHTML=`<b>${d.label}</b><br>${m.name}: ${m.fmt(d.v)}`;}
+    const rows=S.map(s=>({name:s.name,color:s.color,v:s.vals[i]})).filter(x=>x.v!=null);
+    if(!rows.length){hide();return;}
+    const cx=xs(i);cross.setAttribute("x1",cx);cross.setAttribute("x2",cx);cross.setAttribute("opacity",".45");
+    tip.style.opacity=1;tip.style.left=(cx/W*r.width)+"px";tip.style.top=(ys(rows[0].v)/H*r.height)+"px";
+    const body=single?`${m.name}: ${m.fmt(rows[0].v)}`
+      :rows.map(x=>`<span style="color:${x.color}">■</span>${esc(x.name)}: ${m.fmt(x.v)}`).join("<br>");
+    tip.innerHTML=`<b>${labels[i]}</b><br>${body}`;}
   hit.addEventListener("mousemove",move);
   hit.addEventListener("mouseleave",hide);
-  // タッチは「横方向のなぞり」だけ反応。縦スクロールでは何もしない（カクつき防止）。
+  // タッチは横方向のなぞりだけ反応。縦スクロールでは何もしない（カクつき防止）。
   let sx=0,sy=0,lock=null;
   hit.addEventListener("touchstart",ev=>{sx=ev.touches[0].clientX;sy=ev.touches[0].clientY;lock=null;},{passive:true});
-  hit.addEventListener("touchmove",ev=>{
-    if(lock==="v")return;
-    const dx=ev.touches[0].clientX-sx, dy=ev.touches[0].clientY-sy;
+  hit.addEventListener("touchmove",ev=>{if(lock==="v")return;
+    const dx=ev.touches[0].clientX-sx,dy=ev.touches[0].clientY-sy;
     if(lock===null&&(Math.abs(dx)>6||Math.abs(dy)>6))lock=Math.abs(dy)>Math.abs(dx)?"v":"h";
-    if(lock==="v"){hide();return;}
-    move(ev);
-  },{passive:true});
+    if(lock==="v"){hide();return;}move(ev);},{passive:true});
   hit.addEventListener("touchend",hide);
 }
 
