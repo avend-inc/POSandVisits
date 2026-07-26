@@ -50,6 +50,11 @@ on:
         description: "backfillの終了日 (YYYY-MM-DD)。空なら今日"
         required: false
         default: ""
+      dashboard:
+        description: "取り込みはせず、ダッシュボードの集計・配信だけ行う"
+        required: false
+        default: false
+        type: boolean
 
 # 同時に2つ走らないようにする（二重取り込みの予防）
 concurrency:
@@ -103,6 +108,7 @@ jobs:
           echo "Secrets OK"
 
       - name: ETL を実行
+        if: ${{ inputs.dashboard != 'true' }}
         run: |
           if [ "${{ inputs.backfill }}" = "true" ]; then
             ARGS=""
@@ -121,6 +127,12 @@ jobs:
             echo "実行: python -m etl.run_daily $ARGS"
             python -m etl.run_daily $ARGS
           fi
+
+      # 集計してダッシュボード(HTML+data.json)をSupabase Storageへ配信。
+      # 取り込みが成功した後、または dashboard 単独モードのときに動く。
+      - name: ダッシュボードを更新
+        if: ${{ inputs.dashboard == 'true' || success() }}
+        run: python -m tools.export_dashboard
 
       # 失敗したときだけ、原因調査用のファイルを残す（7日で自動削除）
       - name: 失敗時の調査用ファイルを保存
