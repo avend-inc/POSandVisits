@@ -309,6 +309,40 @@ def _click_csv_button(page) -> str:
     return clicked
 
 
+_CSV_DIAG_JS = r"""
+() => {
+  const hit = [...document.querySelectorAll('button, a, input')]
+    .filter(e => /CSV出力/.test((e.innerText || e.value || '')));
+  return hit.map(b => {
+    const form = b.closest('form');
+    return {
+      text: (b.innerText || b.value || '').trim().slice(0, 40),
+      tag: b.tagName,
+      type: b.type || null,
+      outerHTML: b.outerHTML.slice(0, 400),
+      attrs: Object.fromEntries([...b.attributes].map(a => [a.name, a.value])),
+      formAction: form ? form.getAttribute('action') : null,
+      formMethod: form ? form.getAttribute('method') : null,
+    };
+  });
+}
+"""
+
+
+def _diagnose_csv_buttons(page) -> None:
+    """CSV出力ボタンの実体を1度だけログに出す（押下方式の特定用）。"""
+    try:
+        info = page.evaluate(_CSV_DIAG_JS)
+    except Exception as e:
+        print(f"  （CSVボタンの調査に失敗: {e}）")
+        return
+    import json as _json
+    print("  ----8<---- CSV出力ボタンの実体 ----8<----")
+    for line in _json.dumps(info, ensure_ascii=False, indent=2).splitlines():
+        print(f"  | {line}")
+    print("  ----8<---- ここまで ----8<----")
+
+
 def download_csv(page, context) -> bytes:
     """
     CSV出力ボタンを押して、ダウンロードされた中身を返す。
@@ -330,6 +364,9 @@ def download_csv(page, context) -> bytes:
     _watch_page(page)
     context.on("page", lambda pg: (popups.append(pg), _watch_page(pg)))
 
+    # 調査: CSV出力ボタンの実体（HTML・所属フォーム・data属性）を1度だけ出す。
+    _diagnose_csv_buttons(page)
+
     try:
         _click_csv_button(page)
     except EtlError:
@@ -338,8 +375,8 @@ def download_csv(page, context) -> bytes:
         dump_page(page, "cashier_csv_click_failed")
         raise EtlError(f"cashier のCSV出力ボタンを押せませんでした: {e}")
 
-    # --- 1) ダウンロードイベントを最大120秒待つ（元ページ or ポップアップ） ---
-    deadline = time.time() + 120
+    # --- 1) ダウンロードイベントを最大40秒待つ（元ページ or ポップアップ） ---
+    deadline = time.time() + 40
     while not downloads and time.time() < deadline:
         page.wait_for_timeout(500)
 
