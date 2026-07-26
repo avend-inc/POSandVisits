@@ -84,6 +84,17 @@ def build_data(sb: Supabase) -> dict:
     daily: dict[tuple, dict] = {}     # (date, store_id) -> 伝票合計
     cat: dict[tuple, dict] = {}       # (date, store_id, category) -> 明細合計
 
+    # 商品ではないので「売上・点数・カテゴリ」すべてから除外する。
+    #  ・レジ袋 / クーポン … 物ではない（config.py の NON_MERCH と同じ考え方）
+    #  ・「不明」は EZレジで明細が無いだけの“実売上”なので売上には残す（除外しない）
+    EXCLUDE = {"レジ袋", "クーポン"}
+
+    def _new() -> dict:
+        # in/ex=伝票の税込/税抜合計、tx=伝票数、it=販売点数(レジ袋等を除く)、
+        # bag_in/bag_ex=レジ袋等の税込/税抜ぶん（あとで売上から差し引く）
+        return {"in": 0.0, "ex": 0.0, "tx": 0, "it": 0.0, "v": None,
+                "bag_in": 0.0, "bag_ex": 0.0}
+
     def _num(v):
         try:
             return float(v) if v is not None else 0.0
@@ -94,21 +105,38 @@ def build_data(sb: Supabase) -> dict:
         d = r["business_date"]
         sid = r["store_id"]
         dk = (d, sid)
-        rec = daily.setdefault(dk, {"in": 0.0, "ex": 0.0, "tx": 0, "it": 0.0, "v": None})
+        rec = daily.setdefault(dk, _new())
 
+        ex_tax = _num(r["sales_ex_tax"])
+        in_tax = _num(r["sales_in_tax"])
+
+        # 伝票単位の値（税込/税抜合計・伝票数）は tx_id ごとに1回だけ
         txkey = (sid, r["tx_id"])
         if txkey not in tx_seen:
             tx_seen.add(txkey)
-            rec["in"] += _num(r["sales_in_tax"])
-            rec["ex"] += _num(r["sales_ex_tax"])
-            rec["it"] += _num(r["tx_qty"])
+            rec["in"] += in_tax
+            rec["ex"] += ex_tax
             rec["tx"] += 1
+            # 点数は tx_qty ではなく明細(line_qty)の合計で数える（下で加算）。
+            # こうするとレジ袋・クーポンを点数から自然に除ける。
 
         c = (r.get("line_category") or "その他").strip() or "その他"
+        amt = _num(r["line_amount"])
+        qty = _num(r["line_qty"])
+
+        if c in EXCLUDE:
+            # レジ袋・クーポンぶんを控えておき、売上から差し引く。
+            # 点数にもカテゴリにも入れない。
+            rec["bag_ex"] += amt
+            ratio = (in_tax / ex_tax) if ex_tax else 1.0   # 伝票の税率で税込換算
+            rec["bag_in"] += amt * ratio
+            continue
+
+        rec["it"] += qty                       # 販売点数（レジ袋・クーポンを除く）
         ck = (d, sid, c)
         crec = cat.setdefault(ck, {"a": 0.0, "q": 0.0})
-        crec["a"] += _num(r["line_amount"])
-        crec["q"] += _num(r["line_qty"])
+        crec["a"] += amt
+        crec["q"] += qty
 
     # --- visits: 来店客数を日別×店舗に載せる
     visits = _select_all(
@@ -118,12 +146,14 @@ def build_data(sb: Supabase) -> dict:
     )
     for r in visits:
         dk = (r["business_date"], r["store_id"])
-        rec = daily.setdefault(dk, {"in": 0.0, "ex": 0.0, "tx": 0, "it": 0.0, "v": None})
+        rec = daily.setdefault(dk, _new())
         rec["v"] = (rec["v"] or 0) + int(r["visitors"] or 0)
 
     daily_rows = [
         {"d": d, "s": sid,
-         "in": round(v["in"]), "ex": round(v["ex"]),
+         # 税込/税抜売上からレジ袋・クーポンぶんを差し引く（マイナスにはしない）
+         "in": round(max(v["in"] - v["bag_in"], 0)),
+         "ex": round(max(v["ex"] - v["bag_ex"], 0)),
          "tx": v["tx"], "it": round(v["it"]),
          "v": v["v"]}
         for (d, sid), v in sorted(daily.items())
