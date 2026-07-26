@@ -314,8 +314,11 @@ def main() -> int:
         print(f"\n❌ {len(failed)}件が失敗しました。ingest_log に記録済みです。")
         return 1
     if rejected and len(rejected) == len(results):
-        print("\n⛔ すべて『取り込み済み』でした（NG）。ingest_log に記録済みです。")
-        return 2
+        # 既に取り込み済みの日をもう一度動かしただけ（予備スケジュール・再実行・テスト等）。
+        # これは異常ではなく“何もすることが無かった”だけなので、正常終了(0)にする。
+        # （こうしないと予備時刻の実行が毎回「失敗(赤)」に見えて紛らわしい）
+        print("\nℹ️ すべて既に取り込み済みでした（重複取り込みはしていません）。正常終了します。")
+        return 0
     print("\n✅ 取り込みが完了しました。")
     return 0
 

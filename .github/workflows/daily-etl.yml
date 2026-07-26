@@ -27,6 +27,7 @@ on:
     - cron: "0 21 * * *"    # 06:00 JST
     - cron: "0 22 * * *"    # 07:00 JST（予備）
     - cron: "30 23 * * *"   # 08:30 JST（予備）
+    - cron: "0 3 * * *"     # 12:00 JST（★動作テスト用・確認後に削除予定）
 
   workflow_dispatch:
     inputs:
