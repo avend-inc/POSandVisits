@@ -191,10 +191,19 @@ def dump_page(page, label: str) -> Path | None:
     # 入力欄・ボタン・通信の一覧（目印の確定に一番使う）
     try:
         info = scan_page(page)
+        # ファイルには通信の記録（CSVのURL等）も含める。
         report = format_scan_report(info, getattr(page, "_notime_requests", None))
         report_path = DEBUG_DIR / f"{label}_report.txt"
         report_path.write_text(report, encoding="utf-8")
         print(f"  🔍 入力欄・ボタンの一覧を保存しました: {report_path}")
+
+        # 実行ログ（GitHub Actions のログ）にも入力欄・ボタンを出す。
+        # → Artifactを落とさなくても、ログを見るだけで目印を確定できる。
+        #   通信の記録はURLに情報が乗ることがあるのでログには出さず、ファイルだけに残す。
+        print("  ----8<---- ここから画面調査（セレクタ確定用） ----8<----")
+        for line in format_scan_report(info, None).splitlines():
+            print(f"  | {line}")
+        print("  ----8<---- ここまで ----8<----")
     except Exception as e:
         print(f"  （入力欄・ボタンの一覧は保存できませんでした: {e}）")
 
