@@ -5,6 +5,20 @@
 
 ---
 
+## ✅ 売上ダッシュボード（2026-07-26）
+- `web/dashboard.html`（依存なしの自作SVG）＋ `tools/export_dashboard.py`（集計＋配信）。
+- 指標: 税込/税抜売上・来店客数・購入率・客単価・平均購入数・平均商品単価・取引数・
+  カテゴリ別売上/販売数。粒度: 日次/週次(月〜日)/月次。店舗選択・ダーク対応・ホバー。
+- 配信: Supabase Storage 公開バケット `dashboard` に index.html + data.json。
+  日次ETLの後に自動更新（workflowの「ダッシュボードを更新」ステップ）。手動は
+  Actions の `dashboard` 入力を true にすると取り込み無しで配信だけ実行。
+- ライブURL: `{SUPABASE_URL}/storage/v1/object/public/dashboard/index.html`
+- 非公開スナップショット(Artifact)も別途発行（claude.ai、埋め込みデータ）。
+- 集計は data.json に「日別×店舗」の素の合計だけを持たせ、週/月集約と比率計算は
+  画面側で行う（比率の平均という誤りを避けるため）。
+- 注意: ライブURLは公開バケット（推測困難だが公開）。完全非公開が必要なら
+  Supabase Auth ログインを足す拡張が要る（未実装）。
+
 ## ✅ 過去分の一括取り込み（backfill）完了（2026-07-26）
 - `python -m etl.backfill --from 2026-03-13 --to 2026-07-26`（Actionsのbackfill入力でも可）。
 - cashier: 売上明細 2026-03-20〜07-26（129日・約11,000行）。3/20より前は売上0と確認。
