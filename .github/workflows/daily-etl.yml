@@ -111,6 +111,12 @@ jobs:
           fi
           echo "Secrets OK"
 
+      # 一時：公開URLの識別子(プロジェクトref)だけを表示する。
+      # SUPABASE_URL 全体は秘密なので伏字になるが、ref部分だけなら表示できる。
+      - name: 配信先URLの識別子を表示（一時）
+        run: |
+          echo "PROJECT_REF=$(printf '%s' "$SUPABASE_URL" | sed -E 's#^https?://##; s#\..*$##')"
+
       - name: ETL を実行
         if: ${{ ! inputs.dashboard }}
         run: |
