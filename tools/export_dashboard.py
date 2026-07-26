@@ -157,6 +157,11 @@ def _ensure_bucket(sb: Supabase, bucket: str, public: bool) -> None:
 def _upload(sb: Supabase, bucket: str, path: str, body: bytes,
             content_type: str, public: bool) -> str:
     url = f"{sb.url}/storage/v1/object/{bucket}/{path}"
+    # ⚠️ 上書き(x-upsert)だと最初に付いたContent-Typeが残り続けることがある
+    #    （その結果 index.html が text/plain のまま配信され、ブラウザが
+    #      「ページ」ではなく「ソース文字列」を表示してしまう不具合になる）。
+    #    確実に種類を付け直すため「一度消してから新規作成」する。
+    sb.session.delete(url, timeout=60)
     resp = sb.session.post(
         url, data=body,
         headers={
@@ -175,6 +180,21 @@ def _upload(sb: Supabase, bucket: str, path: str, body: bytes,
         loc = f"{bucket}/{path}（非公開・ログインした社内メンバーのみ）"
     print(f"  配信: {loc}")
     return loc
+
+
+def _verify_served(public_url: str) -> None:
+    """配信後、実際にブラウザが受け取るContent-Typeを確認して表示する。"""
+    import requests
+    try:
+        r = requests.get(public_url, timeout=60)
+        ct = r.headers.get("Content-Type")
+        print(f"  検証: HTTP {r.status_code} / Content-Type = {ct}")
+        if r.status_code == 200 and ct and "text/html" in ct:
+            print("  ✅ ブラウザで正しく『ページ』として開けます。")
+        else:
+            print("  ⚠️ text/html で配信されていません（ブラウザがソース表示になる恐れ）。")
+    except Exception as e:
+        print(f"  検証をスキップ（取得できず）: {e}")
 
 
 def _delete(sb: Supabase, bucket: str, path: str) -> None:
@@ -241,6 +261,7 @@ def main() -> int:
                     "text/html; charset=utf-8", public=True)
             _delete(sb, BUCKET_PUBLIC, "data.json")  # 公開側の実データを消す
             page = f"{sb.url}/storage/v1/object/public/{BUCKET_PUBLIC}/index.html"
+            _verify_served(page)
             print(f"\n✅ 配信しました（認証モード）。社内の方は下のURLを開き、"
                   f"@avend.co.jp の Google でログインしてください。\n  {page}")
         else:
@@ -251,6 +272,7 @@ def main() -> int:
             _upload(sb, BUCKET_PUBLIC, "index.html", html,
                     "text/html; charset=utf-8", public=True)
             page = f"{sb.url}/storage/v1/object/public/{BUCKET_PUBLIC}/index.html"
+            _verify_served(page)
             print(f"\n✅ 配信しました（公開モード）。ブラウザで下のURLを開いてください。\n  {page}")
 
     return 0
