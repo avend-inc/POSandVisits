@@ -41,24 +41,42 @@ from .settings import (
 
 # ------------------------------------------------------------
 # 画面の目印（候補を上から順に試す）
+#
+# 【2026-07-26 に実際のログイン後画面で確認】
+#   ・取引履歴一覧の期間欄は「検索オプション」(class=collapsed) の中に隠れている。
+#     → まず「検索オプション」を開いてから日付欄を探す。
+#   ・CSV出力は2つのボタン: 「CSV出力(明細)」「CSV出力(伝票)」
+#     （button.btn.btn-info.btn-sm）。欲しいのは 1明細=1行 の「明細」。
 # ------------------------------------------------------------
+# 「検索オプション」を開くためのラベル（閉じていることがある）
+SEARCH_OPTION_TEXTS = ["検索オプション", "詳細検索", "検索条件", "条件を開く"]
+
 DATE_FROM_CANDIDATES = [
     'input[type="date"]',
     'input[name*="start" i]',
     'input[name*="from" i]',
+    'input[name*="date" i]',
+    'input[class*="date" i]',
+    'input.datepicker',
     'input[placeholder*="開始"]',
     'input[placeholder*="YYYY"]',
+    'input[placeholder*="日付"]',
 ]
 DATE_TO_CANDIDATES = [
     'input[type="date"]',
     'input[name*="end" i]',
     'input[name*="to" i]',
+    'input[name*="date" i]',
+    'input[class*="date" i]',
+    'input.datepicker',
     'input[placeholder*="終了"]',
     'input[placeholder*="YYYY"]',
+    'input[placeholder*="日付"]',
 ]
 SEARCH_TEXTS = ["検索", "絞り込み", "表示", "適用", "この条件で検索"]
-CSV_TEXTS = ["CSVダウンロード", "CSV出力", "CSVエクスポート", "ダウンロード",
-             "エクスポート", "CSV"]
+# 「CSV出力(明細)」を最優先。明細＝1商品1行で sales テーブルの形に合う。
+CSV_TEXTS = ["CSV出力(明細)", "CSV出力（明細）", "CSVダウンロード", "CSV出力",
+             "CSVエクスポート", "ダウンロード", "エクスポート", "CSV"]
 # CSVの種類を選ぶメニューが出た場合、「明細」を含むものを選ぶ
 DETAIL_TEXTS = ["明細", "取引明細", "商品明細", "TradeDetail"]
 
@@ -97,7 +115,69 @@ def _click_by_text(page, texts: list[str]) -> bool:
                     return True
             except Exception:
                 continue
+    # role で見つからなければ、素のテキスト一致でも試す
+    for text in texts:
+        loc = page.get_by_text(re.compile(re.escape(text)))
+        try:
+            if loc.count() > 0 and loc.first.is_visible():
+                loc.first.click()
+                return True
+        except Exception:
+            continue
     return False
+
+
+def _click_exact(page, texts: list[str]) -> bool:
+    """完全一致のラベルで押す（部分一致の誤爆を避けたい時用）。押せたら True。"""
+    for text in texts:
+        for role in ("button", "link"):
+            try:
+                loc = page.get_by_role(role, name=text, exact=True)
+                if loc.count() > 0 and loc.first.is_visible():
+                    loc.first.click()
+                    return True
+            except Exception:
+                continue
+    return False
+
+
+def _click_first_text(page, texts: list[str]) -> str | None:
+    """texts を上から試し、押せたらその文字列を返す（どれを押したか知りたい時用）。"""
+    for text in texts:
+        for role in ("button", "link", "menuitem"):
+            loc = page.get_by_role(role, name=re.compile(re.escape(text)))
+            try:
+                if loc.count() > 0 and loc.first.is_visible():
+                    loc.first.click()
+                    return text
+            except Exception:
+                continue
+    return None
+
+
+def open_search_options(page) -> None:
+    """
+    「検索オプション」（閉じていることがある）を開いて、中の期間欄を出す。
+    既に開いていても押しすぎないよう、閉じている時だけ押す。
+    """
+    for text in SEARCH_OPTION_TEXTS:
+        loc = page.get_by_text(re.compile(re.escape(text)))
+        try:
+            if loc.count() == 0:
+                continue
+            el = loc.first
+            if not el.is_visible():
+                continue
+            # aria-expanded / class="collapsed" を見て、閉じている時だけ開く
+            expanded = (el.get_attribute("aria-expanded") or "").lower()
+            klass = el.get_attribute("class") or ""
+            if expanded == "true" and "collapsed" not in klass:
+                return  # 既に開いている
+            el.click()
+            page.wait_for_timeout(800)   # 展開アニメーションを待つ
+            return
+        except Exception:
+            continue
 
 
 # ------------------------------------------------------------
@@ -158,6 +238,9 @@ def set_date_range(page, business_date: str) -> None:
     print(f"  期間を {business_date} に設定します")
     slash = business_date.replace("-", "/")
 
+    # 期間欄は「検索オプション」の中に隠れていることがあるので、先に開く
+    open_search_options(page)
+
     from_sel = _env_selector("CASHIER_DATE_FROM_SELECTOR")
     to_sel = _env_selector("CASHIER_DATE_TO_SELECTOR")
 
@@ -193,8 +276,13 @@ def set_date_range(page, business_date: str) -> None:
         except Exception:
             pass
 
-    if _click_by_text(page, SEARCH_TEXTS):
-        page.wait_for_load_state("networkidle", timeout=45_000)
+    # 検索（絞り込み）を実行。「検索」は「検索オプション」に部分一致して
+    # パネルを閉じてしまう恐れがあるので、まず完全一致で押す。
+    if _click_exact(page, SEARCH_TEXTS) or _click_by_text(page, ["絞り込み", "適用", "この条件で検索", "表示"]):
+        try:
+            page.wait_for_load_state("networkidle", timeout=45_000)
+        except Exception:
+            pass
     time.sleep(1)
 
 
@@ -210,11 +298,15 @@ def download_csv(page) -> bytes:
             if csv_sel:
                 page.locator(csv_sel).first.click()
             else:
-                if not _click_by_text(page, CSV_TEXTS):
+                # 「CSV出力(明細)」を最優先。押した文字に「明細」が入っていれば
+                # そのまま明細CSVが落ちてくるので、種類選択の追加クリックはしない。
+                clicked = _click_first_text(page, CSV_TEXTS)
+                if clicked is None:
                     raise EtlError("CSVボタンが見つかりません")
-                # 種類を選ぶメニューが出た場合は「明細」を選ぶ
-                time.sleep(1)
-                _click_by_text(page, DETAIL_TEXTS)
+                if "明細" not in clicked:
+                    # 種類を選ぶメニューが出た場合だけ「明細」を選ぶ
+                    time.sleep(1)
+                    _click_by_text(page, DETAIL_TEXTS)
         download = download_info.value
     except EtlError:
         dump_page(page, "cashier_csv_button_notfound")
