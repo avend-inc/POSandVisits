@@ -285,6 +285,20 @@ def set_date_range(page, start_date: str, end_date: str | None = None) -> None:
         except Exception:
             pass
 
+    # 診断: 日付欄に実際に何が入ったか（name/id/value）を出す。
+    try:
+        import json as _json
+        vals = page.evaluate(
+            """() => [...document.querySelectorAll('input')]
+                 .filter(e => {const r=e.getBoundingClientRect();
+                               return r.width>0 && r.height>0;})
+                 .map(e => ({name:e.name||null, id:e.id||null, type:e.type,
+                             ph:e.placeholder||null, val:e.value}))"""
+        )
+        print("  [日付欄デバッグ] " + _json.dumps(vals, ensure_ascii=False))
+    except Exception as _e:
+        print(f"  （日付欄デバッグに失敗: {_e}）")
+
     # 検索（絞り込み）を実行。「検索」は「検索オプション」に部分一致して
     # パネルを閉じてしまう恐れがあるので、まず完全一致で押す。
     if _click_exact(page, SEARCH_TEXTS) or _click_by_text(page, ["絞り込み", "適用", "この条件で検索", "表示"]):
