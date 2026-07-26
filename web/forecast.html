@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>NOTIME 着地見込み</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --surface:#ffffff; --surface2:#f0f2f5; --border:#e2e6ea;
+    --ink:#1a1d21; --ink2:#5b636c; --muted:#8a929b;
+    --accent:#2f6fd0; --accent-weak:#dbe6f7; --good:#1a8a5a; --bad:#c0392b;
+    --shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.04); --radius:14px;
+  }
+  @media (prefers-color-scheme: dark){:root{
+    --bg:#0e1116; --surface:#161b22; --surface2:#1c232c; --border:#2a323c;
+    --ink:#e7ebef; --ink2:#a3adb8; --muted:#727d89;
+    --accent:#5b9bff; --accent-weak:#1e2f4a; --good:#3fce8c; --bad:#ff6b5e; --shadow:0 1px 2px rgba(0,0,0,.4);
+  }}
+  :root[data-theme="dark"]{ --bg:#0e1116;--surface:#161b22;--surface2:#1c232c;--border:#2a323c;--ink:#e7ebef;--ink2:#a3adb8;--muted:#727d89;--accent:#5b9bff;--accent-weak:#1e2f4a;--good:#3fce8c;--bad:#ff6b5e;--shadow:0 1px 2px rgba(0,0,0,.4);}
+  :root[data-theme="light"]{ --bg:#f6f7f9;--surface:#ffffff;--surface2:#f0f2f5;--border:#e2e6ea;--ink:#1a1d21;--ink2:#5b636c;--muted:#8a929b;--accent:#2f6fd0;--accent-weak:#dbe6f7;--good:#1a8a5a;--bad:#c0392b;--shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.04);}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,sans-serif;
+    -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;}
+  .wrap{max-width:820px;margin:0 auto;padding:18px 16px 60px;}
+  header{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;margin-bottom:2px;}
+  h1{font-size:20px;margin:0;font-weight:700;letter-spacing:.02em;}
+  .sub{color:var(--muted);font-size:12px;}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:12px 0 4px;}
+  select{appearance:none;background:var(--surface);color:var(--ink);border:1px solid var(--border);border-radius:10px;
+    padding:8px 30px 8px 12px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;
+    background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);
+    background-position:calc(100% - 16px) 55%,calc(100% - 11px) 55%;background-size:5px 5px,5px 5px;background-repeat:no-repeat;}
+  label.lbl{font-size:12px;color:var(--muted);}
+  .navlink{border:1px solid var(--border);background:var(--surface);color:var(--accent);border-radius:9px;padding:7px 11px;font-size:12px;font-weight:700;cursor:pointer;text-decoration:none;}
+  .navlink:hover{border-color:var(--accent);}
+  .themebtn{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:9px;padding:7px 10px;font-size:12px;cursor:pointer;}
+  .chip{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:8px;padding:7px 11px;font-size:12px;font-weight:600;cursor:pointer;}
+  .chip:hover{color:var(--ink);border-color:var(--accent);}
+  .panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px 16px 12px;margin:14px 0;}
+  .panel h2{font-size:14px;margin:0 0 8px;font-weight:700;}
+  .hero{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 18px;}
+  .hero .big{font-size:34px;font-weight:800;letter-spacing:-.01em;line-height:1.05;}
+  .hero .lbl2{font-size:12px;color:var(--ink2);font-weight:600;}
+  .pills{display:flex;flex-wrap:wrap;gap:8px 10px;margin-top:8px;}
+  .pill{background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:6px 10px;font-size:12px;color:var(--ink2);font-weight:600;}
+  .pill b{color:var(--ink);}
+  .delta{font-weight:700;} .up{color:var(--good);} .down{color:var(--bad);} .flat{color:var(--muted);}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  .tblwrap{overflow-x:auto;}
+  th,td{padding:8px 8px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--border);}
+  th:first-child,td:first-child{text-align:left;}
+  th{color:var(--ink2);font-weight:700;font-size:11.5px;}
+  tfoot td{font-weight:750;border-top:2px solid var(--border);background:var(--surface2);}
+  input.num{width:96px;background:var(--surface);color:var(--ink);border:1px solid var(--border);border-radius:8px;
+    padding:6px 8px;font-size:13px;font-weight:600;text-align:right;font-family:inherit;-webkit-font-smoothing:antialiased;}
+  input.num:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-weak);}
+  td .edit{color:var(--accent);}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:8px 14px;align-items:center;font-size:13.5px;}
+  .kv .k{color:var(--ink2);font-weight:600;} .kv .v{text-align:right;font-weight:700;}
+  .note{font-size:11.5px;color:var(--muted);margin:8px 0 0;line-height:1.7;}
+  .foot{color:var(--muted);font-size:11px;margin-top:18px;line-height:1.7;}
+  .err{padding:20px;color:var(--bad);font-weight:600;}
+  .rowflex{display:flex;flex-wrap:wrap;gap:16px 22px;align-items:center;margin:2px 0 6px;}
+  .field{display:flex;align-items:center;gap:8px;} .field label{font-size:12.5px;color:var(--ink2);font-weight:600;}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"><div class="sub" style="padding:40px 0">読み込み中…</div></div>
+
+<script>
+"use strict";
+const YEN=n=>Math.round(n).toLocaleString("ja-JP");
+const NUM=n=>Math.round(n).toLocaleString("ja-JP");
+const F1=n=>(Math.round(n*10)/10).toLocaleString("ja-JP",{minimumFractionDigits:1,maximumFractionDigits:1});
+const F2=n=>(Math.round(n*100)/100).toLocaleString("ja-JP",{minimumFractionDigits:2,maximumFractionDigits:2});
+const METS=["in","ex","tx","it","v"];
+const state={store:"all",ym:null};
+let DATA=null, AUTO=null, fc=null;
+
+const SUPA_URL="__SUPABASE_URL__", SUPA_ANON="__SUPABASE_ANON_KEY__", PUBLIC_DATA_URL="__PUBLIC_DATA_URL__";
+const ALLOW_DOMAIN="@avend.co.jp"; let SB=null;
+const isPH=s=>!s||s.slice(0,2)==="__";
+function screen(html){document.getElementById("app").innerHTML=html;}
+function showError(e){screen('<div class="err">データを読み込めませんでした：'+esc(String(e&&e.message||e))+'</div>');}
+function prep(){ if(!DATA||!DATA.daily)throw new Error("データが空です");
+  const ds=DATA.daily.map(r=>r.d).sort(); DATA._min=ds[0]; DATA._max=ds[ds.length-1];
+  const sd=DATA.daily.filter(r=>(r.tx||0)>0||(r.in||0)>0).map(r=>r.d).sort();
+  DATA._salesMax=sd.length?sd[sd.length-1]:DATA._max; }
+async function boot(){ try{
+    if(window.__DATA__){DATA=window.__DATA__;prep();render();return;}
+    if(!isPH(SUPA_URL)&&!isPH(SUPA_ANON)&&isPH(PUBLIC_DATA_URL)){await authBoot();return;}
+    const url=isPH(PUBLIC_DATA_URL)?"data.json":PUBLIC_DATA_URL;
+    DATA=await (await fetch(url,{cache:"no-store"})).json(); prep(); render();
+  }catch(e){showError(e);} }
+async function ensureSupabase(){ if(window.supabase)return;
+  await new Promise((res,rej)=>{const s=document.createElement("script");s.src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2";
+    s.onload=res;s.onerror=()=>rej(new Error("ログイン部品を読み込めませんでした"));document.head.appendChild(s);}); }
+async function authBoot(){ screen('<div class="sub" style="padding:40px 0">読み込み中…</div>'); await ensureSupabase();
+  SB=window.supabase.createClient(SUPA_URL,SUPA_ANON,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,flowType:"pkce",storageKey:"notime-auth"}});
+  const {data:{session}}=await SB.auth.getSession();
+  if(!session){screen('<div class="err">ログインが必要です。<a href="index.html">サマリー</a> からログインしてください。</div>');return;}
+  const email=(session.user&&session.user.email||"").toLowerCase();
+  if(!email.endsWith(ALLOW_DOMAIN)){screen('<div class="err">アクセス権がありません。</div>');return;}
+  const {data,error}=await SB.storage.from("dashboard-data").download("data.json");
+  if(error)throw new Error("データを取得できませんでした（"+error.message+"）");
+  DATA=JSON.parse(await data.text()); prep(); render(); }
+
+function esc(s){return String(s).replace(/[&<>]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[m]));}
+function isWeekend(d){const g=new Date(d+"T00:00:00Z").getUTCDay();return g===0||g===6;}
+function addDays(d,n){const t=new Date(d+"T00:00:00Z");t.setUTCDate(t.getUTCDate()+n);return t.toISOString().slice(0,10);}
+function monthEnd(ym){const[y,m]=ym.split("-").map(Number);const last=new Date(Date.UTC(y,m,0)).getUTCDate();return `${ym}-${String(last).padStart(2,"0")}`;}
+function todayStr(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;}
+function usableStores(){const w=new Set(DATA.daily.map(r=>r.s));return DATA.stores.filter(s=>w.has(s.id));}
+function monthsInData(){const s=new Set(DATA.daily.map(r=>r.d.slice(0,7)));return [...s].sort();}
+
+// データから「私の見込み」を自動算出
+function computeAuto(store, ym){
+  const ids = store==="all" ? new Set(usableStores().map(s=>s.id)) : new Set([store]);
+  const mS=ym+"-01", mE=monthEnd(ym), today=todayStr(), winStart=addDays(mS,-56);
+  const byDate={};
+  for(const r of DATA.daily){ if(!ids.has(r.s))continue; if(r.d<winStart||r.d>mE)continue;
+    const a=byDate[r.d]||(byDate[r.d]={in:0,ex:0,tx:0,it:0,v:0,hasV:false});
+    a.in+=r.in||0;a.ex+=r.ex||0;a.tx+=r.tx||0;a.it+=r.it||0;if(r.v!=null){a.v+=r.v;a.hasV=true;} }
+  const monthDates=Object.keys(byDate).filter(d=>d>=mS&&d<=mE).sort();
+  const closing = monthDates.filter(d=>d<=today).slice(-1)[0] || null;
+  const td={in:0,ex:0,tx:0,it:0,v:0};
+  const wk={in:0,ex:0,tx:0,it:0,v:0,n:0}, we={in:0,ex:0,tx:0,it:0,v:0,n:0};
+  if(closing) for(const d of monthDates){ if(d>closing)continue; const a=byDate[d]; const b=isWeekend(d)?we:wk;
+    METS.forEach(k=>{b[k]+=a[k];td[k]+=a[k];}); b.n++; }
+  // 当月に平日/土日祝が無い（月初など）ときの保険：直近56日の平均を使う
+  const trWk={in:0,ex:0,tx:0,it:0,v:0,n:0}, trWe={in:0,ex:0,tx:0,it:0,v:0,n:0};
+  const trFrom=addDays(closing||today,-56), trTo=closing||addDays(today,-1);
+  for(const d of Object.keys(byDate)){ if(d<trFrom||d>trTo)continue; const a=byDate[d]; const b=isWeekend(d)?trWe:trWk; METS.forEach(k=>b[k]+=a[k]); b.n++; }
+  const avgOf=(m,t,k)=> m.n? m[k]/m.n : (t.n? t[k]/t.n : 0);
+  const avg={}; METS.forEach(k=>avg[k]={wk:avgOf(wk,trWk,k), we:avgOf(we,trWe,k)});
+  let remWk=0,remWe=0; const start = closing? addDays(closing,1): mS;
+  for(let d=start; d<=mE; d=addDays(d,1)){ if(isWeekend(d))remWe++; else remWk++; }
+  const exRatio = td.in? td.ex/td.in : 0.91;
+  return {closing, mS, mE, td, wkN:wk.n, weN:we.n, avg, remWk, remWe, exRatio};
+}
+
+function fcKey(){return `notime-fc-${state.store}-${state.ym}`;}
+function loadFc(){
+  // 既定＝自動見込み。保存済みの手直しがあればそれを優先。
+  const def={remWk:AUTO.remWk, remWe:AUTO.remWe, budget:0,
+    avg:{in:{wk:Math.round(AUTO.avg.in.wk),we:Math.round(AUTO.avg.in.we)},
+         v:{wk:Math.round(AUTO.avg.v.wk),we:Math.round(AUTO.avg.v.we)},
+         tx:{wk:Math.round(AUTO.avg.tx.wk),we:Math.round(AUTO.avg.tx.we)},
+         it:{wk:Math.round(AUTO.avg.it.wk),we:Math.round(AUTO.avg.it.we)}}};
+  try{const s=localStorage.getItem(fcKey()); if(s){const o=JSON.parse(s);
+    return {remWk:num(o.remWk,def.remWk),remWe:num(o.remWe,def.remWe),budget:num(o.budget,0),
+      avg:{in:mrg(o,def,"in"),v:mrg(o,def,"v"),tx:mrg(o,def,"tx"),it:mrg(o,def,"it")}};}
+  }catch(e){}
+  return def;
+}
+function mrg(o,def,k){const a=(o.avg&&o.avg[k])||{};return {wk:num(a.wk,def.avg[k].wk),we:num(a.we,def.avg[k].we)};}
+function num(v,d){const n=Number(v);return Number.isFinite(n)?n:d;}
+function saveFc(){try{localStorage.setItem(fcKey(),JSON.stringify(fc));}catch(e){}}
+function resetFc(){try{localStorage.removeItem(fcKey());}catch(e){} fc=loadFc(); render(); }
+
+// 着地見込みの計算（実績td + 残日×見込平均）
+function landing(){
+  const L={};
+  METS.forEach(k=>{ if(k==="ex")return;
+    L[k]=AUTO.td[k] + fc.remWk*(fc.avg[k]?fc.avg[k].wk:0) + fc.remWe*(fc.avg[k]?fc.avg[k].we:0);
+  });
+  L.ex=L.in*AUTO.exRatio;                 // 税抜は税込×実績税率
+  return L;
+}
+const KPI=[
+  {k:"ex", name:"税抜売上", fmt:v=>YEN(v)+"円", calc:t=>t.ex},
+  {k:"pr", name:"購入率",   fmt:v=>F1(v)+"%",   calc:t=>t.v>0?t.tx/t.v*100:null},
+  {k:"aov",name:"客単価",   fmt:v=>YEN(v)+"円", calc:t=>t.tx>0?t.in/t.tx:null},
+  {k:"upt",name:"平均購入数",fmt:v=>F2(v)+"点", calc:t=>t.tx>0?t.it/t.tx:null},
+  {k:"aup",name:"平均商品単価",fmt:v=>YEN(v)+"円",calc:t=>t.it>0?t.ex/t.it:null},
+];
+const DRIVERS=[
+  {k:"in",name:"税込売上",fmt:v=>YEN(v),unit:"円",step:1000},
+  {k:"v", name:"来店客数",fmt:v=>NUM(v),unit:"人",step:1},
+  {k:"tx",name:"取引数",  fmt:v=>NUM(v),unit:"件",step:1},
+  {k:"it",name:"販売点数",fmt:v=>NUM(v),unit:"点",step:1},
+];
+
+function render(){
+  const us=usableStores();
+  const months=monthsInData();
+  if(!state.ym) state.ym = DATA._salesMax.slice(0,7);
+  if(!months.includes(state.ym)) state.ym=months[months.length-1];
+  AUTO=computeAuto(state.store, state.ym);
+  fc=loadFc();
+
+  const stores=[{id:"all",name:"総合（全店）"},...us.map(s=>({id:s.id,name:s.name}))];
+  const storeName=state.store==="all"?"総合（全店）":(us.find(s=>s.id===state.store)||{}).name||"";
+  const md=state.ym.split("-"); const monthLabel=`${md[0]}年${+md[1]}月`;
+
+  document.getElementById("app").innerHTML=`
+    <header>
+      <h1>NOTIME 着地見込み</h1>
+      <a class="navlink" href="index.html" style="margin-left:auto">← サマリー</a>
+      <a class="navlink" href="trends.html">📈 推移</a>
+      <button class="themebtn" id="themebtn">◐ 表示切替</button>
+    </header>
+    <div class="controls">
+      <label class="lbl">店舗</label>
+      <select id="store">${stores.map(s=>`<option value="${s.id}" ${String(s.id)===String(state.store)?"selected":""}>${s.name}</option>`).join("")}</select>
+      <label class="lbl" style="margin-left:6px">対象月</label>
+      <select id="ym">${months.slice().reverse().map(m=>{const[y,mm]=m.split("-");return `<option value="${m}" ${m===state.ym?"selected":""}>${y}年${+mm}月</option>`;}).join("")}</select>
+    </div>
+
+    <div class="panel">
+      <h2>${monthLabel}・${esc(storeName)} の着地見込み</h2>
+      <div class="hero">
+        <span class="lbl2">着地見込み（税込）</span>
+        <span class="big" id="land-in">—</span>
+        <span id="land-vs"></span>
+      </div>
+      <div class="pills" id="pills"></div>
+      <p class="note">締日（最新データ）: <b id="closing">—</b> ／ 締日までの税込売上: <b id="td-in">—</b>。
+        締日より後の日数×下の「見込み平均／日」で着地を計算しています。</p>
+    </div>
+
+    <div class="panel">
+      <h2>前提（ここを直すと即反映・この端末に保存されます）</h2>
+      <div class="rowflex">
+        <div class="field"><label>残 平日日数</label><input class="num" id="remWk" type="number" min="0" step="1" value="${fc.remWk}" style="width:70px"></div>
+        <div class="field"><label>残 土日祝日数</label><input class="num" id="remWe" type="number" min="0" step="1" value="${fc.remWe}" style="width:70px"></div>
+        <div class="field"><label>予算（税込・任意）</label><input class="num" id="budget" type="number" min="0" step="10000" value="${fc.budget||""}" placeholder="未入力"></div>
+        <button class="chip" id="reset">自動見込みに戻す</button>
+      </div>
+      <p class="note">土日祝の残日数は「土日」を自動で数えています。<b>祝日がある月は手で足して</b>ください。予算を入れると計画比・差額が出ます。</p>
+      <div class="tblwrap"><table id="driver"></table></div>
+    </div>
+
+    <div class="panel">
+      <h2>KPI 着地見込み</h2>
+      <div class="tblwrap"><table id="kpi"></table></div>
+      <p class="note">税抜売上＝税込×実績税率(${(AUTO.exRatio).toFixed(3)})。購入率＝取引数÷来店客数／客単価＝税込÷取引数／平均購入数＝点数÷取引数／平均商品単価＝税抜÷点数。レジ袋・クーポンは除外済み。</p>
+    </div>
+
+    <div class="foot">「私の見込み」はデータから自動算出した初期値です（平日／土日祝それぞれの1日あたり平均。当月の実績、無ければ直近8週）。ズレていれば数値を上書きしてください（この端末に保存され、次回もその値を使います）。「自動見込みに戻す」で初期値に戻せます。締日＝取り込み済みの最新日。</div>`;
+
+  document.getElementById("store").onchange=e=>{state.store=e.target.value==="all"?"all":+e.target.value;render();};
+  document.getElementById("ym").onchange=e=>{state.ym=e.target.value;render();};
+  document.getElementById("themebtn").onclick=toggleTheme;
+  document.getElementById("reset").onclick=resetFc;
+  bindInput("remWk",v=>fc.remWk=Math.max(0,Math.round(v)));
+  bindInput("remWe",v=>fc.remWe=Math.max(0,Math.round(v)));
+  bindInput("budget",v=>fc.budget=Math.max(0,v));
+
+  drawDriver(); recompute();
+}
+
+function bindInput(id,setter){const el=document.getElementById(id);if(!el)return;
+  el.oninput=()=>{const v=Number(el.value); if(el.value===""){setter(0);}else if(Number.isFinite(v)){setter(v);} saveFc(); recompute();};}
+
+function drawDriver(){
+  const head=`<thead><tr><th>指標</th><th>締日まで(実績)</th><th>平日 見込/日</th><th>土日祝 見込/日</th><th>着地見込み</th></tr></thead>`;
+  const rows=DRIVERS.map(d=>`<tr>
+    <td>${d.name}</td>
+    <td>${d.fmt(AUTO.td[d.k])}${d.unit}</td>
+    <td><input class="num edit" data-k="${d.k}" data-t="wk" type="number" min="0" step="${d.step}" value="${Math.round(fc.avg[d.k].wk)}"></td>
+    <td><input class="num edit" data-k="${d.k}" data-t="we" type="number" min="0" step="${d.step}" value="${Math.round(fc.avg[d.k].we)}"></td>
+    <td id="land-${d.k}">—</td>
+  </tr>`).join("");
+  document.getElementById("driver").innerHTML=head+"<tbody>"+rows+"</tbody>";
+  document.querySelectorAll('#driver input.edit').forEach(el=>{
+    el.oninput=()=>{const v=Number(el.value);const k=el.dataset.k,t=el.dataset.t;
+      fc.avg[k][t]=(el.value===""||!Number.isFinite(v))?0:Math.max(0,v); saveFc(); recompute();};});
+}
+
+function recompute(){
+  const L=landing(), td=AUTO.td;
+  document.getElementById("land-in").textContent=YEN(L.in)+"円";
+  DRIVERS.forEach(d=>{const c=document.getElementById("land-"+d.k);if(c)c.textContent=d.fmt(L[d.k])+d.unit;});
+  document.getElementById("closing").textContent=AUTO.closing?fmtMD(AUTO.closing):"—（当月データなし）";
+  document.getElementById("td-in").textContent=YEN(td.in)+"円";
+
+  // pills: 進捗率・計画比・差額
+  const b=fc.budget;
+  const pills=[];
+  pills.push(`<span class="pill">締日まで <b>${YEN(td.in)}円</b></span>`);
+  pills.push(`<span class="pill">残 平日<b>${fc.remWk}</b>・土日祝<b>${fc.remWe}</b>日</span>`);
+  if(b>0){
+    const prog=td.in/b*100, ratio=L.in/b*100, diff=L.in-b;
+    pills.push(`<span class="pill">進捗率 <b>${F1(prog)}%</b></span>`);
+    pills.push(`<span class="pill">計画比 <b>${F1(ratio)}%</b></span>`);
+    const cls=diff>=0?"up":"down";
+    pills.push(`<span class="pill">計画差額 <b class="delta ${cls}">${diff>=0?"+":"−"}${YEN(Math.abs(diff))}円</b></span>`);
+    document.getElementById("land-vs").innerHTML=`<span class="lbl2 delta ${ratio>=100?"up":"down"}">（対予算 ${F1(ratio)}%）</span>`;
+  }else{
+    document.getElementById("land-vs").innerHTML="";
+  }
+  document.getElementById("pills").innerHTML=pills.join("");
+
+  // KPI table: 締日まで vs 着地
+  const head=`<thead><tr><th>指標</th><th>締日まで(実績)</th><th>着地見込み</th></tr></thead>`;
+  const body=KPI.map(m=>{const tv=m.calc(td),lv=m.calc(L);
+    return `<tr><td>${m.name}</td><td>${tv==null?"—":m.fmt(tv)}</td><td>${lv==null?"—":m.fmt(lv)}</td></tr>`;}).join("");
+  document.getElementById("kpi").innerHTML=head+"<tbody>"+body+"</tbody>";
+}
+
+function fmtMD(d){const[,m,dd]=d.split("-");return `${+m}/${+dd}`;}
+function toggleTheme(){const r=document.documentElement;const cur=r.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");
+  r.setAttribute("data-theme",cur==="dark"?"light":"dark");}
+boot();
+</script>
+</body>
+</html>
