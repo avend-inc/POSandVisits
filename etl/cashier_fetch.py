@@ -11,18 +11,24 @@ cashier（キャッシャー）から売上明細CSVを取ってくる
        type="text" / type="password" / type="submit" で指定する。
   ・JavaScriptで動くログイン画面なので、ブラウザ（Playwright）が必要。
 
-【日付指定とCSVボタンについて】
-  取引一覧画面の中身はログインしないと見えないため、
-  「よくある形」を順番に試す作りにしてある。
-  もし画面が変わって見つからない場合は、
-    ・debug/ にその瞬間の画面とHTMLを保存する
-    ・環境変数で目印（セレクタ）を上書きできる
-  ようにしてあるので、コードを書き換えずに直せる。
+【取引履歴一覧の操作手順（2026-07-26 に実画面で確定・動作確認済み）】
+  1. 期間欄は「検索オプション」(a.collapsed / href=#search-details) の中に
+     隠れている → まず開く（open_search_options）。
+  2. 開始日・終了日を対象日にして「検索」ボタンで絞り込む。
+  3. 「CSV出力(明細)」ボタン（button.btn-info / data-toggle=modal /
+     data-target=#download-format-selector-modal）を押す。
+     ⚠️ これはダウンロード形式を選ぶ“モーダルを開くだけ”のボタン。
+  4. 開いたモーダルの中の「ダウンロード」ボタンを押して初めてCSVが落ちる。
+  → 164行/日 の明細CSVを取得し、Supabase sales に保存できることを確認済み。
 
-    CASHIER_DATE_FROM_SELECTOR  … 開始日の入力欄
-    CASHIER_DATE_TO_SELECTOR    … 終了日の入力欄
-    CASHIER_SEARCH_SELECTOR     … 検索ボタン
-    CASHIER_CSV_SELECTOR        … CSVダウンロードボタン
+  画面が変わって見つからない場合の保険:
+    ・失敗時は debug/ に画面・HTML・入力欄/ボタン一覧・通信ログを保存する
+      （実行ログにも出るので、Actionsのログだけで目印を直せる）。
+    ・環境変数で目印（セレクタ）を上書きできる:
+        CASHIER_DATE_FROM_SELECTOR  … 開始日の入力欄
+        CASHIER_DATE_TO_SELECTOR    … 終了日の入力欄
+        CASHIER_SEARCH_SELECTOR     … 検索ボタン
+        CASHIER_CSV_SELECTOR        … CSV出力ボタン
 """
 from __future__ import annotations
 
