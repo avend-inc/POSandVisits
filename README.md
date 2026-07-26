@@ -18,10 +18,11 @@ Python から **Playwright**（画面を出さないChrome）を動かして取�
 
 ### 手順 1-1. Supabase に表（テーブル）を作る
 
-1. Supabase の管理画面を開く → 左メニューの **SQL Editor**
-2. `sql/001_schema.sql` の中身を全部コピーして貼り付け、**Run**
-3. 続けて `sql/002_seed_stores.sql` も同じように **Run**
+1. Supabase の管理画面を開く → 左メニューの **SQL Editor** →「New query」
+2. **`sql/setup_all.sql`** の中身を全部コピーして貼り付け、**Run**（これ1回だけ）
 
+> `setup_all.sql` は `001_schema.sql` と `002_seed_stores.sql` を1枚にまとめたものです。
+> （分けて実行したい場合は 001 → 002 の順でもOK）
 > 何度実行しても壊れません。表がすでにあれば何も起きません。
 
 ### 手順 1-2. Supabase の「キー」を控える
