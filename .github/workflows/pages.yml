@@ -1,0 +1,69 @@
+# ============================================================
+#  ダッシュボードを GitHub Pages に公開する
+#
+#  ・web/dashboard.html を index.html として配信（正しく「ページ」として開ける）
+#  ・売上データ(data.json)は Supabase から読み込む（毎日の自動更新がそのまま効く）
+#  ・検索避け(noindex + robots.txt)入り
+#  ・このブランチに push すると自動で再公開。手動は Actions から実行(Run workflow)。
+# ============================================================
+name: ダッシュボードをPagesに公開
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/notime-daily-etl-continue-cbheap]
+    paths:
+      - web/dashboard.html
+      - .github/workflows/pages.yml
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@v4
+
+      - name: index.html を組み立てる
+        env:
+          # Supabase 上の data.json（毎日のETLが更新している公開ファイル）
+          DATA_URL: "https://rwfcsanmqvkxiuwdeddv.supabase.co/storage/v1/object/public/web/data.json"
+        run: |
+          mkdir -p _site
+          python3 - <<'PY'
+          import os
+          data_url = os.environ["DATA_URL"]
+          html = open("web/dashboard.html", encoding="utf-8").read()
+          html = (html
+                  .replace("__SUPABASE_URL__", "")
+                  .replace("__SUPABASE_ANON_KEY__", "")
+                  .replace("__PUBLIC_DATA_URL__", data_url))
+          open("_site/index.html", "w", encoding="utf-8").write(html)
+          open("_site/robots.txt", "w").write("User-agent: *\nDisallow: /\n")
+          print("built _site/index.html", len(html), "chars")
+          PY
+
+      - name: Pages の設定（無ければ有効化）
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: 成果物をアップロード
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Pages へ公開
+        id: deployment
+        uses: actions/deploy-pages@v4
