@@ -171,7 +171,7 @@ def _upload(sb: Supabase, bucket: str, path: str, body: bytes,
         url,
         headers=auth,
         data={"cacheControl": "0"},                        # キャッシュさせない
-        files={"": (filename, body, content_type)},        # ← ファイルの種類を明示
+        files={"file": (filename, body, content_type)},    # ← ファイルの種類を明示
         timeout=120,
     )
     if resp.status_code not in (200, 201):
@@ -184,20 +184,30 @@ def _upload(sb: Supabase, bucket: str, path: str, body: bytes,
     return loc
 
 
-def _verify_served(public_url: str, cache_bust: str = "") -> None:
-    """配信後、実際にブラウザが受け取るContent-Typeを確認して表示する。"""
+def _verify_served(sb: Supabase, bucket: str, path: str,
+                   public_url: str, cache_bust: str = "") -> None:
+    """配信後、実際に配信されるContent-Typeと、保存されている本当の種類を確認する。"""
     import requests
+    # ① ブラウザが受け取る種類（公開URL＝CDN経由）
     for label, url in [("通常", public_url),
                        ("cache回避", f"{public_url}?cb={cache_bust}")]:
         try:
             r = requests.get(url, timeout=60)
             ct = r.headers.get("Content-Type")
-            xcache = r.headers.get("x-cache") or r.headers.get("cf-cache-status") or "-"
-            head = r.text[:40].replace("\n", " ")
+            age = r.headers.get("age") or "-"
+            cc = r.headers.get("cache-control") or "-"
             ok = "✅html" if (ct and "text/html" in ct) else "⚠️not-html"
-            print(f"  検証[{label}]: HTTP {r.status_code} / CT={ct} / cache={xcache} / {ok} / 先頭『{head}』")
+            print(f"  検証[{label}]: HTTP {r.status_code} / CT={ct} / age={age} / cc={cc} / {ok}")
         except Exception as e:
-            print(f"  検証[{label}]をスキップ（取得できず）: {e}")
+            print(f"  検証[{label}]をスキップ: {e}")
+    # ② 保存されている本当の種類（infoエンドポイント＝CDNを通さない原本）
+    try:
+        info_url = f"{sb.url}/storage/v1/object/info/public/{bucket}/{path}"
+        r = requests.get(info_url, headers={"apikey": sb.key,
+                         "Authorization": f"Bearer {sb.key}"}, timeout=60)
+        print(f"  保存種類[info]: HTTP {r.status_code} / {r.text[:200]}")
+    except Exception as e:
+        print(f"  保存種類[info]をスキップ: {e}")
 
 
 def _delete(sb: Supabase, bucket: str, path: str) -> None:
@@ -264,7 +274,7 @@ def main() -> int:
                     "text/html; charset=utf-8", public=True)
             _delete(sb, BUCKET_PUBLIC, "data.json")  # 公開側の実データを消す
             page = f"{sb.url}/storage/v1/object/public/{BUCKET_PUBLIC}/index.html"
-            _verify_served(page, cache_bust=data["generated_at"].replace(":",""))
+            _verify_served(sb, BUCKET_PUBLIC, "index.html", page, cache_bust=data["generated_at"].replace(":",""))
             print(f"\n✅ 配信しました（認証モード）。社内の方は下のURLを開き、"
                   f"@avend.co.jp の Google でログインしてください。\n  {page}")
         else:
@@ -275,7 +285,7 @@ def main() -> int:
             _upload(sb, BUCKET_PUBLIC, "index.html", html,
                     "text/html; charset=utf-8", public=True)
             page = f"{sb.url}/storage/v1/object/public/{BUCKET_PUBLIC}/index.html"
-            _verify_served(page, cache_bust=data["generated_at"].replace(":",""))
+            _verify_served(sb, BUCKET_PUBLIC, "index.html", page, cache_bust=data["generated_at"].replace(":",""))
             print(f"\n✅ 配信しました（公開モード）。ブラウザで下のURLを開いてください。\n  {page}")
 
     return 0
