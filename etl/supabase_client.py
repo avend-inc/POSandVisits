@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import math
+import time
 from typing import Any, Iterable
 
 import requests
@@ -29,6 +30,9 @@ import requests
 from .settings import EtlError, SUPABASE_CHUNK, require_env
 
 TIMEOUT = 60
+# 通信が一時的に詰まる（タイムアウト/接続断）ことがあるので、少し待って再試行する
+SEND_RETRIES = 3
+SEND_BACKOFF_SEC = 3
 
 
 def _clean(value: Any) -> Any:
@@ -78,6 +82,29 @@ class Supabase:
     def _endpoint(self, table: str) -> str:
         return f"{self.url}/rest/v1/{table}"
 
+    def _send(self, method: str, url: str, **kwargs) -> requests.Response:
+        """
+        タイムアウトや一時的な接続断に備えて、少し待って再試行しながら送る。
+        （Supabaseが一瞬詰まっても、取り込み全体を落とさないため）
+        """
+        kwargs.setdefault("timeout", TIMEOUT)
+        last: Exception | None = None
+        for attempt in range(1, SEND_RETRIES + 1):
+            try:
+                return self.session.request(method, url, **kwargs)
+            except requests.exceptions.RequestException as e:
+                last = e
+                if attempt < SEND_RETRIES:
+                    wait = SEND_BACKOFF_SEC * attempt
+                    print(f"  ⚠️ Supabase通信に失敗（{e}）。{wait}秒待って再試行します"
+                          f"（{attempt}/{SEND_RETRIES - 1}）...")
+                    time.sleep(wait)
+        raise EtlError(
+            "Supabaseに接続できませんでした（タイムアウト/接続断）。\n"
+            f"  最後のエラー: {last}\n"
+            "  よくある原因: 一時的なネットワーク不調、SUPABASE_URL の綴り違い。"
+        )
+
     def _raise(self, resp: requests.Response, what: str) -> None:
         raise EtlError(
             f"Supabaseへの{what}に失敗しました（HTTP {resp.status_code}）。\n"
@@ -89,18 +116,18 @@ class Supabase:
         )
 
     def select(self, table: str, params: dict[str, str]) -> list[dict]:
-        resp = self.session.get(self._endpoint(table), params=params, timeout=TIMEOUT)
+        resp = self._send("GET", self._endpoint(table), params=params)
         if resp.status_code >= 400:
             self._raise(resp, f"読み出し（{table}）")
         return resp.json()
 
     def insert(self, table: str, rows: list[dict]) -> list[dict]:
         """普通の追加（重複が起きたらエラーになる）。"""
-        resp = self.session.post(
+        resp = self._send(
+            "POST",
             self._endpoint(table),
             data=json.dumps(_clean_rows(rows), ensure_ascii=False).encode("utf-8"),
             headers={"Prefer": "return=representation"},
-            timeout=TIMEOUT,
         )
         if resp.status_code == 409:
             raise DuplicateError(resp.text[:300])
@@ -122,12 +149,12 @@ class Supabase:
         inserted = 0
         for start in range(0, len(rows), SUPABASE_CHUNK):
             chunk = _clean_rows(rows[start:start + SUPABASE_CHUNK])
-            resp = self.session.post(
+            resp = self._send(
+                "POST",
                 self._endpoint(table),
                 params={"on_conflict": on_conflict},
                 data=json.dumps(chunk, ensure_ascii=False).encode("utf-8"),
                 headers={"Prefer": "resolution=ignore-duplicates,return=representation"},
-                timeout=TIMEOUT,
             )
             if resp.status_code >= 400:
                 self._raise(resp, f"書き込み（{table}）")

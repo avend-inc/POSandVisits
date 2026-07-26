@@ -47,6 +47,9 @@ SCAN_JS = """
     value: (el.value || '').slice(0, 40),
     ariaLabel: el.getAttribute('aria-label'),
     dataTestId: el.getAttribute('data-testid') || el.getAttribute('data-test'),
+    href: el.getAttribute ? (el.getAttribute('href') || null) : null,
+    onclick: (el.getAttribute && el.getAttribute('onclick')) ? true : null,
+    disabled: (el.disabled || el.getAttribute('aria-disabled') === 'true') || null,
     className: (el.className || '').toString().slice(0, 120),
     text: (el.innerText || '').trim().slice(0, 60),
   });
@@ -112,9 +115,27 @@ def browser_page(headless: bool = True, accept_downloads: bool = True):
         page = context.new_page()
         main_log = attach_request_log(page)
 
+        # 確認ダイアログ（「ダウンロードしますか？」等）はデフォルトだと
+        # Playwright が自動で打ち消してエクスポートがキャンセルされる。
+        # 出たら必ず「OK」して先へ進める。
+        def _accept_dialog(d) -> None:
+            try:
+                main_log.append(f"[dialog] {d.type}: {(d.message or '')[:80]}")
+                d.accept()
+            except Exception:
+                try:
+                    d.dismiss()
+                except Exception:
+                    pass
+        try:
+            page.on("dialog", _accept_dialog)
+        except Exception:
+            pass
+
         # 別タブ（ポップアップ）で開くCSV出力などの通信も、同じログにためる。
         def _hook_popup(popup) -> None:
             try:
+                popup.on("dialog", _accept_dialog)
                 popup.on("request",
                          lambda r: main_log.append(f"[popup] {r.method} {r.url}"))
                 popup.on("download",
