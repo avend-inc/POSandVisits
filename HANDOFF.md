@@ -40,20 +40,27 @@
 ### ★2. cashier のログイン後の画面（期間欄・CSVボタン）を確定させる
 これが**今いちばんの不確定点**。ログインしないと画面が見えないため、
 `etl/cashier_fetch.py` は「よくある形」を順に試す作りになっている。
-確実にするには、ユーザーが手元PCで次を実行し、結果を共有する:
 
-```bash
-python tools/inspect_cashier.py
-```
+**スマホからでも確定できる方式に改善済み（PCログイン不要）**:
+★1のSecrets登録が終わっていれば、GitHub Actions が本物のSecretsで
+cashierにログインし、目印が見つからなければ debug/ に
+**入力欄・ボタンの一覧＋通信の記録** を自動保存する（`etl/browser.py` の
+`dump_page` が `<label>_report.txt` を書く）。
+手順:
 
-ブラウザが開く → ユーザー自身がログイン → 取引一覧を表示 → 黒い画面でEnter。
-`debug/cashier_report.txt` に入力欄・ボタンの一覧が出る。その中身を見て
-`etl/cashier_fetch.py` のセレクタ候補、または `.env` の
+1. Actions →「NOTIME 日次ETL」→ Run workflow（`only=cashier` でよい）
+2. 赤くなったら Artifacts の `debug-…` を落とす
+3. `cashier_daterange_notfound_report.txt`（または `..._csv_button_notfound_report.txt`）
+   の中身を共有 → セレクタを確定させる
+
+材料が揃ったら `etl/cashier_fetch.py` の候補、または `.env` の
 `CASHIER_DATE_FROM_SELECTOR` / `CASHIER_DATE_TO_SELECTOR` / `CASHIER_CSV_SELECTOR`
-を確定させる。
+を確定させる。CSVが「あるURLへのGET」だと分かれば、デジテールと同じく
+`context.request.get(...)` で直接叩く堅い作りに切り替えるのが理想。
 
-> スマホから相談する場合: この inspect は手元PCでの操作が必要。
-> 「PCでinspectを実行→cashier_report.txtの中身を貼る」をお願いする形になる。
+**手元PCが使える場合（従来の方法）**: `python tools/inspect_cashier.py` を実行
+→ 自分でログイン → 取引一覧を表示 → Enter → `debug/cashier_report.txt` を共有。
+（inspect も改善後は `etl/browser.py` の scan を共用している。出力内容は同じ）
 
 ### 3. 実際に1日ぶんを流して確認
 Secrets登録後、GitHubの Actions → 「NOTIME 日次ETL」→ Run workflow（date指定可）。

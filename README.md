@@ -182,7 +182,27 @@ tools/
 
 cashier の「期間の入力欄」と「CSVダウンロードボタン」は、
 ログイン後の画面にあるため、あらかじめ形を確定できていません。
-うまく動かないときは次のようにしてください。
+うまく動かないときは、目印（セレクタ）を確定させる必要があります。
+
+### 6-1. いちばんラク（スマホでOK・PCログイン不要）★おすすめ
+
+**GitHub Actions を1回動かすだけ**で、目印を確定する材料が手に入ります。
+Actions は登録済みの Secrets で**本物のcashier画面にログイン**し、
+もし目印が見つからなければ、その瞬間の画面の
+**入力欄・ボタンの一覧と通信の記録**を自動で保存してくれます。
+
+1. **Actions** タブ →「NOTIME 日次ETL」→ **Run workflow**（`only` は `cashier` でOK）
+2. 実行が赤くなったら、ページ下の **Artifacts** から `debug-…` をダウンロード
+3. その中の **`cashier_daterange_notfound_report.txt`**
+   （または `cashier_csv_button_notfound_report.txt`）を開く
+4. その中身をこちら（担当者・Claude）に共有 → 目印を直します
+
+> このレポートには入力欄・ボタンの目印と、
+> CSVを取りに行くときのURLが載っています。パスワードは含まれません。
+
+### 6-2. 手元PCで調べる（従来の方法）
+
+PCが使える場合は、次でも同じ材料が取れます。
 
 ```bash
 python tools/inspect_cashier.py

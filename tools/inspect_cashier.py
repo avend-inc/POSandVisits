@@ -29,42 +29,14 @@ cashier の取引一覧画面を調べるための道具（1回だけ使う）
 """
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from etl.browser import format_scan_report, scan_page  # noqa: E402
 from etl.settings import CASHIER_TRADE_URL, DEBUG_DIR  # noqa: E402
-
-SCAN_JS = """
-() => {
-  const vis = el => {
-    const r = el.getBoundingClientRect();
-    return r.width > 0 && r.height > 0;
-  };
-  const desc = el => ({
-    tag: el.tagName,
-    type: el.type || null,
-    name: el.name || null,
-    id: el.id || null,
-    placeholder: el.placeholder || null,
-    value: (el.value || '').slice(0, 40),
-    ariaLabel: el.getAttribute('aria-label'),
-    dataTestId: el.getAttribute('data-testid') || el.getAttribute('data-test'),
-    className: (el.className || '').toString().slice(0, 120),
-    text: (el.innerText || '').trim().slice(0, 60),
-  });
-  return {
-    url: location.href,
-    title: document.title,
-    inputs:  [...document.querySelectorAll('input, select, textarea')].filter(vis).map(desc),
-    buttons: [...document.querySelectorAll('button, a, [role=button]')].filter(vis)
-              .filter(e => (e.innerText || '').trim().length > 0).map(desc),
-  };
-}
-"""
 
 
 def main() -> int:
@@ -101,28 +73,13 @@ def main() -> int:
         print("=" * 64)
         input(">>> 準備ができたら Enter: ")
 
-        info = page.evaluate(SCAN_JS)
+        info = scan_page(page)
 
         (DEBUG_DIR / "cashier_trade.html").write_text(page.content(), encoding="utf-8")
         page.screenshot(path=str(DEBUG_DIR / "cashier_trade.png"), full_page=True)
 
-        report = [
-            "===== cashier 取引一覧 画面調査 =====",
-            f"URL  : {info['url']}",
-            f"件名 : {info['title']}",
-            "",
-            "----- 入力欄（期間の指定に使うもの）-----",
-            json.dumps(info["inputs"], ensure_ascii=False, indent=2),
-            "",
-            "----- ボタン・リンク（CSVダウンロード）-----",
-            json.dumps(info["buttons"], ensure_ascii=False, indent=2),
-            "",
-            "----- 通信の記録（CSVのURLが分かることがあります）-----",
-            *[line for line in requests_log
-              if any(k in line.lower() for k in
-                     ("csv", "download", "export", "trade", "search"))][-60:],
-        ]
-        (DEBUG_DIR / "cashier_report.txt").write_text("\n".join(report), encoding="utf-8")
+        report = format_scan_report(info, requests_log)
+        (DEBUG_DIR / "cashier_report.txt").write_text(report, encoding="utf-8")
 
         browser.close()
 
