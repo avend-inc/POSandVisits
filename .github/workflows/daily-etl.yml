@@ -92,6 +92,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: ブラウザ(Chromium)を用意
+        if: ${{ ! inputs.dashboard }}
         run: python -m playwright install --with-deps chromium
 
       - name: 設定がそろっているか確認
@@ -108,7 +109,7 @@ jobs:
           echo "Secrets OK"
 
       - name: ETL を実行
-        if: ${{ inputs.dashboard != 'true' }}
+        if: ${{ ! inputs.dashboard }}
         run: |
           if [ "${{ inputs.backfill }}" = "true" ]; then
             ARGS=""
@@ -131,7 +132,7 @@ jobs:
       # 集計してダッシュボード(HTML+data.json)をSupabase Storageへ配信。
       # 取り込みが成功した後、または dashboard 単独モードのときに動く。
       - name: ダッシュボードを更新
-        if: ${{ inputs.dashboard == 'true' || success() }}
+        if: ${{ inputs.dashboard || success() }}
         run: python -m tools.export_dashboard
 
       # 失敗したときだけ、原因調査用のファイルを残す（7日で自動削除）
