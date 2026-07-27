@@ -63,6 +63,7 @@
   input.num{width:104px;background:var(--surface);color:var(--ink);border:1px solid var(--border);border-radius:8px;padding:6px 8px;font-size:13px;font-weight:600;text-align:right;font-family:inherit;}
   input.num:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-weak);}
   input.num.edit{color:var(--accent);}
+  input.num:disabled{opacity:.65;cursor:not-allowed;background:var(--surface2);color:var(--ink2);}
   .auto{color:var(--ink);font-weight:700;}
   .up{color:var(--good);} .down{color:var(--bad);} .mut{color:var(--muted);}
   .note{font-size:11.5px;color:var(--muted);margin:8px 0 0;line-height:1.7;}
@@ -91,7 +92,8 @@ const NUM=n=>Math.round(n).toLocaleString("ja-JP");
 const F1=n=>(Math.round(n*10)/10).toLocaleString("ja-JP",{minimumFractionDigits:1,maximumFractionDigits:1});
 const F2=n=>(Math.round(n*100)/100).toLocaleString("ja-JP",{minimumFractionDigits:2,maximumFractionDigits:2});
 const state={store:"all",ym:null,view:"pl"};   // view: "pl"=月次予実 / "fc"=着地見込み
-let DATA=null, A=null, M={}, AUTO=null, fc=null;
+let DATA=null, A=null, M={}, MALL={}, AUTO=null, fc=null;
+let CANEDIT=true, RT=null;   // 編集可否（編集/管理のみ）／リアルタイム購読
 
 const CONFIG_URL="https://rwfcsanmqvkxiuwdeddv.supabase.co/storage/v1/object/public/dashboard/config.json";
 let SB=null, ME={email:"",role:null};
@@ -102,11 +104,11 @@ function prep(){ if(!DATA||!DATA.daily)throw new Error("データが空です");
   const sd=DATA.daily.filter(r=>(r.tx||0)>0||(r.in||0)>0).map(r=>r.d).sort();
   DATA._salesMax=sd.length?sd[sd.length-1]:DATA._max; }
 async function boot(){ try{
-  if(window.__DATA__){DATA=window.__DATA__;prep();render();return;}
+  if(window.__DATA__){DATA=window.__DATA__;prep();reload();return;}
   let cfg=null; try{cfg=await (await fetch(CONFIG_URL,{cache:"no-store"})).json();}catch(e){}
   if(cfg&&cfg.mode==="auth"){await authBoot(cfg.url,cfg.anon);return;}
   const url=(cfg&&cfg.dataUrl)||"data.json";
-  DATA=await (await fetch(url,{cache:"no-store"})).json(); prep(); render();
+  DATA=await (await fetch(url,{cache:"no-store"})).json(); prep(); reload();
 }catch(e){showError(e);} }
 async function ensureSupabase(){ if(window.supabase)return; await new Promise((res,rej)=>{const s=document.createElement("script");
   s.src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2";s.onload=res;s.onerror=()=>rej(new Error("ログイン部品を読み込めませんでした"));document.head.appendChild(s);}); }
@@ -120,7 +122,7 @@ async function authBoot(url,anon){ screen('<div class="sub" style="padding:40px 
   if(!ME.role){showDenied(ME.email);return;}
   const {data,error}=await SB.storage.from("dashboard-data").download("data.json");
   if(error)throw new Error("データを取得できませんでした（"+error.message+"）");
-  DATA=JSON.parse(await data.text()); prep(); render(); }
+  DATA=JSON.parse(await data.text()); prep(); subscribeRealtime(); reload(); }
 function showLogin(){ screen(`<div class="gate"><div class="logo">NOTIME 月次予実</div>
   <div class="t">ログイン</div><div class="m">許可されたメンバー専用です。<br>管理者に登録された Google アカウントでログインしてください。</div>
   <button class="gbtn" id="glogin"><span class="g"></span>Google でログイン</button></div>`);
@@ -188,27 +190,35 @@ function fcBudget(store,ym){
   const b=(BUDGETS[budStoreName(store)]||{})[ym]; return (b&&Number.isFinite(b.in))?b.in:0;
 }
 
-function mkey(){return `notime-pl-${state.store}-${state.ym}`;}
-function loadM(){
-  let raw=null; try{raw=localStorage.getItem(mkey());}catch(e){}
-  if(raw){ try{return JSON.parse(raw);}catch(e){return {};} }
-  // 初回：シートの予算を初期値として保存（以後は普通の入力として編集・削除可能）
-  const seed=isAll()?{}:storeSeed(state.store,state.ym);
-  if(Object.keys(seed).length){ try{localStorage.setItem(mkey(),JSON.stringify(seed));}catch(e){} }
-  return {...seed};
+// ===== 入力データの保存先 =====
+//  認証モード(SB有)：サーバ plan_data（全端末で共有・リアルタイム反映）。
+//  非認証(公開/ローカル)：localStorage（従来）。キー形式 notime-<page>-<scope>-<ym>。
+async function planLoad(page,scope,ym){
+  if(SB){ try{const {data}=await SB.from("plan_data").select("data").eq("page",page).eq("scope",String(scope)).eq("ym",ym).maybeSingle(); return data?(data.data||{}):null;}catch(e){return null;} }
+  try{const s=localStorage.getItem(`notime-${page}-${scope}-${ym}`);return s?JSON.parse(s):null;}catch(e){return null;}
 }
-function saveM(){ try{localStorage.setItem(mkey(),JSON.stringify(M));}catch(e){} }
+async function planLoadAll(page,ym){
+  if(SB){ try{const {data}=await SB.from("plan_data").select("scope,data").eq("page",page).eq("ym",ym); const m={};(data||[]).forEach(r=>m[r.scope]=r.data||{});return m;}catch(e){return {};} }
+  const m={}; for(const s of usableStores()){try{const x=localStorage.getItem(`notime-${page}-${s.id}-${ym}`);if(x)m[String(s.id)]=JSON.parse(x);}catch(e){}} return m;
+}
+async function planSave(page,scope,ym,data){
+  if(SB){ try{await SB.from("plan_data").upsert({page,scope:String(scope),ym,data,updated_at:new Date().toISOString(),updated_by:ME.email},{onConflict:"page,scope,ym"});}catch(e){} return; }
+  try{localStorage.setItem(`notime-${page}-${scope}-${ym}`,JSON.stringify(data));}catch(e){}
+}
+async function planDelete(page,scope,ym){
+  if(SB){ try{await SB.from("plan_data").delete().eq("page",page).eq("scope",String(scope)).eq("ym",ym);}catch(e){} return; }
+  try{localStorage.removeItem(`notime-${page}-${scope}-${ym}`);}catch(e){}
+}
+// 特定店舗の予実データ（未保存ならシート予算を初期値に）
+async function loadMData(){ const d=await planLoad("pl",state.store,state.ym); return (d&&Object.keys(d).length)?d:{...storeSeed(state.store,state.ym)}; }
+function saveM(){ planSave("pl",state.store,state.ym,M); }
 function g(k){const v=M[k];return Number.isFinite(v)?v:0;}
 function has(k){return Number.isFinite(M[k]);}
-function inp(k,step){return `<input class="num pin" data-k="${k}" type="number" step="${step||1}" value="${has(k)?M[k]:""}" placeholder="—">`;}
+function inp(k,step){return `<input class="num pin" data-k="${k}" type="number" step="${step||1}" value="${has(k)?M[k]:""}" placeholder="—"${CANEDIT?"":" disabled"}>`;}
 
 // 総合（全店）は各店の入力値の合計。金額系は合計、比率は合計した基礎値から計算。
 function isAll(){return state.store==="all";}
-function storeMof(sid){
-  let raw=null; try{raw=localStorage.getItem(`notime-pl-${sid}-${state.ym}`);}catch(e){}
-  if(raw){ try{return JSON.parse(raw);}catch(e){return {};} }
-  return storeSeed(sid,state.ym);  // 未保存ならシート予算を初期値として合計に反映
-}
+function storeMof(sid){ const d=MALL[String(sid)]; return (d&&Object.keys(d).length)?d:storeSeed(sid,state.ym); }
 function sumStores(key){let t=0,any=false;for(const s of usableStores()){const m=storeMof(s.id);if(Number.isFinite(m[key])){t+=m[key];any=true;}}return any?t:null;}
 function effNum(key){ return isAll()? sumStores(key) : (Number.isFinite(M[key])?M[key]:null); }
 function E(key){const v=effNum(key);return Number.isFinite(v)?v:0;}
@@ -263,20 +273,20 @@ function computeAuto(store, ym){
 function fcKey(){return `notime-fc-${state.store}-${state.ym}`;}
 function fcNum(v,d){const n=Number(v);return Number.isFinite(n)?n:d;}
 function fcMrg(o,def,k){const a=(o.avg&&o.avg[k])||{};return {wk:fcNum(a.wk,def.avg[k].wk),we:fcNum(a.we,def.avg[k].we)};}
-function loadFc(){
+async function loadFcData(){
   const def={remWk:AUTO.remWk, remWe:AUTO.remWe, budget:fcBudget(state.store,state.ym),
     avg:{in:{wk:Math.round(AUTO.avg.in.wk),we:Math.round(AUTO.avg.in.we)},
          v:{wk:Math.round(AUTO.avg.v.wk),we:Math.round(AUTO.avg.v.we)},
          tx:{wk:Math.round(AUTO.avg.tx.wk),we:Math.round(AUTO.avg.tx.we)},
          it:{wk:Math.round(AUTO.avg.it.wk),we:Math.round(AUTO.avg.it.we)}}};
-  try{const s=localStorage.getItem(fcKey()); if(s){const o=JSON.parse(s);
+  const o=await planLoad("fc",state.store,state.ym);
+  if(o&&Object.keys(o).length){
     return {remWk:fcNum(o.remWk,def.remWk),remWe:fcNum(o.remWe,def.remWe),budget:fcNum(o.budget,def.budget),
       avg:{in:fcMrg(o,def,"in"),v:fcMrg(o,def,"v"),tx:fcMrg(o,def,"tx"),it:fcMrg(o,def,"it")}};}
-  }catch(e){}
   return def;
 }
-function saveFc(){try{localStorage.setItem(fcKey(),JSON.stringify(fc));}catch(e){}}
-function resetFc(){try{localStorage.removeItem(fcKey());}catch(e){} render(); }
+function saveFc(){ planSave("fc",state.store,state.ym,fc); }
+function resetFc(){ planDelete("fc",state.store,state.ym); reload(); }
 function landing(){
   const L={};
   METS.forEach(k=>{ if(k==="ex")return;
@@ -299,7 +309,31 @@ const DRIVERS=[
 ];
 function fmtMD(d){const[,m,dd]=d.split("-");return `${+m}/${+dd}`;}
 
-// ======= 画面描画 =======
+// ======= データ読込→描画 =======
+async function reload(){
+  try{
+    CANEDIT = !SB || ME.role==="editor" || ME.role==="admin";
+    const months=monthsInData();
+    if(!state.ym||!months.includes(state.ym)) state.ym=(DATA._salesMax||months[months.length-1]).slice(0,7);
+    if(state.view==="fc"){ AUTO=computeAuto(state.store,state.ym); fc=await loadFcData(); }
+    else{ A=computeActual(state.store,state.ym);
+      if(isAll()){ MALL=await planLoadAll("pl",state.ym); M={}; } else { M=await loadMData(); MALL={}; } }
+    render(); subscribeRealtime();
+  }catch(e){showError(e);}
+}
+// 他端末での変更を購読し、入力中でなければ再読み込み（リアルタイム反映）
+function subscribeRealtime(){
+  if(!SB||RT)return;
+  RT=SB.channel("plan_rt").on("postgres_changes",{event:"*",schema:"public",table:"plan_data"},payload=>{
+    const r=payload.new||payload.old; if(!r)return;
+    const page=state.view==="fc"?"fc":"pl";
+    if(r.page!==page||r.ym!==state.ym)return;
+    if(r.updated_by&&r.updated_by===ME.email)return;      // 自分の変更は無視
+    const ae=document.activeElement;
+    if(ae&&(ae.classList.contains("pin")||ae.classList.contains("num")))return;  // 入力中は見送り
+    reload();
+  }).subscribe();
+}
 function render(){
   const us=usableStores(), months=monthsInData();
   if(!state.ym||!months.includes(state.ym)) state.ym=(DATA._salesMax||months[months.length-1]).slice(0,7);
@@ -324,7 +358,6 @@ function render(){
     </div>`;
 
   if(state.view==="fc"){
-    AUTO=computeAuto(state.store,state.ym); fc=loadFc();
     document.getElementById("app").innerHTML=top+fcBody(monthLabel,storeName);
     bindCommon(); bindFc();
     drawDriver(); fcRecompute();
@@ -332,11 +365,10 @@ function render(){
   }
 
   // 月次予実ビュー
-  A=computeActual(state.store,state.ym); M=loadM();
   document.getElementById("app").innerHTML=top+plBody(monthLabel,storeName);
   bindCommon();
   const rb=document.getElementById("reset");
-  if(rb)rb.onclick=()=>{if(confirm("この店舗・この月の記入値を消しますか？")){try{localStorage.removeItem(mkey());}catch(e){}M={};render();}};
+  if(rb)rb.onclick=async()=>{if(confirm("この店舗・この月の記入値を消しますか？")){await planDelete("pl",state.store,state.ym);reload();}};
   document.querySelectorAll(".pin").forEach(el=>el.oninput=()=>{const k=el.dataset.k;
     if(el.value===""){delete M[k];}else{const v=Number(el.value);if(Number.isFinite(v))M[k]=v;else delete M[k];}
     saveM();recompute();});
@@ -344,10 +376,10 @@ function render(){
 }
 
 function bindCommon(){
-  document.getElementById("store").onchange=e=>{state.store=e.target.value==="all"?"all":+e.target.value;render();};
-  document.getElementById("ym").onchange=e=>{state.ym=e.target.value;render();};
+  document.getElementById("store").onchange=e=>{state.store=e.target.value==="all"?"all":+e.target.value;reload();};
+  document.getElementById("ym").onchange=e=>{state.ym=e.target.value;reload();};
   document.getElementById("themebtn").onclick=toggleTheme;
-  document.querySelectorAll(".subtoggle button").forEach(b=>b.onclick=()=>{state.view=b.dataset.view;render();});
+  document.querySelectorAll(".subtoggle button").forEach(b=>b.onclick=()=>{state.view=b.dataset.view;reload();});
 }
 
 function plBody(monthLabel,storeName){
@@ -360,7 +392,7 @@ function plBody(monthLabel,storeName){
   const costRows=COSTS.map((c,i)=>`<tr><td>${esc(c)}</td><td>${amtCell("cb_"+i)}</td><td>${amtCell("ca_"+i)}</td><td id="cd_${i}" class="mut"></td></tr>`).join("");
   const payRows=PAYS.map((p,i)=>`<tr><td>${p}</td><td>${amtCell("pay_"+i)}</td></tr>`).join("");
   return `
-    ${isAll()?'<p class="note" style="margin:2px 0 0">総合（全店）の予算・コストは<b>各店に入力した値の合計</b>です（自動）。編集は店舗を選んでください。</p>':'<div style="margin:4px 0 0"><button class="chip" id="reset">この月の入力を消す</button></div>'}
+    ${isAll()?'<p class="note" style="margin:2px 0 0">総合（全店）の予算・コストは<b>各店に入力した値の合計</b>です（自動）。編集は店舗を選んでください。</p>':(CANEDIT?'<div style="margin:4px 0 0"><button class="chip" id="reset">この月の入力を消す</button></div>':'<p class="note" style="margin:2px 0 0">閲覧のみ（入力・編集は「編集」または「管理」権限の方）。</p>')}
     <div class="panel">
       <h2>${monthLabel}・${esc(storeName)} サマリー</h2>
       <div class="hero">
@@ -423,10 +455,10 @@ function fcBody(monthLabel,storeName){
     <div class="panel">
       <h2>前提（ここを直すと即反映・この端末に保存されます）</h2>
       <div class="rowflex">
-        <div class="field"><label>残 平日日数</label><input class="num" id="remWk" type="number" min="0" step="1" value="${fc.remWk}" style="width:70px"></div>
-        <div class="field"><label>残 土日祝日数</label><input class="num" id="remWe" type="number" min="0" step="1" value="${fc.remWe}" style="width:70px"></div>
-        <div class="field"><label>目標（税込予算）</label><input class="num" id="budget" type="number" min="0" step="10000" value="${fc.budget||""}" placeholder="未登録"></div>
-        <button class="chip" id="fcreset">自動見込みに戻す</button>
+        <div class="field"><label>残 平日日数</label><input class="num" id="remWk" type="number" min="0" step="1" value="${fc.remWk}" style="width:70px"${CANEDIT?"":" disabled"}></div>
+        <div class="field"><label>残 土日祝日数</label><input class="num" id="remWe" type="number" min="0" step="1" value="${fc.remWe}" style="width:70px"${CANEDIT?"":" disabled"}></div>
+        <div class="field"><label>目標（税込予算）</label><input class="num" id="budget" type="number" min="0" step="10000" value="${fc.budget||""}" placeholder="未登録"${CANEDIT?"":" disabled"}></div>
+        ${CANEDIT?'<button class="chip" id="fcreset">自動見込みに戻す</button>':'<span class="note">閲覧のみ（編集は権限者）</span>'}
       </div>
       <p class="note">土日祝の残日数は「土日」を自動で数えています。<b>祝日がある月は手で足して</b>ください。目標（税込予算）は<b>月次予実シートから自動表示</b>。違っていれば上書きできます（進捗率・計画比・差額が出ます）。</p>
       <div class="tblwrap"><table id="driver"></table></div>
@@ -452,8 +484,8 @@ function drawDriver(){
   const rows=DRIVERS.map(d=>`<tr>
     <td>${d.name}</td>
     <td>${d.fmt(AUTO.td[d.k])}${d.unit}</td>
-    <td><input class="num edit" data-k="${d.k}" data-t="wk" type="number" min="0" step="${d.step}" value="${Math.round(fc.avg[d.k].wk)}"></td>
-    <td><input class="num edit" data-k="${d.k}" data-t="we" type="number" min="0" step="${d.step}" value="${Math.round(fc.avg[d.k].we)}"></td>
+    <td><input class="num edit" data-k="${d.k}" data-t="wk" type="number" min="0" step="${d.step}" value="${Math.round(fc.avg[d.k].wk)}"${CANEDIT?"":" disabled"}></td>
+    <td><input class="num edit" data-k="${d.k}" data-t="we" type="number" min="0" step="${d.step}" value="${Math.round(fc.avg[d.k].we)}"${CANEDIT?"":" disabled"}></td>
     <td id="land-${d.k}">—</td>
   </tr>`).join("");
   document.getElementById("driver").innerHTML=head+"<tbody>"+rows+"</tbody>";
