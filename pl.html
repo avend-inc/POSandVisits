@@ -131,8 +131,33 @@ const COSTS=["家賃","人件費","広告費(Meta/LINE)","PR費用","決済手�
   "監視カメラ","本社配賦","火災保険","初期ローン","入店管理システム","レジ利用料","物件更新手数料","保証会社更新手数料","その他"];
 const PAYS=["現金","カード決済","QRコード","電子マネー"];
 
+// 各店の月次予実シート(見込計算表)の予算。in=税込売上/ex=税抜売上/v=来店客数。
+// 未保存の月は初期値として使い（初回オープン時に保存）、以後は手修正・削除できます。
+const BUDGETS={
+  "山形":{"2026-03":{in:4698307,ex:4271188,v:3251},"2026-04":{in:4388578,ex:3989616,v:2927},"2026-05":{in:4332260,ex:3938418,v:2718},"2026-06":{in:3086094,ex:2805540,v:2033},"2026-07":{in:2565420,ex:2332200,v:1690},"2026-08":{in:2460266,ex:2236605,v:1880},"2026-09":{in:1975050,ex:1795500,v:1575},"2026-10":{in:2358048,ex:2143680,v:1740},"2026-11":{in:2716560,ex:2469600,v:1838},"2026-12":{in:3121642,ex:2837856,v:1689},"2027-01":{in:3172620,ex:2884200,v:1840},"2027-02":{in:2165130,ex:1968300,v:1458}},
+  "いわき":{"2026-04":{in:3690747,ex:3355225},"2026-05":{in:5039496,ex:4581360},"2026-06":{in:3564000,ex:3240000},"2026-07":{in:3310560,ex:3009600},"2026-08":{in:2583279,ex:2348435},"2026-09":{in:1949063,ex:1771875},"2026-10":{in:2335271,ex:2122974},"2026-11":{in:2703826,ex:2458024},"2026-12":{in:3141152,ex:2855593},"2027-01":{in:3187800,ex:2898000},"2027-02":{in:2171144,ex:1973768},"2027-03":{in:2384168,ex:2167425}},
+  "福井":{"2026-06":{in:9814358,ex:8922144},"2026-07":{in:6831000,ex:6210000},"2026-08":{in:4533779,ex:4121618},"2026-09":{in:2876816,ex:2615288},"2026-10":{in:3472367,ex:3156698},"2026-11":{in:4006077,ex:3641888},"2026-12":{in:4697460,ex:4270419},"2027-01":{in:4117286,ex:3742988},"2027-02":{in:2817738,ex:2561580},"2027-03":{in:3103791,ex:2821628},"2027-04":{in:3378623,ex:3071475},"2027-05":{in:3772230,ex:3429300}},
+};
+function budStoreName(sid){const s=(DATA.stores||[]).find(x=>String(x.id)===String(sid));return s?s.name:"";}
+// シート予算を b_ キー（予算入力欄のキー）に変換。税込→b_inTax/b_in、税抜→b_ex、来店→b_v。
+function storeSeed(sid,ym){
+  const b=(BUDGETS[budStoreName(sid)]||{})[ym]; if(!b)return {};
+  const o={};
+  if(Number.isFinite(b.in)){o.b_inTax=b.in;o.b_in=b.in;}
+  if(Number.isFinite(b.ex))o.b_ex=b.ex;
+  if(Number.isFinite(b.v))o.b_v=b.v;
+  return o;
+}
+
 function mkey(){return `notime-pl-${state.store}-${state.ym}`;}
-function loadM(){ try{const s=localStorage.getItem(mkey());return s?JSON.parse(s):{};}catch(e){return {};} }
+function loadM(){
+  let raw=null; try{raw=localStorage.getItem(mkey());}catch(e){}
+  if(raw){ try{return JSON.parse(raw);}catch(e){return {};} }
+  // 初回：シートの予算を初期値として保存（以後は普通の入力として編集・削除可能）
+  const seed=isAll()?{}:storeSeed(state.store,state.ym);
+  if(Object.keys(seed).length){ try{localStorage.setItem(mkey(),JSON.stringify(seed));}catch(e){} }
+  return {...seed};
+}
 function saveM(){ try{localStorage.setItem(mkey(),JSON.stringify(M));}catch(e){} }
 function g(k){const v=M[k];return Number.isFinite(v)?v:0;}
 function has(k){return Number.isFinite(M[k]);}
@@ -140,7 +165,11 @@ function inp(k,step){return `<input class="num pin" data-k="${k}" type="number" 
 
 // 総合（全店）は各店の入力値の合計。金額系は合計、比率は合計した基礎値から計算。
 function isAll(){return state.store==="all";}
-function storeMof(sid){try{const s=localStorage.getItem(`notime-pl-${sid}-${state.ym}`);return s?JSON.parse(s):{};}catch(e){return {};}}
+function storeMof(sid){
+  let raw=null; try{raw=localStorage.getItem(`notime-pl-${sid}-${state.ym}`);}catch(e){}
+  if(raw){ try{return JSON.parse(raw);}catch(e){return {};} }
+  return storeSeed(sid,state.ym);  // 未保存ならシート予算を初期値として合計に反映
+}
 function sumStores(key){let t=0,any=false;for(const s of usableStores()){const m=storeMof(s.id);if(Number.isFinite(m[key])){t+=m[key];any=true;}}return any?t:null;}
 function effNum(key){ return isAll()? sumStores(key) : (Number.isFinite(M[key])?M[key]:null); }
 function E(key){const v=effNum(key);return Number.isFinite(v)?v:0;}

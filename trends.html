@@ -109,6 +109,8 @@ const METRICS=[
 ];
 const state={view:"total",own:"all",grain:"week",from:null,to:null};
 let DATA=null;
+// 比較ラベル：対象期間の長さで 前日比／前週比／前月比 を出し分ける。比較先は直前の同じ長さの期間。
+function deltaLabel(n){ if(n<=1)return"前日比"; if(n<=7)return"前週比"; if(n<=31)return"前月比"; return "前"+n+"日比"; }
 
 // ---- 配信設定（アップロード時に export_dashboard.py / Pages生成が置き換える）----
 const SUPA_URL="";
@@ -247,7 +249,7 @@ function render(){
     <div class="cards" id="cards"></div>
     <div class="foot">
       各グラフは「${state.grain==="day"?"日別":state.grain==="week"?"週別":"月別"}」の推移。「店舗別に比較」を選ぶと店舗ごとの折れ線が色分けで重なります。
-      右上の数字は対象期間ぜんぶの合計／平均（比較時は総合）。「前の同期間比」＝直前の同じ長さの期間との増減（例：直近30日なら、その前の30日。前月比・前日比ではありません）。
+      右上の数字は対象期間ぜんぶの合計／平均（比較時は総合）。前日比・前週比・前月比は直前の同じ長さの期間との増減（対象期間の選び方で自動表示。比べた期間は数字にマウスを合わせると出ます）。
       指標：購入率＝取引数÷来店客数／客単価＝税込売上÷取引数／平均購入数＝総点数÷取引数／平均商品単価＝税抜売上÷総点数。
       週別は月曜〜日曜。レジ袋・クーポンは売上・点数・カテゴリから除外。いわきは2店舗ぶんを合算。${owns.length>1?"「区分」で直営／FCを切替。":"（FC店を追加すると直営／FCの切替が出ます）"}
     </div>`;
@@ -303,7 +305,8 @@ function draw(){
     const v=m.calc(total),pv=ptotal?m.calc(ptotal):null;let d="";
     if(v!=null&&pv!=null&&pv!==0){const pct=(v-pv)/Math.abs(pv)*100;
       const cls=pct>0.05?"up":pct<-0.05?"down":"flat",ar=pct>0.05?"▲":pct<-0.05?"▼":"—";
-      d=`<span class="delta ${cls}" title="前の同期間（${pFrom<DATA._min?DATA._min:pFrom}〜${pTo}）比">${ar} ${F1(Math.abs(pct))}% <span class="sub" style="color:inherit;font-weight:500">前の同期間比</span></span>`;}
+      const pf=(pFrom<DATA._min?DATA._min:pFrom);
+      d=`<span class="delta ${cls}" title="${pf}〜${pTo} と比較">${ar} ${F1(Math.abs(pct))}% <span class="sub" style="color:inherit;font-weight:500">${deltaLabel(ndays)}</span></span>`;}
     return `<div class="card">
       <div class="top"><span class="k">${m.name}</span>${d}<span class="val">${v==null?"—":m.fmt(v)}</span></div>
       <div class="chart" data-k="${m.key}"></div></div>`;

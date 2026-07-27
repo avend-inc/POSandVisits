@@ -134,6 +134,9 @@ const METRICS=[
 ];
 const M=k=>METRICS.find(m=>m.key===k);
 const KPI_ORDER=["in","ex","v","tx","qty","pr","aov","upt","aup"];
+// 比較ラベル：対象期間の長さに合わせて 前日比／前週比／前月比 を出し分ける。
+// 比較先は「直前の同じ長さの期間」（実際の日付はマウスオーバーで表示）。
+function deltaLabel(n){ if(n<=1)return"前日比"; if(n<=7)return"前週比"; if(n<=31)return"前月比"; return "前"+n+"日比"; }
 const state={store:"all",grain:"week",metric:"in",from:null,to:null};
 let DATA=null;
 
@@ -356,7 +359,7 @@ function render(){
     </div>
     <div class="foot">
       上の大きな数字は「対象期間ぜんぶの合計／平均」です（日別・週別・月別の切替は下の推移グラフと一覧の刻みだけを変えます）。
-      「前の同期間比」＝直前の同じ長さの期間との増減（例：直近30日なら、その前の30日）。前月比・前日比ではありません。指標：購入率＝取引数÷来店客数／客単価（税込）＝税込売上÷取引数／平均購入数＝総点数÷取引数／平均商品単価（税抜）＝税抜売上÷総点数。
+      前日比・前週比・前月比は、直前の同じ長さの期間との増減です（対象期間の選び方に合わせて自動で表示。実際に比べた期間は数字にマウスを合わせると出ます）。指標：購入率＝取引数÷来店客数／客単価（税込）＝税込売上÷取引数／平均購入数＝総点数÷取引数／平均商品単価（税抜）＝税抜売上÷総点数。
       税込/税抜売上・取引数・販売数は伝票単位、カテゴリは明細単位。来店客数はデジテール、売上はcashier。週別は月曜〜日曜。いわきは2店舗ぶんを合算。
     </div>`;
 
@@ -388,7 +391,8 @@ function draw(){
     const m=M(k),v=m.calc(total),pv=ptotal?m.calc(ptotal):null;let d="";
     if(v!=null&&pv!=null&&pv!==0){const pct=(v-pv)/Math.abs(pv)*100;
       const cls=pct>0.05?"up":pct<-0.05?"down":"flat",ar=pct>0.05?"▲":pct<-0.05?"▼":"—";
-      d=`<div class="delta ${cls}">${ar} ${F1(Math.abs(pct))}% <span class="sub" style="color:inherit;font-weight:500">前の同期間比（${pFrom<DATA._min?DATA._min:pFrom}〜${pTo}）</span></div>`;}
+      const pf=(pFrom<DATA._min?DATA._min:pFrom);
+      d=`<div class="delta ${cls}" title="${pf}〜${pTo} と比較">${ar} ${F1(Math.abs(pct))}% <span class="sub" style="color:inherit;font-weight:500">${deltaLabel(ndays)}</span></div>`;}
     return `<div class="card"><div class="k">${m.name}</div><div class="val">${v==null?"—":m.fmt(v)}</div>${d}</div>`;
   }).join("");
 
