@@ -157,7 +157,7 @@ function computeAuto(store, ym){
 function fcKey(){return `notime-fc-${state.store}-${state.ym}`;}
 function loadFc(){
   // 既定＝自動見込み。保存済みの手直しがあればそれを優先。
-  const def={remWk:AUTO.remWk, remWe:AUTO.remWe, budget:0,
+  const def={remWk:AUTO.remWk, remWe:AUTO.remWe, budget:seedBudget(state.store,state.ym),
     avg:{in:{wk:Math.round(AUTO.avg.in.wk),we:Math.round(AUTO.avg.in.we)},
          v:{wk:Math.round(AUTO.avg.v.wk),we:Math.round(AUTO.avg.v.we)},
          tx:{wk:Math.round(AUTO.avg.tx.wk),we:Math.round(AUTO.avg.tx.we)},
@@ -185,9 +185,9 @@ function landing(){
 const KPI=[
   {k:"ex", name:"税抜売上", fmt:v=>YEN(v)+"円", calc:t=>t.ex},
   {k:"pr", name:"購入率",   fmt:v=>F1(v)+"%",   calc:t=>t.v>0?t.tx/t.v*100:null},
-  {k:"aov",name:"客単価",   fmt:v=>YEN(v)+"円", calc:t=>t.tx>0?t.in/t.tx:null},
+  {k:"aov",name:"客単価（税込）",   fmt:v=>YEN(v)+"円", calc:t=>t.tx>0?t.in/t.tx:null},
   {k:"upt",name:"平均購入数",fmt:v=>F2(v)+"点", calc:t=>t.tx>0?t.it/t.tx:null},
-  {k:"aup",name:"平均商品単価",fmt:v=>YEN(v)+"円",calc:t=>t.it>0?t.ex/t.it:null},
+  {k:"aup",name:"平均商品単価（税抜）",fmt:v=>YEN(v)+"円",calc:t=>t.it>0?t.ex/t.it:null},
 ];
 const DRIVERS=[
   {k:"in",name:"税込売上",fmt:v=>YEN(v),unit:"円",step:1000},
@@ -195,6 +195,20 @@ const DRIVERS=[
   {k:"tx",name:"取引数",  fmt:v=>NUM(v),unit:"件",step:1},
   {k:"it",name:"販売点数",fmt:v=>NUM(v),unit:"点",step:1},
 ];
+
+// 月次の目標（税込予算）。各店の月次予実シート「見込計算表」より。
+// 店舗の目標欄で上書き可（この端末に保存）。総合（全店）は各店の合計。
+// いわき・下北沢は未登録（スプシのリンク受領後に追加）。
+const BUDGETS={
+  "山形":{"2026-03":4698307,"2026-04":4388578,"2026-05":4332260,"2026-06":3086094,"2026-07":2565420,"2026-08":2460266,"2026-09":1975050,"2026-10":2358048,"2026-11":2716560,"2026-12":3121642,"2027-01":3172620,"2027-02":2165130},
+  "福井":{"2026-06":9814358,"2026-07":6831000,"2026-08":4533779,"2026-09":2876816,"2026-10":3472367,"2026-11":4006077,"2026-12":4697460,"2027-01":4117286,"2027-02":2817738,"2027-03":3103791,"2027-04":3378623,"2027-05":3772230},
+};
+function storeNameById(id){const s=(DATA.stores||[]).find(s=>String(s.id)===String(id));return s?s.name:"";}
+// 目標（税込）を返す。総合は各店合計（登録のある店だけ）。未登録なら0。
+function seedBudget(store,ym){
+  if(store==="all"){let sum=0;(DATA.stores||[]).forEach(s=>{sum+=(BUDGETS[s.name]||{})[ym]||0;});return sum;}
+  return (BUDGETS[storeNameById(store)]||{})[ym]||0;
+}
 
 function render(){
   const us=usableStores();
@@ -237,10 +251,10 @@ function render(){
       <div class="rowflex">
         <div class="field"><label>残 平日日数</label><input class="num" id="remWk" type="number" min="0" step="1" value="${fc.remWk}" style="width:70px"></div>
         <div class="field"><label>残 土日祝日数</label><input class="num" id="remWe" type="number" min="0" step="1" value="${fc.remWe}" style="width:70px"></div>
-        <div class="field"><label>予算（税込・任意）</label><input class="num" id="budget" type="number" min="0" step="10000" value="${fc.budget||""}" placeholder="未入力"></div>
+        <div class="field"><label>目標（税込予算）</label><input class="num" id="budget" type="number" min="0" step="10000" value="${fc.budget||""}" placeholder="未登録"></div>
         <button class="chip" id="reset">自動見込みに戻す</button>
       </div>
-      <p class="note">土日祝の残日数は「土日」を自動で数えています。<b>祝日がある月は手で足して</b>ください。予算を入れると計画比・差額が出ます。</p>
+      <p class="note">土日祝の残日数は「土日」を自動で数えています。<b>祝日がある月は手で足して</b>ください。目標（税込予算）は<b>月次予実シートから自動表示</b>。違っていれば上書きできます（進捗率・計画比・差額が出ます）。</p>
       <div class="tblwrap"><table id="driver"></table></div>
     </div>
 
@@ -295,12 +309,14 @@ function recompute(){
   pills.push(`<span class="pill">残 平日<b>${fc.remWk}</b>・土日祝<b>${fc.remWe}</b>日</span>`);
   if(b>0){
     const prog=td.in/b*100, ratio=L.in/b*100, diff=L.in-b;
+    pills.push(`<span class="pill">🎯 目標(税込) <b>${YEN(b)}円</b></span>`);
     pills.push(`<span class="pill">進捗率 <b>${F1(prog)}%</b></span>`);
     pills.push(`<span class="pill">計画比 <b>${F1(ratio)}%</b></span>`);
     const cls=diff>=0?"up":"down";
     pills.push(`<span class="pill">計画差額 <b class="delta ${cls}">${diff>=0?"+":"−"}${YEN(Math.abs(diff))}円</b></span>`);
     document.getElementById("land-vs").innerHTML=`<span class="lbl2 delta ${ratio>=100?"up":"down"}">（対予算 ${F1(ratio)}%）</span>`;
   }else{
+    pills.push(`<span class="pill" style="opacity:.75">🎯 目標 未登録（この店舗）</span>`);
     document.getElementById("land-vs").innerHTML="";
   }
   document.getElementById("pills").innerHTML=pills.join("");
