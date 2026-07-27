@@ -73,6 +73,15 @@
   input.num:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-weak);}
   input.num.edit{color:var(--accent);}
   input.num:disabled{opacity:.65;cursor:not-allowed;background:var(--surface2);color:var(--ink2);}
+  input.num.editing{border-color:var(--bad);background:rgba(192,57,43,.07);}
+  input.num.saved{border-color:var(--good);background:rgba(26,138,90,.12);transition:background .4s,border-color .4s;}
+  .closebadge{margin-left:auto;display:inline-flex;align-items:center;gap:5px;background:var(--surface2);border:1px solid var(--border);border-radius:999px;padding:5px 12px;font-size:12px;font-weight:700;color:var(--ink2);}
+  .closebadge b{color:var(--ink);}
+  tr.tierhead td{background:var(--surface2);font-weight:800;font-size:11px;color:var(--ink2);letter-spacing:.03em;}
+  tr.keyrow td{font-weight:750;}
+  tr.keyrow td:first-child{border-left:3px solid var(--accent);}
+  tr.keyrow .big2{font-size:15px;font-weight:800;}
+  tr.subrow td{color:var(--ink2);}
   .btn-save{border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:9px;padding:8px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;}
   .btn-save:disabled{opacity:.45;cursor:default;}
   .btn-save.dirty{box-shadow:0 0 0 3px var(--accent-weak);}
@@ -227,7 +236,10 @@ async function loadMData(){ const d=await planLoad("pl",state.store,state.ym); r
 function saveM(){ planSave("pl",state.store,state.ym,M); }
 function g(k){const v=M[k];return Number.isFinite(v)?v:0;}
 function has(k){return Number.isFinite(M[k]);}
-function inp(k,step){return `<input class="num pin" data-k="${k}" type="number" step="${step||1}" value="${has(k)?M[k]:""}" placeholder="—"${CANEDIT?"":" disabled"}>`;}
+// 金額はカンマ区切りで表示。編集中は生値、フォーカスを外すとカンマ表示に戻る。
+const NUMc=n=>Number(n).toLocaleString("ja-JP");
+const parseNum=s=>{const n=Number(String(s).replace(/[,，\s]/g,""));return Number.isFinite(n)?n:NaN;};
+function inp(k,step){return `<input class="num pin" data-k="${k}" type="text" inputmode="decimal" value="${has(k)?NUMc(M[k]):""}" placeholder="—"${CANEDIT?"":" disabled"}>`;}
 
 // 総合（全店）は各店の入力値の合計。金額系は合計、比率は合計した基礎値から計算。
 function isAll(){return state.store==="all";}
@@ -307,12 +319,14 @@ function landing(){
   L.ex=L.in*AUTO.exRatio;
   return L;
 }
+// 主要KPI(key)＝売上を動かす3要素、その他(sub)＝参考。売上(KGI)はヒーローに別表示。
 const FKPI=[
-  {k:"ex", name:"税抜売上", fmt:v=>YEN(v)+"円", calc:t=>t.ex},
-  {k:"pr", name:"購入率",   fmt:v=>F1(v)+"%",   calc:t=>t.v>0?t.tx/t.v*100:null},
-  {k:"aov",name:"客単価（税込）",   fmt:v=>YEN(v)+"円", calc:t=>t.tx>0?t.in/t.tx:null},
-  {k:"upt",name:"平均購入数",fmt:v=>F2(v)+"点", calc:t=>t.tx>0?t.it/t.tx:null},
-  {k:"aup",name:"平均商品単価（税抜）",fmt:v=>YEN(v)+"円",calc:t=>t.it>0?t.ex/t.it:null},
+  {k:"v",  name:"来店数",         tier:"key", fmt:v=>NUM(v)+"人", calc:t=>t.v},
+  {k:"pr", name:"購入率",         tier:"key", fmt:v=>F1(v)+"%",   calc:t=>t.v>0?t.tx/t.v*100:null},
+  {k:"aov",name:"客単価（税込）",   tier:"key", fmt:v=>YEN(v)+"円", calc:t=>t.tx>0?t.in/t.tx:null},
+  {k:"ex", name:"税抜売上",       tier:"sub", fmt:v=>YEN(v)+"円", calc:t=>t.ex},
+  {k:"upt",name:"平均購入数",     tier:"sub", fmt:v=>F2(v)+"点", calc:t=>t.tx>0?t.it/t.tx:null},
+  {k:"aup",name:"平均商品単価（税抜）",tier:"sub",fmt:v=>YEN(v)+"円",calc:t=>t.it>0?t.ex/t.it:null},
 ];
 const DRIVERS=[
   {k:"in",name:"税込売上",fmt:v=>YEN(v),unit:"円",step:1000},
@@ -359,7 +373,8 @@ function render(){
   const top=`
     <header>
       <h1>売上KPI管理</h1>
-      <button class="themebtn" id="themebtn" style="margin-left:auto">◐ 表示切替</button>
+      <span class="closebadge" title="取り込み済みの最新データ日（締日）">📅 締日 <b>${DATA._salesMax?fmtMD(DATA._salesMax):"—"}</b></span>
+      <button class="themebtn" id="themebtn" style="margin-left:8px">◐ 表示切替</button>
     </header>
     <div class="controls">
       <label class="lbl">店舗</label>
@@ -385,9 +400,13 @@ function render(){
   bindCommon();
   const rb=document.getElementById("reset");
   if(rb)rb.onclick=async()=>{if(confirm("この店舗・この月の記入値を消しますか？")){await planDelete("pl",state.store,state.ym);reload();}};
-  document.querySelectorAll(".pin").forEach(el=>el.oninput=()=>{const k=el.dataset.k;
-    if(el.value===""){delete M[k];}else{const v=Number(el.value);if(Number.isFinite(v))M[k]=v;else delete M[k];}
-    markDirty();recompute();});
+  document.querySelectorAll(".pin").forEach(el=>{
+    el.oninput=()=>{const k=el.dataset.k;const v=parseNum(el.value);
+      if(el.value.trim()===""){delete M[k];}else if(Number.isFinite(v)){M[k]=v;}else{delete M[k];}
+      el.classList.remove("saved");el.classList.add("editing");markDirty();recompute();};
+    el.onfocus=()=>{const k=el.dataset.k;if(has(k))el.value=String(M[k]);};   // 編集中は生値
+    el.onblur=()=>{const k=el.dataset.k;el.value=has(k)?NUMc(M[k]):"";};        // 外すとカンマ表示
+  });
   recompute();
 }
 
@@ -407,6 +426,12 @@ async function commitPlan(){
   if(state.view==="fc") await planSave("fc",state.store,state.ym,fc);
   else await planSave("pl",state.store,state.ym,M);
   DIRTY=false;
+  // 各入力ボックスに「保存済み」を表示（緑にフラッシュ）＋金額はカンマ表示に戻す
+  document.querySelectorAll("input.num.editing").forEach(el=>{
+    el.classList.remove("editing");el.classList.add("saved");
+    if(el.classList.contains("pin")){const k=el.dataset.k;el.value=has(k)?NUMc(M[k]):"";}
+    setTimeout(()=>el.classList.remove("saved"),1600);
+  });
   if(c){c.classList.remove("dirty");c.textContent="更新済み ✓";}
   const n=document.getElementById("commit-note"); if(n)n.textContent="保存しました（全端末に反映）";
   setTimeout(()=>{const cc=document.getElementById("commit"); if(cc&&!DIRTY){cc.textContent="更新";cc.disabled=true;}
@@ -476,7 +501,7 @@ function fcBody(monthLabel,storeName){
     <div class="panel">
       <h2>${monthLabel}・${esc(storeName)} の着地見込み</h2>
       <div class="fhero">
-        <span class="lbl2">着地見込み（税込）</span>
+        <span class="lbl2"><b style="color:var(--accent)">KGI</b>｜着地見込み（税込売上）</span>
         <span class="big" id="land-in">—</span>
         <span id="land-vs"></span>
       </div>
@@ -495,7 +520,7 @@ function fcBody(monthLabel,storeName){
       <div class="tblwrap"><table id="driver"></table></div>
     </div>
     <div class="panel">
-      <h2>KPI 着地見込み</h2>
+      <h2>KPI 着地見込み <span class="sub" style="font-weight:500">（KGI=売上／主要KPI=来店数・購入率・客単価）</span></h2>
       <div class="tblwrap"><table id="kpi"></table></div>
       <p class="note">税抜売上＝税込×実績税率(${(AUTO.exRatio).toFixed(3)})。購入率＝取引数÷来店客数／客単価（税込）＝税込÷取引数／平均購入数＝点数÷取引数／平均商品単価（税抜）＝税抜÷点数。レジ袋・クーポンは除外済み。</p>
     </div>
@@ -509,7 +534,7 @@ function bindFc(){
   bindFcInput("budget",v=>fc.budget=Math.max(0,v));
 }
 function bindFcInput(id,setter){const el=document.getElementById(id);if(!el)return;
-  el.oninput=()=>{const v=Number(el.value); if(el.value===""){setter(0);}else if(Number.isFinite(v)){setter(v);} markDirty(); fcRecompute();};}
+  el.oninput=()=>{const v=Number(el.value); if(el.value===""){setter(0);}else if(Number.isFinite(v)){setter(v);} el.classList.remove("saved");el.classList.add("editing"); markDirty(); fcRecompute();};}
 function drawDriver(){
   const head=`<thead><tr><th>指標</th><th>締日まで(実績)</th><th>平日 見込/日</th><th>土日祝 見込/日</th><th>着地見込み</th></tr></thead>`;
   const rows=DRIVERS.map(d=>`<tr>
@@ -522,7 +547,7 @@ function drawDriver(){
   document.getElementById("driver").innerHTML=head+"<tbody>"+rows+"</tbody>";
   document.querySelectorAll('#driver input.edit').forEach(el=>{
     el.oninput=()=>{const v=Number(el.value);const k=el.dataset.k,t=el.dataset.t;
-      fc.avg[k][t]=(el.value===""||!Number.isFinite(v))?0:Math.max(0,v); markDirty(); fcRecompute();};});
+      fc.avg[k][t]=(el.value===""||!Number.isFinite(v))?0:Math.max(0,v); el.classList.remove("saved");el.classList.add("editing"); markDirty(); fcRecompute();};});
 }
 function fcRecompute(){
   const L=landing(), td=AUTO.td;
@@ -547,8 +572,12 @@ function fcRecompute(){
   }
   document.getElementById("pills").innerHTML=pills.join("");
   const head=`<thead><tr><th>指標</th><th>締日まで(実績)</th><th>着地見込み</th></tr></thead>`;
-  const body=FKPI.map(m=>{const tv=m.calc(td),lv=m.calc(L);
-    return `<tr><td>${m.name}</td><td>${tv==null?"—":m.fmt(tv)}</td><td>${lv==null?"—":m.fmt(lv)}</td></tr>`;}).join("");
+  const rowHtml=m=>{const tv=m.calc(td),lv=m.calc(L);
+    return `<tr class="${m.tier==="key"?"keyrow":"subrow"}"><td>${m.name}</td><td>${tv==null?"—":m.fmt(tv)}</td><td class="${m.tier==="key"?"big2":""}">${lv==null?"—":m.fmt(lv)}</td></tr>`;};
+  const body=`<tr class="tierhead"><td colspan="3">◆ 主要KPI（売上を動かす3要素：来店数 × 購入率 × 客単価）</td></tr>`
+    +FKPI.filter(m=>m.tier==="key").map(rowHtml).join("")
+    +`<tr class="tierhead"><td colspan="3">その他KPI（参考）</td></tr>`
+    +FKPI.filter(m=>m.tier==="sub").map(rowHtml).join("");
   document.getElementById("kpi").innerHTML=head+"<tbody>"+body+"</tbody>";
 }
 
