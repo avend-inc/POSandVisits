@@ -78,6 +78,13 @@
     padding:6px 8px;border-radius:8px;white-space:nowrap;transform:translate(-50%,-115%);opacity:0;transition:opacity .08s;z-index:5;box-shadow:var(--shadow);}
   .foot{color:var(--muted);font-size:11px;margin-top:18px;line-height:1.7;}
   .err{padding:20px;color:var(--bad);font-weight:600;}
+  .gate{max-width:440px;margin:14vh auto;text-align:center;padding:0 22px;}
+  .gate .logo{font-size:22px;font-weight:750;letter-spacing:.02em;}
+  .gate .t{font-size:16px;font-weight:700;margin:18px 0 6px;}
+  .gate .m{color:var(--ink2);font-size:14px;line-height:1.8;}
+  .gbtn{display:inline-flex;align-items:center;gap:10px;background:var(--surface);color:var(--ink);border:1px solid var(--border);border-radius:11px;padding:12px 20px;font-size:15px;font-weight:700;cursor:pointer;box-shadow:var(--shadow);margin-top:18px;}
+  .gbtn:hover{border-color:var(--accent);}
+  .gbtn .g{width:18px;height:18px;display:inline-block;border-radius:50%;background:conic-gradient(#ea4335 0 25%,#fbbc05 0 50%,#34a853 0 75%,#4285f4 0);}
 </style>
 </head>
 <body>
@@ -111,13 +118,9 @@ let DATA=null;
 // 比較ラベル：対象期間の長さで 前日比／前週比／前月比 を出し分ける。比較先は直前の同じ長さの期間。
 function deltaLabel(n){ if(n<=1)return"前日比"; if(n<=7)return"前週比"; if(n<=31)return"前月比"; return "前"+n+"日比"; }
 
-// ---- 配信設定（アップロード時に export_dashboard.py / Pages生成が置き換える）----
-const SUPA_URL="__SUPABASE_URL__";
-const SUPA_ANON="__SUPABASE_ANON_KEY__";
-const PUBLIC_DATA_URL="__PUBLIC_DATA_URL__";
-const ALLOW_DOMAIN="@avend.co.jp";
-let SB=null;
-const isPH=s=>!s||s.slice(0,2)==="__";
+// ---- 配信設定：公開バケットの config.json を見て公開/認証モードを自動判別 ----
+const CONFIG_URL="https://rwfcsanmqvkxiuwdeddv.supabase.co/storage/v1/object/public/dashboard/config.json";
+let SB=null, ME={email:"",role:null};
 
 function prep(){
   if(!DATA||!DATA.daily)throw new Error("データが空です");
@@ -135,8 +138,9 @@ function showError(e){screen('<div class="err">データを読み込めません
 async function boot(){
   try{
     if(window.__DATA__){DATA=window.__DATA__;prep();render();return;}
-    if(!isPH(SUPA_URL)&&!isPH(SUPA_ANON)&&isPH(PUBLIC_DATA_URL)){await authBoot();return;}
-    const url=isPH(PUBLIC_DATA_URL)?"data.json":PUBLIC_DATA_URL;
+    let cfg=null; try{cfg=await (await fetch(CONFIG_URL,{cache:"no-store"})).json();}catch(e){}
+    if(cfg&&cfg.mode==="auth"){await authBoot(cfg.url,cfg.anon);return;}
+    const url=(cfg&&cfg.dataUrl)||"data.json";
     DATA=await (await fetch(url,{cache:"no-store"})).json();
     prep();render();
   }catch(e){showError(e);}
@@ -147,18 +151,31 @@ async function ensureSupabase(){
     s.src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2";
     s.onload=res;s.onerror=()=>rej(new Error("ログイン部品を読み込めませんでした"));document.head.appendChild(s);});
 }
-async function authBoot(){
+async function authBoot(url,anon){
   screen('<div class="sub" style="padding:40px 0">読み込み中…</div>');
   await ensureSupabase();
-  SB=window.supabase.createClient(SUPA_URL,SUPA_ANON,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,flowType:"pkce",storageKey:"notime-auth"}});
+  SB=window.supabase.createClient(url,anon,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,flowType:"pkce",storageKey:"notime-auth"}});
   const {data:{session}}=await SB.auth.getSession();
-  if(!session){screen('<div class="err">ログインが必要です。<a href="index.html">サマリー</a> からログインしてください。</div>');return;}
-  const email=(session.user&&session.user.email||"").toLowerCase();
-  if(!email.endsWith(ALLOW_DOMAIN)){screen('<div class="err">アクセス権がありません。</div>');return;}
+  if(!session){showLogin();return;}
+  ME.email=(session.user&&session.user.email||"").toLowerCase();
+  let role=null; try{const {data:u}=await SB.from("app_users").select("role").eq("email",ME.email).maybeSingle();role=u&&u.role||null;}catch(e){}
+  ME.role=role;
+  if(!ME.role){showDenied(ME.email);return;}
   const {data,error}=await SB.storage.from("dashboard-data").download("data.json");
   if(error)throw new Error("データを取得できませんでした（"+error.message+"）");
   DATA=JSON.parse(await data.text());prep();render();
 }
+function showLogin(){ screen(`<div class="gate"><div class="logo">NOTIME KPI推移</div>
+  <div class="t">ログイン</div><div class="m">許可されたメンバー専用です。<br>管理者に登録された Google アカウントでログインしてください。</div>
+  <button class="gbtn" id="glogin"><span class="g"></span>Google でログイン</button></div>`);
+  document.getElementById("glogin").onclick=doLogin; }
+function showDenied(email){ screen(`<div class="gate"><div class="logo">NOTIME KPI推移</div>
+  <div class="t">アクセス権がありません</div><div class="m"><b>${esc(email)}</b> はまだ登録されていません。<br>管理者（Shoさん）にユーザー追加を依頼してください。</div>
+  <button class="gbtn" id="grelogin"><span class="g"></span>別のアカウントでログイン</button></div>`);
+  document.getElementById("grelogin").onclick=doLogout; }
+async function doLogin(){ const redirectTo=location.origin+location.pathname;
+  const {error}=await SB.auth.signInWithOAuth({provider:"google",options:{redirectTo,queryParams:{prompt:"select_account"}}}); if(error)showError(error); }
+async function doLogout(){try{await SB.auth.signOut();}catch(e){}location.reload();}
 
 function mondayOf(d){const t=new Date(d+"T00:00:00Z");t.setUTCDate(t.getUTCDate()-((t.getUTCDay()+6)%7));return t.toISOString().slice(0,10);}
 function pKey(d,g){return g==="day"?d:g==="month"?d.slice(0,7):mondayOf(d);}
