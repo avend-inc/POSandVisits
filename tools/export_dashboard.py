@@ -280,12 +280,23 @@ def _verify_served(sb: Supabase, bucket: str, path: str,
 
 
 def _delete(sb: Supabase, bucket: str, path: str) -> None:
-    """公開バケットに残った古いファイルを消す（認証モードで漏れを防ぐ）。"""
+    """公開バケットに残った古いファイルを確実に消す（認証モードで漏れを防ぐ）。
+    単体DELETEと一括removeの両方を叩き、実ステータスをログに出す（空振り検知のため）。"""
+    # ① 単体 DELETE
     url = f"{sb.url}/storage/v1/object/{bucket}/{path}"
-    resp = sb.session.delete(url, timeout=60)
-    if resp.status_code in (200, 204):
-        print(f"  削除: 公開側の {bucket}/{path} を消しました（非公開へ移行）")
-    # 404（元々ない）等は無視でよい
+    try:
+        resp = sb.session.delete(url, timeout=60)
+        print(f"  公開側 {bucket}/{path} 削除(単体): HTTP {resp.status_code} {resp.text[:80]}")
+    except Exception as e:
+        print(f"  公開側 単体削除スキップ: {e}")
+    # ② 一括 remove（storage3 の remove 相当。prefixes 指定・保険）
+    try:
+        r2 = sb.session.request(
+            "DELETE", f"{sb.url}/storage/v1/object/{bucket}",
+            data=json.dumps({"prefixes": [path]}), timeout=60)
+        print(f"  公開側 {bucket}/{path} 削除(一括): HTTP {r2.status_code} {r2.text[:120]}")
+    except Exception as e:
+        print(f"  公開側 一括削除スキップ: {e}")
 
 
 def _inject_config(html: str, supa_url: str, anon: str, public_data_url: str) -> bytes:
