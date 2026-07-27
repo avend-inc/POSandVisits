@@ -148,7 +148,7 @@ function prep(){
   const vd=DATA.daily.filter(r=>r.v!=null).map(r=>r.d).sort();
   DATA._salesMax=sd.length?sd[sd.length-1]:DATA._max;
   DATA._visitMax=vd.length?vd[vd.length-1]:DATA._max;
-  state.from=DATA._min; state.to=DATA._max;
+  const [tf,tt]=presetRange("thismonth"); state.from=tf; state.to=tt;  // 既定＝今月
 }
 
 function screen(html){document.getElementById("app").innerHTML=html;}
