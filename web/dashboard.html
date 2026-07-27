@@ -451,8 +451,8 @@ function drawCompare(rows,fym){
   const cols=KPI_ORDER.map(M);
   const mn=fym?(+fym.split("-")[1]):null;
   const landHead=`着地見込み<br><span class="sub" style="font-weight:500">${mn?mn+"月":""}・税込</span>`;
-  const head=`<thead><tr><th>店舗</th>${cols.map(c=>`<th>${c.name}</th>`).join("")}<th>${landHead}</th></tr></thead>`;
-  const body=rows.map(p=>`<tr${p._name==="総合"?' style="font-weight:750"':''}><td>${esc(p._name)}</td>${cols.map(c=>{const v=c.calc(p);return `<td>${v==null?"—":c.fmt(v)}</td>`;}).join("")}<td>${p._land!=null?YEN(p._land)+"円":"—"}</td></tr>`).join("");
+  const head=`<thead><tr><th>店舗</th><th>${landHead}</th>${cols.map(c=>`<th>${c.name}</th>`).join("")}</tr></thead>`;
+  const body=rows.map(p=>`<tr${p._name==="総合"?' style="font-weight:750"':''}><td>${esc(p._name)}</td><td>${p._land!=null?YEN(p._land)+"円":"—"}</td>${cols.map(c=>{const v=c.calc(p);return `<td>${v==null?"—":c.fmt(v)}</td>`;}).join("")}</tr>`).join("");
   document.getElementById("cmp").innerHTML=head+"<tbody>"+body+"</tbody>";
 }
 function drawCatTable(cats){
