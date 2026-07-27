@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>NOTIME 管理</title>
+<style>
+  :root{ --bg:#f6f7f9;--surface:#fff;--surface2:#f0f2f5;--border:#e2e6ea;--ink:#1a1d21;--ink2:#5b636c;--muted:#8a929b;
+    --accent:#2f6fd0;--accent-weak:#dbe6f7;--good:#1a8a5a;--bad:#c0392b;--shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.04);--radius:14px;}
+  @media (prefers-color-scheme: dark){:root{ --bg:#0e1116;--surface:#161b22;--surface2:#1c232c;--border:#2a323c;--ink:#e7ebef;--ink2:#a3adb8;--muted:#727d89;--accent:#5b9bff;--accent-weak:#1e2f4a;--good:#3fce8c;--bad:#ff6b5e;--shadow:0 1px 2px rgba(0,0,0,.4);}}
+  :root[data-theme="dark"]{ --bg:#0e1116;--surface:#161b22;--surface2:#1c232c;--border:#2a323c;--ink:#e7ebef;--ink2:#a3adb8;--muted:#727d89;--accent:#5b9bff;--accent-weak:#1e2f4a;--good:#3fce8c;--bad:#ff6b5e;--shadow:0 1px 2px rgba(0,0,0,.4);}
+  :root[data-theme="light"]{ --bg:#f6f7f9;--surface:#fff;--surface2:#f0f2f5;--border:#e2e6ea;--ink:#1a1d21;--ink2:#5b636c;--muted:#8a929b;--accent:#2f6fd0;--accent-weak:#dbe6f7;--good:#1a8a5a;--bad:#c0392b;--shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.04);}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,sans-serif;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;}
+  .wrap{max-width:900px;margin:0 auto;padding:18px 16px 60px;}
+  header{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;margin-bottom:2px;}
+  h1{font-size:20px;margin:0;font-weight:700;letter-spacing:.02em;}
+  .sub{color:var(--muted);font-size:12px;}
+  .navlink{border:1px solid var(--border);background:var(--surface);color:var(--accent);border-radius:9px;padding:7px 11px;font-size:12px;font-weight:700;cursor:pointer;text-decoration:none;}
+  .themebtn{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:9px;padding:7px 10px;font-size:12px;cursor:pointer;}
+  .panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px 16px 14px;margin:14px 0;}
+  .panel h2{font-size:15px;margin:0 0 4px;font-weight:800;}
+  .panel .note{font-size:12px;color:var(--muted);margin:0 0 10px;line-height:1.6;}
+  .tblwrap{overflow-x:auto;}
+  table{width:100%;border-collapse:collapse;font-size:13px;min-width:520px;}
+  th,td{padding:8px 8px;text-align:left;white-space:nowrap;border-bottom:1px solid var(--border);vertical-align:middle;}
+  th{color:var(--ink2);font-weight:700;font-size:11.5px;}
+  input,select{background:var(--surface);color:var(--ink);border:1px solid var(--border);border-radius:8px;padding:7px 9px;font-size:13px;font-family:inherit;}
+  input:focus,select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-weak);}
+  input.wide{min-width:200px;}
+  .btn{border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:9px;padding:8px 14px;font-size:13px;font-weight:700;cursor:pointer;}
+  .btn.ghost{background:var(--surface);color:var(--accent);}
+  .btn.danger{background:var(--surface);color:var(--bad);border-color:var(--border);padding:6px 10px;font-size:12px;}
+  .btn:disabled{opacity:.5;cursor:not-allowed;}
+  .roletag{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;}
+  .r-admin{background:#7c3aed22;color:#7c3aed;} .r-editor{background:var(--accent-weak);color:var(--accent);} .r-viewer{background:var(--surface2);color:var(--ink2);}
+  .addrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px;padding-top:10px;border-top:1px dashed var(--border);}
+  .msg{font-size:12.5px;font-weight:600;margin:8px 0 0;}
+  .msg.ok{color:var(--good);} .msg.err{color:var(--bad);}
+  .gate{max-width:460px;margin:12vh auto;text-align:center;padding:0 22px;}
+  .gate .logo{font-size:22px;font-weight:800;} .gate .t{font-size:16px;font-weight:700;margin:16px 0 6px;} .gate .m{color:var(--ink2);font-size:14px;line-height:1.8;}
+  .gbtn{display:inline-flex;align-items:center;gap:10px;background:var(--surface);color:var(--ink);border:1px solid var(--border);border-radius:11px;padding:12px 20px;font-size:15px;font-weight:700;cursor:pointer;box-shadow:var(--shadow);margin-top:18px;}
+  .gbtn .g{width:18px;height:18px;border-radius:50%;background:conic-gradient(#ea4335 0 25%,#fbbc05 0 50%,#34a853 0 75%,#4285f4 0);}
+  .err{padding:20px;color:var(--bad);font-weight:600;}
+  .notice{background:var(--accent-weak);border:1px solid transparent;border-radius:12px;padding:16px 18px;color:var(--ink);font-size:14px;line-height:1.8;}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"><div class="sub" style="padding:40px 0">読み込み中…</div></div>
+<script>
+"use strict";
+const SUPA_URL="__SUPABASE_URL__", SUPA_ANON="__SUPABASE_ANON_KEY__";
+const ALLOW_DOMAIN="@avend.co.jp";
+const isPH=s=>!s||s.slice(0,2)==="__";
+let SB=null, ME={email:"",role:null};
+const ROLES=[["viewer","閲覧"],["editor","編集"],["admin","管理"]];
+const roleJp=r=>({viewer:"閲覧",editor:"編集",admin:"管理"}[r]||r);
+function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));}
+function screen(h){document.getElementById("app").innerHTML=h;}
+
+async function ensureSupabase(){ if(window.supabase)return; await new Promise((res,rej)=>{const s=document.createElement("script");
+  s.src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2";s.onload=res;s.onerror=()=>rej(new Error("ログイン部品を読み込めませんでした"));document.head.appendChild(s);}); }
+
+async function boot(){
+  if(isPH(SUPA_URL)||isPH(SUPA_ANON)){
+    screen(`<header><h1>NOTIME 管理</h1></header>
+      <div class="panel"><div class="notice">この管理画面は、<b>Googleログインの設定が完了すると</b>使えるようになります。<br>
+      セットアップ（Google連携・Supabase設定・SUPABASE_ANON_KEYの登録）が済むと、ここでユーザーと店舗を管理できます。</div></div>`);
+    return;
+  }
+  try{
+    await ensureSupabase();
+    SB=window.supabase.createClient(SUPA_URL,SUPA_ANON,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,flowType:"pkce",storageKey:"notime-auth"}});
+    const {data:{session}}=await SB.auth.getSession();
+    if(!session){showLogin();return;}
+    ME.email=(session.user&&session.user.email||"").toLowerCase();
+    if(!ME.email.endsWith(ALLOW_DOMAIN)){showDenied(`${ME.email} は社内アカウントではありません`);return;}
+    const {data,error}=await SB.from("app_users").select("role,name").eq("email",ME.email).maybeSingle();
+    if(error)throw error;
+    ME.role=data&&data.role||null;
+    if(ME.role!=="admin"){ showDenied(ME.role?`この画面は管理者専用です（あなたの権限：${roleJp(ME.role)}）`:"アクセス権がありません。管理者にユーザー追加を依頼してください。"); return; }
+    render();
+  }catch(e){ screen('<div class="err">エラー：'+esc(e.message||e)+'</div>'); }
+}
+function showLogin(){ screen(`<div class="gate"><div class="logo">NOTIME 管理</div>
+  <div class="t">ログイン</div><div class="m">${ALLOW_DOMAIN} の Google アカウントでログインしてください。</div>
+  <button class="gbtn" id="gl"><span class="g"></span>Google でログイン</button></div>`);
+  document.getElementById("gl").onclick=async()=>{const redirectTo=location.origin+location.pathname;
+    await SB.auth.signInWithOAuth({provider:"google",options:{redirectTo,queryParams:{hd:"avend.co.jp",prompt:"select_account"}}});};
+}
+function showDenied(msg){ screen(`<div class="gate"><div class="logo">NOTIME 管理</div>
+  <div class="t">アクセスできません</div><div class="m">${esc(msg)}</div>
+  <button class="gbtn" id="lo"><span class="g"></span>別のアカウントでログイン</button>
+  <div style="margin-top:14px"><a class="navlink" href="index.html">← ダッシュボードへ</a></div></div>`);
+  document.getElementById("lo").onclick=async()=>{try{await SB.auth.signOut();}catch(e){}location.reload();};
+}
+
+async function render(){
+  screen(`
+    <header>
+      <h1>NOTIME 管理</h1>
+      <span class="sub">${esc(ME.email)}（管理）</span>
+      <a class="navlink" href="index.html" style="margin-left:auto">← ダッシュボード</a>
+      <button class="themebtn" id="themebtn">◐ 表示</button>
+      <button class="themebtn" id="logout">ログアウト</button>
+    </header>
+    <div class="panel">
+      <h2>ユーザー管理</h2>
+      <p class="note">ロール：<b>閲覧</b>＝見るだけ／<b>編集</b>＝＋予算・コスト等の入力／<b>管理</b>＝＋ユーザー・店舗の管理。
+        追加した @avend.co.jp のメールでGoogleログインすると使えます。</p>
+      <div class="tblwrap"><table id="utbl"><tbody><tr><td class="sub">読み込み中…</td></tr></tbody></table></div>
+      <div class="addrow">
+        <input id="u_email" class="wide" type="email" placeholder="メール（@avend.co.jp）">
+        <input id="u_name" placeholder="名前（任意）">
+        <select id="u_role">${ROLES.map(([v,t])=>`<option value="${v}">${t}</option>`).join("")}</select>
+        <button class="btn" id="u_add">ユーザー追加</button>
+      </div>
+      <p class="msg" id="u_msg"></p>
+    </div>
+    <div class="panel">
+      <h2>店舗管理</h2>
+      <p class="note">直営/FC の区分や、デジテール入店slug、オープン日などを設定できます。売上取り込みは自動で店舗を追加しますが、ここで事前登録・修正もできます。</p>
+      <div class="tblwrap"><table id="stbl"><tbody><tr><td class="sub">読み込み中…</td></tr></tbody></table></div>
+      <div class="addrow">
+        <input id="s_name" placeholder="店舗名（例：下北沢）">
+        <input id="s_code" placeholder="コード（英字・例：shimokita）">
+        <select id="s_own"><option value="直営">直営</option><option value="FC">FC</option></select>
+        <input id="s_slug" placeholder="入店slug（任意）">
+        <input id="s_open" type="date" title="オープン日">
+        <button class="btn" id="s_add">店舗追加</button>
+      </div>
+      <p class="msg" id="s_msg"></p>
+    </div>`);
+  document.getElementById("themebtn").onclick=()=>{const r=document.documentElement;const c=r.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");r.setAttribute("data-theme",c==="dark"?"light":"dark");};
+  document.getElementById("logout").onclick=async()=>{try{await SB.auth.signOut();}catch(e){}location.reload();};
+  document.getElementById("u_add").onclick=addUser;
+  document.getElementById("s_add").onclick=addStore;
+  await loadUsers(); await loadStores();
+}
+
+function msg(id,text,ok){const el=document.getElementById(id);if(el){el.textContent=text;el.className="msg "+(ok?"ok":"err");}}
+
+async function loadUsers(){
+  const {data,error}=await SB.from("app_users").select("*").order("role").order("email");
+  const tb=document.querySelector("#utbl");
+  if(error){tb.innerHTML=`<tbody><tr><td class="err">読み込み失敗：${esc(error.message)}</td></tr></tbody>`;return;}
+  const head=`<thead><tr><th>メール</th><th>名前</th><th>ロール</th><th></th></tr></thead>`;
+  const rows=data.map(u=>`<tr>
+    <td>${esc(u.email)}${u.email===ME.email?' <span class="sub">(自分)</span>':''}</td>
+    <td>${esc(u.name)}</td>
+    <td><select data-email="${esc(u.email)}" class="urole">${ROLES.map(([v,t])=>`<option value="${v}" ${u.role===v?"selected":""}>${t}</option>`).join("")}</select></td>
+    <td>${u.email===ME.email?'':`<button class="btn danger" data-del="${esc(u.email)}">削除</button>`}</td></tr>`).join("");
+  tb.innerHTML=head+"<tbody>"+rows+"</tbody>";
+  tb.querySelectorAll(".urole").forEach(sel=>sel.onchange=async()=>{
+    const email=sel.dataset.email;
+    const {error}=await SB.from("app_users").update({role:sel.value}).eq("email",email);
+    msg("u_msg", error?("変更失敗："+error.message):`${email} を「${roleJp(sel.value)}」に変更しました`, !error);
+  });
+  tb.querySelectorAll("[data-del]").forEach(b=>b.onclick=async()=>{
+    const email=b.dataset.del; if(!confirm(`${email} を削除しますか？`))return;
+    const {error}=await SB.from("app_users").delete().eq("email",email);
+    msg("u_msg", error?("削除失敗："+error.message):`${email} を削除しました`, !error);
+    if(!error)loadUsers();
+  });
+}
+async function addUser(){
+  const email=(document.getElementById("u_email").value||"").trim().toLowerCase();
+  const name=(document.getElementById("u_name").value||"").trim();
+  const role=document.getElementById("u_role").value;
+  if(!email.endsWith(ALLOW_DOMAIN)){msg("u_msg","@avend.co.jp のメールを入れてください",false);return;}
+  const {error}=await SB.from("app_users").upsert({email,name,role},{onConflict:"email"});
+  msg("u_msg", error?("追加失敗："+error.message):`${email} を「${roleJp(role)}」で追加しました`, !error);
+  if(!error){document.getElementById("u_email").value="";document.getElementById("u_name").value="";loadUsers();}
+}
+
+async function loadStores(){
+  const {data,error}=await SB.from("stores").select("*").order("id");
+  const tb=document.querySelector("#stbl");
+  if(error){tb.innerHTML=`<tbody><tr><td class="err">読み込み失敗：${esc(error.message)}</td></tr></tbody>`;return;}
+  const head=`<thead><tr><th>店舗</th><th>区分</th><th>入店slug</th><th>入店集計</th><th>オープン日</th><th></th></tr></thead>`;
+  const rows=data.map(s=>`<tr>
+    <td>${esc(s.name)} <span class="sub">${esc(s.code||"")}</span></td>
+    <td><select data-id="${s.id}" class="sown"><option value="直営" ${(s.ownership||"直営")==="直営"?"selected":""}>直営</option><option value="FC" ${s.ownership==="FC"?"selected":""}>FC</option></select></td>
+    <td><input data-id="${s.id}" class="sslug" value="${esc(s.digitel_slug||"")}" placeholder="—" style="width:130px"></td>
+    <td><input type="checkbox" data-id="${s.id}" class="sentry" ${s.has_entry_data?"checked":""}></td>
+    <td><input type="date" data-id="${s.id}" class="sopen" value="${esc(s.open_date||"")}"></td>
+    <td><button class="btn ghost" data-save="${s.id}">保存</button></td></tr>`).join("");
+  tb.innerHTML=head+"<tbody>"+rows+"</tbody>";
+  tb.querySelectorAll("[data-save]").forEach(b=>b.onclick=async()=>{
+    const id=b.dataset.save;
+    const own=tb.querySelector(`.sown[data-id="${id}"]`).value;
+    const slug=tb.querySelector(`.sslug[data-id="${id}"]`).value.trim()||null;
+    const entry=tb.querySelector(`.sentry[data-id="${id}"]`).checked;
+    const open=tb.querySelector(`.sopen[data-id="${id}"]`).value||null;
+    const {error}=await SB.from("stores").update({ownership:own,digitel_slug:slug,has_entry_data:entry,open_date:open}).eq("id",id);
+    msg("s_msg", error?("保存失敗："+error.message):"店舗を保存しました", !error);
+  });
+}
+async function addStore(){
+  const name=(document.getElementById("s_name").value||"").trim();
+  const code=(document.getElementById("s_code").value||"").trim();
+  const own=document.getElementById("s_own").value;
+  const slug=(document.getElementById("s_slug").value||"").trim()||null;
+  const open=document.getElementById("s_open").value||null;
+  if(!name||!code){msg("s_msg","店舗名とコードは必須です",false);return;}
+  const {error}=await SB.from("stores").insert({name,code,ownership:own,digitel_slug:slug,open_date:open,has_entry_data:true});
+  msg("s_msg", error?("追加失敗："+error.message):`店舗「${name}」を追加しました`, !error);
+  if(!error){["s_name","s_code","s_slug","s_open"].forEach(id=>document.getElementById(id).value="");loadStores();}
+}
+boot();
+</script>
+</body>
+</html>
