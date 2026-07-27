@@ -98,6 +98,22 @@
   .gbtn{display:inline-flex;align-items:center;gap:10px;background:var(--surface);color:var(--ink);border:1px solid var(--border);border-radius:11px;padding:12px 20px;font-size:15px;font-weight:700;cursor:pointer;box-shadow:var(--shadow);margin-top:18px;}
   .gbtn:hover{border-color:var(--accent);}
   .gbtn .g{width:18px;height:18px;display:inline-block;border-radius:50%;background:conic-gradient(#ea4335 0 25%,#fbbc05 0 50%,#34a853 0 75%,#4285f4 0);}
+  .acform{display:grid;gap:8px;margin-top:2px;}
+  .acform input.t,.acform textarea,.acform select{background:var(--surface);color:var(--ink);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:13px;font-family:inherit;width:100%;}
+  .acform input.t:focus,.acform textarea:focus,.acform select:focus,.acitem input.t:focus,.acitem select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-weak);}
+  .acform textarea{min-height:52px;resize:vertical;line-height:1.6;}
+  .acitem{border:1px solid var(--border);border-radius:11px;padding:11px 12px;margin:10px 0;background:var(--surface2);}
+  .acitem .h{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;}
+  .acitem .ttl{font-weight:750;font-size:13.5px;}
+  .acitem .meta{font-size:11.5px;color:var(--muted);}
+  .acitem .body{font-size:12.5px;color:var(--ink2);margin-top:6px;line-height:1.7;white-space:pre-wrap;}
+  .acitem .edit{display:flex;flex-wrap:wrap;gap:8px;margin-top:9px;align-items:center;}
+  .acitem select,.acitem input.t{background:var(--surface);color:var(--ink);border:1px solid var(--border);border-radius:8px;padding:6px 9px;font-size:12.5px;font-family:inherit;}
+  .tag{border-radius:999px;padding:3px 9px;font-size:11px;font-weight:700;border:1px solid var(--border);color:var(--ink2);}
+  .tag.main{background:var(--bad);color:#fff;border-color:var(--bad);}
+  .tag.kpi{background:var(--accent-weak);color:var(--accent);border-color:transparent;}
+  .acdel{border:1px solid var(--border);background:var(--surface);color:var(--bad);border-radius:8px;padding:6px 11px;font-size:11.5px;font-weight:700;cursor:pointer;}
+  .acdel:hover{border-color:var(--bad);}
 </style>
 </head>
 <body>
@@ -113,8 +129,8 @@ const YEN=n=>Math.round(n).toLocaleString("ja-JP");
 const NUM=n=>Math.round(n).toLocaleString("ja-JP");
 const F1=n=>(Math.round(n*10)/10).toLocaleString("ja-JP",{minimumFractionDigits:1,maximumFractionDigits:1});
 const F2=n=>(Math.round(n*100)/100).toLocaleString("ja-JP",{minimumFractionDigits:2,maximumFractionDigits:2});
-const state={store:"all",ym:null,view:"pl"};   // view: "pl"=月次予実 / "fc"=着地見込み
-let DATA=null, A=null, M={}, MALL={}, AUTO=null, fc=null;
+const state={store:"all",ym:null,view:"pl"};   // view: "pl"=月次予実 / "fc"=着地見込み / "ac"=打ち手
+let DATA=null, A=null, M={}, MALL={}, AUTO=null, fc=null, AC={items:[]};
 let CANEDIT=true, RT=null, DIRTY=false;   // 編集可否／リアルタイム購読／未保存フラグ
 
 const CONFIG_URL="https://rwfcsanmqvkxiuwdeddv.supabase.co/storage/v1/object/public/dashboard/config.json";
@@ -344,6 +360,7 @@ async function reload(){
     const months=monthsInData();
     if(!state.ym||!months.includes(state.ym)) state.ym=(DATA._salesMax||months[months.length-1]).slice(0,7);
     if(state.view==="fc"){ AUTO=computeAuto(state.store,state.ym); fc=await loadFcData(); }
+    else if(state.view==="ac"){ AUTO=computeAuto(state.store,state.ym); fc=await loadFcData(); await acLoad(); }
     else{ A=computeActual(state.store,state.ym);
       if(isAll()){ MALL=await planLoadAll("pl",state.ym); M={}; } else { M=await loadMData(); MALL={}; } }
     render(); subscribeRealtime();
@@ -354,12 +371,13 @@ function subscribeRealtime(){
   if(!SB||RT)return;
   RT=SB.channel("plan_rt").on("postgres_changes",{event:"*",schema:"public",table:"plan_data"},payload=>{
     const r=payload.new||payload.old; if(!r)return;
-    const page=state.view==="fc"?"fc":"pl";
-    if(r.page!==page||r.ym!==state.ym)return;
+    const page=state.view==="fc"?"fc":state.view==="ac"?"action":"pl";
+    if(r.page!==page)return;
+    if(page==="action"){ if(r.ym!=="all")return; } else if(r.ym!==state.ym)return;
     if(r.updated_by&&r.updated_by===ME.email)return;      // 自分の変更は無視
     if(DIRTY)return;                                        // 未保存の編集中は上書きしない
     const ae=document.activeElement;
-    if(ae&&(ae.classList.contains("pin")||ae.classList.contains("num")))return;  // 入力中は見送り
+    if(ae&&(ae.tagName==="INPUT"||ae.tagName==="TEXTAREA"))return;  // 入力中は見送り
     reload();
   }).subscribe();
 }
@@ -385,13 +403,20 @@ function render(){
     <div class="subtoggle">
       <button data-view="pl" class="${state.view==="pl"?"on":""}">月次予実</button>
       <button data-view="fc" class="${state.view==="fc"?"on":""}">🎯 着地見込み</button>
+      <button data-view="ac" class="${state.view==="ac"?"on":""}">🧠 打ち手</button>
     </div>
-    ${(CANEDIT&&(state.view==="fc"||!isAll()))?`<div class="savebar"><button class="btn-save" id="commit" disabled>更新</button><span class="sub" id="commit-note">入力後に「更新」で保存＝全端末に反映</span></div>`:""}`;
+    ${(CANEDIT&&state.view!=="ac"&&(state.view==="fc"||!isAll()))?`<div class="savebar"><button class="btn-save" id="commit" disabled>更新</button><span class="sub" id="commit-note">入力後に「更新」で保存＝全端末に反映</span></div>`:""}`;
 
   if(state.view==="fc"){
     document.getElementById("app").innerHTML=top+fcBody(monthLabel,storeName);
     bindCommon(); bindFc();
     drawDriver(); fcRecompute();
+    return;
+  }
+
+  if(state.view==="ac"){
+    document.getElementById("app").innerHTML=top+acBody(monthLabel,storeName);
+    bindCommon(); acRender();
     return;
   }
 
@@ -579,6 +604,132 @@ function fcRecompute(){
     +`<tr class="tierhead"><td colspan="3">その他KPI（参考）</td></tr>`
     +FKPI.filter(m=>m.tier==="sub").map(rowHtml).join("");
   document.getElementById("kpi").innerHTML=head+"<tbody>"+body+"</tbody>";
+}
+
+// ======= 打ち手（アクション）タブ =======
+//  週境界は月曜〜日曜。ギャップ・要因分析はKGI(売上)と主要KPIで。打ち手ログは店舗ごとに蓄積。
+function escAttr(s){return esc(s).replace(/"/g,"&quot;");}
+function mondayOf(d){const t=new Date(d+"T00:00:00Z");const g=(t.getUTCDay()+6)%7;t.setUTCDate(t.getUTCDate()-g);return t.toISOString().slice(0,10);}
+function daysInc(from,to){return Math.round((new Date(to+"T00:00:00Z")-new Date(from+"T00:00:00Z"))/86400000)+1;}
+function prevYm(ym){let[y,m]=ym.split("-").map(Number);m--;if(m<1){m=12;y--;}return `${y}-${String(m).padStart(2,"0")}`;}
+function weeksMonSun(ym,upto){
+  const mS=ym+"-01", mE=monthEnd(ym); const end=(upto&&upto<mE)?upto:mE;
+  const weeks=[]; let cur=mondayOf(mS);
+  while(cur<=end){ const wEnd=addDays(cur,6); const from=cur<mS?mS:cur, to=wEnd>end?end:wEnd;
+    if(from<=to)weeks.push({from,to}); cur=addDays(cur,7); }
+  return weeks;
+}
+function actIn(store,from,to){
+  const ids=store==="all"?new Set(usableStores().map(s=>s.id)):new Set([store]);
+  const a={in:0,ex:0,tx:0,it:0,v:0};
+  for(const r of DATA.daily){ if(!ids.has(r.s))continue; if(r.d<from||r.d>to)continue;
+    a.in+=r.in||0;a.ex+=r.ex||0;a.tx+=r.tx||0;a.it+=r.it||0;a.v+=r.v||0; }
+  return a;
+}
+function kpiPr(a){return a.v>0?a.tx/a.v*100:null;}
+function kpiAov(a){return a.tx>0?a.in/a.tx:null;}
+function acNewId(){return "a"+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36);}
+async function acLoad(){const d=await planLoad("action",state.store,"all");AC=(d&&Array.isArray(d.items))?{items:d.items}:{items:[]};}
+function acSave(){return planSave("action",state.store,"all",AC);}
+
+function acBody(monthLabel,storeName){
+  return `
+    <div class="panel">
+      <h2>${monthLabel}・${esc(storeName)} 売上ギャップ &amp; 要因</h2>
+      <div class="fhero">
+        <span class="lbl2">売上（税込）着地見込み vs 月予算</span>
+        <span class="big" id="ac-gap">—</span>
+      </div>
+      <div class="pills" id="ac-pills"></div>
+      <div class="tblwrap" style="margin-top:10px"><table id="ac-factor"></table></div>
+      <p class="note" id="ac-comment"></p>
+    </div>
+    <div class="panel">
+      <h2>週次（月〜日）予算 vs 実績</h2>
+      <div class="tblwrap"><table id="ac-week"></table></div>
+      <p class="note">週は月曜〜日曜。週予算＝月予算×(その週の日数÷当月日数)。実績は締日（最新データ）まで。ギャップの大きい週から手を打ちます。</p>
+    </div>
+    <div class="panel">
+      <h2>🧠 打ち手ログ（ナレッジ蓄積）</h2>
+      ${CANEDIT?`<div class="acform">
+        <input class="t" id="ac-title" type="text" placeholder="打ち手のタイトル（例：土日にLINEクーポン配信）">
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
+          <select id="ac-target" style="flex:1;min-width:130px"><option value="来店数">対象：来店数</option><option value="購入率">対象：購入率</option><option value="客単価">対象：客単価</option><option value="その他">対象：その他</option></select>
+          <select id="ac-status" style="flex:1;min-width:130px"><option value="未着手">未着手</option><option value="実施中">実施中</option><option value="検証中">検証中</option><option value="完了">完了</option></select>
+        </div>
+        <textarea id="ac-action" placeholder="施策の内容・狙い（仮説）"></textarea>
+        <textarea id="ac-result" placeholder="効果・検証メモ（後から追記OK）"></textarea>
+        <div><button class="btn-save" id="ac-add">＋ 打ち手を追加</button></div>
+      </div>`:'<p class="note">閲覧のみ（追加・編集は「編集」または「管理」権限の方）。</p>'}
+      <div id="ac-list"></div>
+      <p class="note">追加・変更は即サーバ保存＝全端末で共有。蓄積したナレッジは要因分析・次の打ち手立案に活用します（店舗ごとに蓄積）。</p>
+    </div>`;
+}
+function acRender(){
+  const L=landing(), td=AUTO.td, b=fc.budget||0;
+  const prev=computeActual(state.store,prevYm(state.ym));
+  const gap=L.in-b, gEl=document.getElementById("ac-gap");
+  if(b>0){ gEl.textContent=(gap>=0?"+":"−")+YEN(Math.abs(gap))+"円"; gEl.className="big "+(gap>=0?"up":"down"); }
+  else{ gEl.textContent="目標 未登録"; gEl.className="big mut"; }
+  const pills=[`<span class="pill">着地見込み <b>${YEN(L.in)}円</b></span>`];
+  if(b>0){ pills.push(`<span class="pill">月予算 <b>${YEN(b)}円</b></span>`); pills.push(`<span class="pill">計画比 <b>${F1(L.in/b*100)}%</b></span>`); }
+  document.getElementById("ac-pills").innerHTML=pills.join("");
+  // 要因：主要KPI（来店/購入率/客単価）着地見込み vs 前月実績
+  const facs=[
+    {name:"来店数",fmt:v=>NUM(v)+"人",lv:L.v,pv:prev.v},
+    {name:"購入率",fmt:v=>F1(v)+"%",lv:kpiPr(L),pv:kpiPr(prev)},
+    {name:"客単価（税込）",fmt:v=>YEN(v)+"円",lv:kpiAov(L),pv:kpiAov(prev)},
+  ].map(f=>({...f,chg:(f.pv&&f.pv!==0&&f.lv!=null)?(f.lv/f.pv-1)*100:null}));
+  let main=null; facs.forEach(f=>{if(f.chg!=null&&f.chg<0&&(main===null||f.chg<main.chg))main=f;});
+  const fhead=`<thead><tr><th>主要KPI</th><th>着地見込み</th><th>前月実績</th><th>前月比</th></tr></thead>`;
+  const frows=facs.map(f=>{const isMain=main&&f.name===main.name;
+    const chg=f.chg==null?"—":`<span class="delta ${f.chg>=0?"up":"down"}">${f.chg>=0?"+":"−"}${F1(Math.abs(f.chg))}%</span>`;
+    return `<tr class="${isMain?"keyrow":""}"><td>${f.name}${isMain?' <span class="tag main">主因</span>':""}</td><td>${f.lv==null?"—":f.fmt(f.lv)}</td><td>${f.pv==null?"—":f.fmt(f.pv)}</td><td>${chg}</td></tr>`;}).join("");
+  document.getElementById("ac-factor").innerHTML=fhead+"<tbody>"+frows+"</tbody>";
+  let cm="";
+  if(b>0){ cm=gap>=0?`着地見込みは月予算を <b class="up">${YEN(gap)}円</b> 上回る見込み。`:`着地見込みは月予算に <b class="down">${YEN(-gap)}円</b> 不足。`; }
+  else cm="月予算が未登録です（🎯着地見込みタブで目標を設定するとギャップを表示）。";
+  if(main)cm+=` 前月比で最も落ちているのは <b>${main.name}</b>（${F1(main.chg)}%）。ここへの打ち手を優先。`;
+  document.getElementById("ac-comment").innerHTML=cm;
+  // 週次（月〜日）予算 vs 実績
+  const wks=weeksMonSun(state.ym,AUTO.closing), mDays=daysInc(state.ym+"-01",monthEnd(state.ym));
+  const whead=`<thead><tr><th>週（月〜日）</th><th>週予算</th><th>実績(税込)</th><th>ギャップ</th><th>来店</th></tr></thead>`;
+  const wrows=wks.map(w=>{const a=actIn(state.store,w.from,w.to), wd=daysInc(w.from,w.to), wb=b>0?b*wd/mDays:0, g=a.in-wb;
+    return `<tr><td>${fmtMD(w.from)}〜${fmtMD(w.to)}</td><td>${wb>0?YEN(wb)+"円":"—"}</td><td>${YEN(a.in)}円</td><td>${wb>0?`<span class="delta ${g>=0?"up":"down"}">${g>=0?"+":"−"}${YEN(Math.abs(g))}円</span>`:"—"}</td><td>${NUM(a.v)}人</td></tr>`;}).join("");
+  document.getElementById("ac-week").innerHTML=whead+"<tbody>"+(wrows||'<tr><td colspan="5" class="mut">当月のデータがありません</td></tr>')+"</tbody>";
+  acRenderList();
+  if(CANEDIT){const ab=document.getElementById("ac-add");if(ab)ab.onclick=acAdd;}
+}
+function acRenderList(){
+  const list=document.getElementById("ac-list"); if(!list)return;
+  const st=["未着手","実施中","検証中","完了"];
+  const items=(AC.items||[]).slice().sort((a,b)=>((b.date||"").localeCompare(a.date||""))||((b.id||"")>(a.id||"")?1:-1));
+  if(!items.length){list.innerHTML='<p class="note">まだ打ち手がありません。上のフォームから追加してください。</p>';return;}
+  list.innerHTML=items.map(it=>`<div class="acitem" data-id="${escAttr(it.id)}">
+      <div class="h"><span class="ttl">${esc(it.title||"")}</span>
+        ${it.target?`<span class="tag kpi">${esc(it.target)}</span>`:""}
+        <span class="meta">${esc(it.date||"")}｜対象月 ${esc((it.ym||"").replace("-","/"))}</span></div>
+      ${it.action?`<div class="body">${esc(it.action)}</div>`:""}
+      <div class="edit">
+        ${CANEDIT?`<select class="acst" data-id="${escAttr(it.id)}">${st.map(s=>`<option ${s===it.status?"selected":""}>${s}</option>`).join("")}</select>
+        <input class="t acres" data-id="${escAttr(it.id)}" type="text" style="flex:1;min-width:160px" placeholder="効果・検証メモ" value="${escAttr(it.result||"")}">
+        <button class="acdel" data-id="${escAttr(it.id)}">削除</button>`
+        :`<span class="tag">${esc(it.status||"")}</span>${it.result?`<span class="meta">効果: ${esc(it.result)}</span>`:""}`}
+      </div></div>`).join("");
+  if(!CANEDIT)return;
+  list.querySelectorAll(".acst").forEach(el=>el.onchange=async()=>{const it=AC.items.find(x=>x.id===el.dataset.id);if(it){it.status=el.value;await acSave();}});
+  list.querySelectorAll(".acres").forEach(el=>el.onchange=async()=>{const it=AC.items.find(x=>x.id===el.dataset.id);if(it){it.result=el.value.trim();await acSave();}});
+  list.querySelectorAll(".acdel").forEach(el=>el.onclick=async()=>{if(!confirm("この打ち手を削除しますか？"))return;AC.items=AC.items.filter(x=>x.id!==el.dataset.id);await acSave();render();});
+}
+async function acAdd(){
+  const t=document.getElementById("ac-title"); const title=(t.value||"").trim();
+  if(!title){t.focus();return;}
+  AC.items.unshift({id:acNewId(),date:todayStr(),ym:state.ym,title,
+    target:document.getElementById("ac-target").value,
+    status:document.getElementById("ac-status").value,
+    action:(document.getElementById("ac-action").value||"").trim(),
+    result:(document.getElementById("ac-result").value||"").trim()});
+  await acSave(); render();
 }
 
 function setTxt(id,txt,cls){const el=document.getElementById(id);if(!el)return;el.textContent=txt;if(cls!==undefined)el.className=cls;}
