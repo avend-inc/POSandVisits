@@ -103,9 +103,9 @@ const METRICS=[
   {key:"tx", name:"取引数",       fmt:v=>NUM(v)+"件", calc:p=>p.tx},
   {key:"qty",name:"販売数",       fmt:v=>NUM(v)+"点", calc:p=>p.it},
   {key:"pr", name:"購入率",       fmt:v=>F1(v)+"%",   calc:p=>p.v>0?p.tx/p.v*100:null},
-  {key:"aov",name:"客単価",       fmt:v=>YEN(v)+"円", calc:p=>p.tx>0?p.in/p.tx:null},
+  {key:"aov",name:"客単価（税込）",   fmt:v=>YEN(v)+"円", calc:p=>p.tx>0?p.in/p.tx:null},
   {key:"upt",name:"平均購入数",   fmt:v=>F2(v)+"点",  calc:p=>p.tx>0?p.it/p.tx:null},
-  {key:"aup",name:"平均商品単価", fmt:v=>YEN(v)+"円", calc:p=>p.it>0?p.ex/p.it:null},
+  {key:"aup",name:"平均商品単価（税抜）", fmt:v=>YEN(v)+"円", calc:p=>p.it>0?p.ex/p.it:null},
 ];
 const state={view:"total",own:"all",grain:"week",from:null,to:null};
 let DATA=null;
@@ -247,7 +247,7 @@ function render(){
     <div class="cards" id="cards"></div>
     <div class="foot">
       各グラフは「${state.grain==="day"?"日別":state.grain==="week"?"週別":"月別"}」の推移。「店舗別に比較」を選ぶと店舗ごとの折れ線が色分けで重なります。
-      右上の数字は対象期間ぜんぶの合計／平均（比較時は総合）、前期比は同じ長さの直前期間との比較。
+      右上の数字は対象期間ぜんぶの合計／平均（比較時は総合）。「前の同期間比」＝直前の同じ長さの期間との増減（例：直近30日なら、その前の30日。前月比・前日比ではありません）。
       指標：購入率＝取引数÷来店客数／客単価＝税込売上÷取引数／平均購入数＝総点数÷取引数／平均商品単価＝税抜売上÷総点数。
       週別は月曜〜日曜。レジ袋・クーポンは売上・点数・カテゴリから除外。いわきは2店舗ぶんを合算。${owns.length>1?"「区分」で直営／FCを切替。":"（FC店を追加すると直営／FCの切替が出ます）"}
     </div>`;
@@ -303,7 +303,7 @@ function draw(){
     const v=m.calc(total),pv=ptotal?m.calc(ptotal):null;let d="";
     if(v!=null&&pv!=null&&pv!==0){const pct=(v-pv)/Math.abs(pv)*100;
       const cls=pct>0.05?"up":pct<-0.05?"down":"flat",ar=pct>0.05?"▲":pct<-0.05?"▼":"—";
-      d=`<span class="delta ${cls}">${ar} ${F1(Math.abs(pct))}%</span>`;}
+      d=`<span class="delta ${cls}" title="前の同期間（${pFrom<DATA._min?DATA._min:pFrom}〜${pTo}）比">${ar} ${F1(Math.abs(pct))}% <span class="sub" style="color:inherit;font-weight:500">前の同期間比</span></span>`;}
     return `<div class="card">
       <div class="top"><span class="k">${m.name}</span>${d}<span class="val">${v==null?"—":m.fmt(v)}</span></div>
       <div class="chart" data-k="${m.key}"></div></div>`;
