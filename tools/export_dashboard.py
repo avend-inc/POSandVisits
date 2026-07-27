@@ -85,6 +85,7 @@ def build_data(sb: Supabase) -> dict:
     tx_seen: set[tuple] = set()
     daily: dict[tuple, dict] = {}     # (date, store_id) -> 伝票合計
     cat: dict[tuple, dict] = {}       # (date, store_id, category) -> 明細合計
+    catprice: dict[tuple, dict] = {}  # (date, store_id, category, 単価) -> 明細合計（価格帯別）
 
     # 商品ではないので「売上・点数・カテゴリ」すべてから除外する。
     #  ・レジ袋 / クーポン … 物ではない（config.py の NON_MERCH と同じ考え方）
@@ -144,6 +145,14 @@ def build_data(sb: Supabase) -> dict:
         crec["a"] += amt
         crec["q"] += qty
 
+        # 価格帯別（カテゴリ内の単価ごと）。単価＝明細金額÷点数を最寄りの円に丸める。
+        if qty > 0 and amt > 0:
+            price = int(round(amt / qty))
+            pk = (d, sid, c, price)
+            prec = catprice.setdefault(pk, {"a": 0.0, "q": 0.0})
+            prec["a"] += amt
+            prec["q"] += qty
+
     # --- visits: 来店客数を日別×店舗に載せる
     visits = _select_all(
         sb, "visits",
@@ -169,6 +178,10 @@ def build_data(sb: Supabase) -> dict:
         {"d": d, "s": sid, "c": c, "a": round(v["a"]), "q": round(v["q"])}
         for (d, sid, c), v in sorted(cat.items())
     ]
+    catprice_rows = [
+        {"d": d, "s": sid, "c": c, "p": p, "a": round(v["a"]), "q": round(v["q"])}
+        for (d, sid, c, p), v in sorted(catprice.items())
+    ]
 
     return {
         "generated_at": datetime.now(JST).isoformat(timespec="seconds"),
@@ -177,6 +190,7 @@ def build_data(sb: Supabase) -> dict:
                    for s in stores],
         "daily": daily_rows,
         "cat": cat_rows,
+        "catp": catprice_rows,
     }
 
 
@@ -304,7 +318,7 @@ def main() -> int:
 
     print("ダッシュボード用データを集計しています...")
     data = build_data(sb)
-    print(f"  日別×店舗: {len(data['daily'])}件 / カテゴリ日別: {len(data['cat'])}件")
+    print(f"  日別×店舗: {len(data['daily'])}件 / カテゴリ日別: {len(data['cat'])}件 / 価格帯別: {len(data.get('catp',[]))}件")
     data_bytes = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     print(f"  data.json サイズ: {len(data_bytes)//1024} KB")
 
