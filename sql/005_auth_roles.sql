@@ -25,12 +25,8 @@ create or replace function public.current_app_email() returns text
   select lower(coalesce(auth.jwt() ->> 'email', ''))
 $$;
 
-create or replace function public.current_app_role() returns text
-  language sql stable security definer set search_path = public as $$
-  select role from public.app_users where email = public.current_app_email() limit 1
-$$;
-
 -- --- ユーザー表（email → ロール）-------------------------------------------
+--   ※ current_app_role() がこの表を参照するので、関数より先に作る。
 create table if not exists public.app_users (
   email      text primary key,
   name       text,
@@ -38,6 +34,12 @@ create table if not exists public.app_users (
   created_at timestamptz not null default now()
 );
 alter table public.app_users enable row level security;
+
+-- current_app_role は app_users を参照するため、テーブル作成の後に定義する。
+create or replace function public.current_app_role() returns text
+  language sql stable security definer set search_path = public as $$
+  select role from public.app_users where email = public.current_app_email() limit 1
+$$;
 
 -- 読み取り：社内(@avend.co.jp)でログインしていれば可（自分のロール確認・管理一覧のため）
 drop policy if exists "app_users_read" on public.app_users;
