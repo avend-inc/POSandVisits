@@ -64,6 +64,10 @@
   input.num:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-weak);}
   input.num.edit{color:var(--accent);}
   input.num:disabled{opacity:.65;cursor:not-allowed;background:var(--surface2);color:var(--ink2);}
+  .btn-save{border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:9px;padding:8px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;}
+  .btn-save:disabled{opacity:.45;cursor:default;}
+  .btn-save.dirty{box-shadow:0 0 0 3px var(--accent-weak);}
+  .savebar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:10px 0 0;}
   .auto{color:var(--ink);font-weight:700;}
   .up{color:var(--good);} .down{color:var(--bad);} .mut{color:var(--muted);}
   .note{font-size:11.5px;color:var(--muted);margin:8px 0 0;line-height:1.7;}
@@ -93,7 +97,7 @@ const F1=n=>(Math.round(n*10)/10).toLocaleString("ja-JP",{minimumFractionDigits:
 const F2=n=>(Math.round(n*100)/100).toLocaleString("ja-JP",{minimumFractionDigits:2,maximumFractionDigits:2});
 const state={store:"all",ym:null,view:"pl"};   // view: "pl"=月次予実 / "fc"=着地見込み
 let DATA=null, A=null, M={}, MALL={}, AUTO=null, fc=null;
-let CANEDIT=true, RT=null;   // 編集可否（編集/管理のみ）／リアルタイム購読
+let CANEDIT=true, RT=null, DIRTY=false;   // 編集可否／リアルタイム購読／未保存フラグ
 
 const CONFIG_URL="https://rwfcsanmqvkxiuwdeddv.supabase.co/storage/v1/object/public/dashboard/config.json";
 let SB=null, ME={email:"",role:null};
@@ -312,6 +316,7 @@ function fmtMD(d){const[,m,dd]=d.split("-");return `${+m}/${+dd}`;}
 // ======= データ読込→描画 =======
 async function reload(){
   try{
+    DIRTY=false;
     CANEDIT = !SB || ME.role==="editor" || ME.role==="admin";
     const months=monthsInData();
     if(!state.ym||!months.includes(state.ym)) state.ym=(DATA._salesMax||months[months.length-1]).slice(0,7);
@@ -329,6 +334,7 @@ function subscribeRealtime(){
     const page=state.view==="fc"?"fc":"pl";
     if(r.page!==page||r.ym!==state.ym)return;
     if(r.updated_by&&r.updated_by===ME.email)return;      // 自分の変更は無視
+    if(DIRTY)return;                                        // 未保存の編集中は上書きしない
     const ae=document.activeElement;
     if(ae&&(ae.classList.contains("pin")||ae.classList.contains("num")))return;  // 入力中は見送り
     reload();
@@ -355,7 +361,8 @@ function render(){
     <div class="subtoggle">
       <button data-view="pl" class="${state.view==="pl"?"on":""}">月次予実</button>
       <button data-view="fc" class="${state.view==="fc"?"on":""}">🎯 着地見込み</button>
-    </div>`;
+    </div>
+    ${(CANEDIT&&(state.view==="fc"||!isAll()))?`<div class="savebar"><button class="btn-save" id="commit" disabled>更新</button><span class="sub" id="commit-note">入力後に「更新」で保存＝全端末に反映</span></div>`:""}`;
 
   if(state.view==="fc"){
     document.getElementById("app").innerHTML=top+fcBody(monthLabel,storeName);
@@ -371,15 +378,30 @@ function render(){
   if(rb)rb.onclick=async()=>{if(confirm("この店舗・この月の記入値を消しますか？")){await planDelete("pl",state.store,state.ym);reload();}};
   document.querySelectorAll(".pin").forEach(el=>el.oninput=()=>{const k=el.dataset.k;
     if(el.value===""){delete M[k];}else{const v=Number(el.value);if(Number.isFinite(v))M[k]=v;else delete M[k];}
-    saveM();recompute();});
+    markDirty();recompute();});
   recompute();
 }
 
 function bindCommon(){
-  document.getElementById("store").onchange=e=>{state.store=e.target.value==="all"?"all":+e.target.value;reload();};
-  document.getElementById("ym").onchange=e=>{state.ym=e.target.value;reload();};
+  document.getElementById("store").onchange=e=>{if(DIRTY&&!confirm("未保存の変更があります。切り替えると破棄されます。よろしいですか？")){e.target.value=String(state.store);return;}state.store=e.target.value==="all"?"all":+e.target.value;reload();};
+  document.getElementById("ym").onchange=e=>{if(DIRTY&&!confirm("未保存の変更があります。切り替えると破棄されます。よろしいですか？")){e.target.value=state.ym;return;}state.ym=e.target.value;reload();};
   document.getElementById("themebtn").onclick=toggleTheme;
-  document.querySelectorAll(".subtoggle button").forEach(b=>b.onclick=()=>{state.view=b.dataset.view;reload();});
+  document.querySelectorAll(".subtoggle button").forEach(b=>b.onclick=()=>{if(DIRTY&&!confirm("未保存の変更があります。切り替えると破棄されます。よろしいですか？"))return;state.view=b.dataset.view;reload();});
+  const cb=document.getElementById("commit"); if(cb)cb.onclick=commitPlan;
+}
+// 未保存の目印（更新ボタンを有効化）／「更新」で確定保存＝全端末に反映
+function markDirty(){ DIRTY=true; const c=document.getElementById("commit");
+  if(c){c.disabled=false;c.classList.add("dirty");c.textContent="更新（未保存）";}
+  const n=document.getElementById("commit-note"); if(n)n.textContent="未保存の変更があります。「更新」で保存してください"; }
+async function commitPlan(){
+  const c=document.getElementById("commit"); if(c){c.disabled=true;c.textContent="保存中…";}
+  if(state.view==="fc") await planSave("fc",state.store,state.ym,fc);
+  else await planSave("pl",state.store,state.ym,M);
+  DIRTY=false;
+  if(c){c.classList.remove("dirty");c.textContent="更新済み ✓";}
+  const n=document.getElementById("commit-note"); if(n)n.textContent="保存しました（全端末に反映）";
+  setTimeout(()=>{const cc=document.getElementById("commit"); if(cc&&!DIRTY){cc.textContent="更新";cc.disabled=true;}
+    const nn=document.getElementById("commit-note"); if(nn&&!DIRTY)nn.textContent="入力後に「更新」で保存＝全端末に反映";},1800);
 }
 
 function plBody(monthLabel,storeName){
@@ -437,7 +459,7 @@ function plBody(monthLabel,storeName){
         </tbody>
       </table></div>
     </div>
-    <div class="foot">実績＝アプリの取込データ（cashier売上・デジテール来店）から自動。予算・原価・販管費・決済手段別は<b>この端末に保存</b>されます（店舗×月ごと）。「この月の入力を消す」で空に戻せます。</div>`;
+    <div class="foot">実績＝アプリの取込データ（cashier売上・デジテール来店）から自動。予算・原価・販管費・決済手段別は入力後に<b>「更新」でサーバ保存＝全端末で共有</b>されます（店舗×月ごと）。「この月の入力を消す」で空に戻せます。</div>`;
 }
 
 function fcBody(monthLabel,storeName){
@@ -453,7 +475,7 @@ function fcBody(monthLabel,storeName){
       <p class="note">締日（最新データ）: <b id="closing">—</b> ／ 締日までの税込売上: <b id="td-in">—</b>。締日より後の日数×下の「見込み平均／日」で着地を計算しています。</p>
     </div>
     <div class="panel">
-      <h2>前提（ここを直すと即反映・この端末に保存されます）</h2>
+      <h2>前提（数値を直して上の「更新」でサーバ保存＝全端末に反映）</h2>
       <div class="rowflex">
         <div class="field"><label>残 平日日数</label><input class="num" id="remWk" type="number" min="0" step="1" value="${fc.remWk}" style="width:70px"${CANEDIT?"":" disabled"}></div>
         <div class="field"><label>残 土日祝日数</label><input class="num" id="remWe" type="number" min="0" step="1" value="${fc.remWe}" style="width:70px"${CANEDIT?"":" disabled"}></div>
@@ -468,7 +490,7 @@ function fcBody(monthLabel,storeName){
       <div class="tblwrap"><table id="kpi"></table></div>
       <p class="note">税抜売上＝税込×実績税率(${(AUTO.exRatio).toFixed(3)})。購入率＝取引数÷来店客数／客単価（税込）＝税込÷取引数／平均購入数＝点数÷取引数／平均商品単価（税抜）＝税抜÷点数。レジ袋・クーポンは除外済み。</p>
     </div>
-    <div class="foot">「私の見込み」はデータから自動算出した初期値です（平日／土日祝それぞれの1日あたり平均。当月の実績、無ければ直近8週）。ズレていれば数値を上書きしてください（この端末に保存）。「自動見込みに戻す」で初期値に戻せます。締日＝取り込み済みの最新日。</div>`;
+    <div class="foot">「私の見込み」はデータから自動算出した初期値です（平日／土日祝それぞれの1日あたり平均。当月の実績、無ければ直近8週）。ズレていれば数値を上書きして「更新」（サーバ保存＝全端末に反映）。「自動見込みに戻す」で初期値に戻せます。締日＝取り込み済みの最新日。</div>`;
 }
 
 function bindFc(){
@@ -478,7 +500,7 @@ function bindFc(){
   bindFcInput("budget",v=>fc.budget=Math.max(0,v));
 }
 function bindFcInput(id,setter){const el=document.getElementById(id);if(!el)return;
-  el.oninput=()=>{const v=Number(el.value); if(el.value===""){setter(0);}else if(Number.isFinite(v)){setter(v);} saveFc(); fcRecompute();};}
+  el.oninput=()=>{const v=Number(el.value); if(el.value===""){setter(0);}else if(Number.isFinite(v)){setter(v);} markDirty(); fcRecompute();};}
 function drawDriver(){
   const head=`<thead><tr><th>指標</th><th>締日まで(実績)</th><th>平日 見込/日</th><th>土日祝 見込/日</th><th>着地見込み</th></tr></thead>`;
   const rows=DRIVERS.map(d=>`<tr>
@@ -486,17 +508,17 @@ function drawDriver(){
     <td>${d.fmt(AUTO.td[d.k])}${d.unit}</td>
     <td><input class="num edit" data-k="${d.k}" data-t="wk" type="number" min="0" step="${d.step}" value="${Math.round(fc.avg[d.k].wk)}"${CANEDIT?"":" disabled"}></td>
     <td><input class="num edit" data-k="${d.k}" data-t="we" type="number" min="0" step="${d.step}" value="${Math.round(fc.avg[d.k].we)}"${CANEDIT?"":" disabled"}></td>
-    <td id="land-${d.k}">—</td>
+    <td id="dland-${d.k}">—</td>
   </tr>`).join("");
   document.getElementById("driver").innerHTML=head+"<tbody>"+rows+"</tbody>";
   document.querySelectorAll('#driver input.edit').forEach(el=>{
     el.oninput=()=>{const v=Number(el.value);const k=el.dataset.k,t=el.dataset.t;
-      fc.avg[k][t]=(el.value===""||!Number.isFinite(v))?0:Math.max(0,v); saveFc(); fcRecompute();};});
+      fc.avg[k][t]=(el.value===""||!Number.isFinite(v))?0:Math.max(0,v); markDirty(); fcRecompute();};});
 }
 function fcRecompute(){
   const L=landing(), td=AUTO.td;
   document.getElementById("land-in").textContent=YEN(L.in)+"円";
-  DRIVERS.forEach(d=>{const c=document.getElementById("land-"+d.k);if(c)c.textContent=d.fmt(L[d.k])+d.unit;});
+  DRIVERS.forEach(d=>{const c=document.getElementById("dland-"+d.k);if(c)c.textContent=d.fmt(L[d.k])+d.unit;});
   document.getElementById("closing").textContent=AUTO.closing?fmtMD(AUTO.closing):"—（当月データなし）";
   document.getElementById("td-in").textContent=YEN(td.in)+"円";
   const b=fc.budget, pills=[];
