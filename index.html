@@ -32,7 +32,7 @@
   body{margin:0;background:var(--bg);color:var(--ink);
     font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,sans-serif;
     -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;}
-  .wrap{max-width:1140px;margin:0 auto;padding:18px 16px 60px;}
+  .wrap{max-width:1140px;margin:0 auto;padding:18px 16px 88px;}
   header{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline;margin-bottom:2px;}
   h1{font-size:20px;margin:0;font-weight:700;letter-spacing:.02em;}
   .sub{color:var(--muted);font-size:12px;}
@@ -78,6 +78,13 @@
   .themebtn{margin-left:auto;border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:9px;padding:7px 10px;font-size:12px;cursor:pointer;}
   .navlink{border:1px solid var(--border);background:var(--surface);color:var(--accent);border-radius:9px;padding:7px 11px;font-size:12px;font-weight:700;cursor:pointer;text-decoration:none;}
   .navlink:hover{border-color:var(--accent);}
+  .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:60;background:var(--surface);border-top:1px solid var(--border);box-shadow:0 -2px 12px rgba(0,0,0,.07);padding-bottom:env(safe-area-inset-bottom);}
+  .tabbar-in{max-width:600px;margin:0 auto;display:flex;}
+  .tabbar a{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 2px 9px;text-decoration:none;color:var(--ink2);font-size:11px;font-weight:700;letter-spacing:.02em;-webkit-tap-highlight-color:transparent;}
+  .tabbar a .ic{font-size:19px;line-height:1;filter:grayscale(.25) opacity(.85);}
+  .tabbar a.on{color:var(--accent);}
+  .tabbar a.on .ic{filter:none;}
+  .tabbar a:active{opacity:.55;}
   .gate{max-width:440px;margin:14vh auto;text-align:center;padding:0 22px;}
   .gate .logo{font-size:22px;font-weight:750;letter-spacing:.02em;}
   .gate .t{font-size:16px;font-weight:700;margin:18px 0 6px;}
@@ -92,6 +99,12 @@
 </head>
 <body>
 <div class="wrap" id="app"><div class="sub" style="padding:40px 0">読み込み中…</div></div>
+<nav class="tabbar"><div class="tabbar-in">
+  <a href="index.html" class="on"><span class="ic">📊</span>サマリー</a>
+  <a href="pl.html"><span class="ic">📋</span>予実</a>
+  <a href="forecast.html"><span class="ic">🎯</span>見込</a>
+  <a href="trends.html"><span class="ic">📈</span>推移</a>
+</div></nav>
 
 <script>
 "use strict";
@@ -274,10 +287,7 @@ function render(){
   document.getElementById("app").innerHTML=`
     <header>
       <h1>NOTIME 売上ダッシュボード</h1>
-      <a class="navlink" href="pl.html" style="margin-left:auto">📋 月次予実</a>
-      <a class="navlink" href="forecast.html" style="margin-left:8px">🎯 着地見込み</a>
-      <a class="navlink" href="trends.html" style="margin-left:8px">📈 KPI推移</a>
-      <button class="themebtn" id="themebtn" style="margin-left:8px">◐ 表示切替</button>
+      <button class="themebtn" id="themebtn" style="margin-left:auto">◐ 表示切替</button>
       ${SB?'<button class="themebtn" id="logoutbtn" style="margin-left:8px">ログアウト</button>':''}
     </header>
     <div class="sub" style="margin:2px 0 2px">

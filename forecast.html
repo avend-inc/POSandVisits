@@ -23,7 +23,7 @@
   body{margin:0;background:var(--bg);color:var(--ink);
     font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,sans-serif;
     -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;}
-  .wrap{max-width:820px;margin:0 auto;padding:18px 16px 60px;}
+  .wrap{max-width:820px;margin:0 auto;padding:18px 16px 88px;}
   header{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;margin-bottom:2px;}
   h1{font-size:20px;margin:0;font-weight:700;letter-spacing:.02em;}
   .sub{color:var(--muted);font-size:12px;}
@@ -35,6 +35,13 @@
   label.lbl{font-size:12px;color:var(--muted);}
   .navlink{border:1px solid var(--border);background:var(--surface);color:var(--accent);border-radius:9px;padding:7px 11px;font-size:12px;font-weight:700;cursor:pointer;text-decoration:none;}
   .navlink:hover{border-color:var(--accent);}
+  .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:60;background:var(--surface);border-top:1px solid var(--border);box-shadow:0 -2px 12px rgba(0,0,0,.07);padding-bottom:env(safe-area-inset-bottom);}
+  .tabbar-in{max-width:600px;margin:0 auto;display:flex;}
+  .tabbar a{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 2px 9px;text-decoration:none;color:var(--ink2);font-size:11px;font-weight:700;letter-spacing:.02em;-webkit-tap-highlight-color:transparent;}
+  .tabbar a .ic{font-size:19px;line-height:1;filter:grayscale(.25) opacity(.85);}
+  .tabbar a.on{color:var(--accent);}
+  .tabbar a.on .ic{filter:none;}
+  .tabbar a:active{opacity:.55;}
   .themebtn{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:9px;padding:7px 10px;font-size:12px;cursor:pointer;}
   .chip{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:8px;padding:7px 11px;font-size:12px;font-weight:600;cursor:pointer;}
   .chip:hover{color:var(--ink);border-color:var(--accent);}
@@ -68,6 +75,12 @@
 </head>
 <body>
 <div class="wrap" id="app"><div class="sub" style="padding:40px 0">読み込み中…</div></div>
+<nav class="tabbar"><div class="tabbar-in">
+  <a href="index.html"><span class="ic">📊</span>サマリー</a>
+  <a href="pl.html"><span class="ic">📋</span>予実</a>
+  <a href="forecast.html" class="on"><span class="ic">🎯</span>見込</a>
+  <a href="trends.html"><span class="ic">📈</span>推移</a>
+</div></nav>
 
 <script>
 "use strict";
@@ -198,9 +211,7 @@ function render(){
   document.getElementById("app").innerHTML=`
     <header>
       <h1>NOTIME 着地見込み</h1>
-      <a class="navlink" href="index.html" style="margin-left:auto">← サマリー</a>
-      <a class="navlink" href="trends.html">📈 推移</a>
-      <button class="themebtn" id="themebtn">◐ 表示切替</button>
+      <button class="themebtn" id="themebtn" style="margin-left:auto">◐ 表示切替</button>
     </header>
     <div class="controls">
       <label class="lbl">店舗</label>
