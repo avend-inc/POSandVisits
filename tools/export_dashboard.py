@@ -342,6 +342,11 @@ def main() -> int:
             _upload(sb, BUCKET_PUBLIC, "index.html", html,
                     "text/html; charset=utf-8", public=True)
             _delete(sb, BUCKET_PUBLIC, "data.json")  # 公開側の実データを消す
+            # 画面が読む公開設定（anon は公開してよい鍵。画面はこれを見て認証モードで動く）
+            cfg = json.dumps({"mode": "auth", "url": sb.url, "anon": anon},
+                             ensure_ascii=False).encode("utf-8")
+            _upload(sb, BUCKET_PUBLIC, "config.json", cfg,
+                    "application/json; charset=utf-8", public=True)
             page = f"{sb.url}/storage/v1/object/public/{BUCKET_PUBLIC}/index.html"
             _verify_served(sb, BUCKET_PUBLIC, "index.html", page, cache_bust=data["generated_at"].replace(":",""))
             print(f"\n✅ 配信しました（認証モード）。社内の方は下のURLを開き、"
@@ -353,6 +358,12 @@ def main() -> int:
                     "application/json; charset=utf-8", public=True)
             _upload(sb, BUCKET_PUBLIC, "index.html", html,
                     "text/html; charset=utf-8", public=True)
+            # 画面が読む公開設定（公開モード：data.json の公開URLを指す）
+            cfg = json.dumps({"mode": "public",
+                              "dataUrl": f"{sb.url}/storage/v1/object/public/{BUCKET_PUBLIC}/data.json"},
+                             ensure_ascii=False).encode("utf-8")
+            _upload(sb, BUCKET_PUBLIC, "config.json", cfg,
+                    "application/json; charset=utf-8", public=True)
             page = f"{sb.url}/storage/v1/object/public/{BUCKET_PUBLIC}/index.html"
             _verify_served(sb, BUCKET_PUBLIC, "index.html", page, cache_bust=data["generated_at"].replace(":",""))
             print(f"\n✅ 配信しました（公開モード）。ブラウザで下のURLを開いてください。\n  {page}")
