@@ -13,7 +13,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="売上KPI管理">
 <meta name="robots" content="noindex, nofollow">
-<title>NOTIME 売上ダッシュボード</title>
+<title>売上KPI管理</title>
 <style>
   :root{
     --bg:#f6f7f9; --surface:#ffffff; --surface2:#f0f2f5; --border:#e2e6ea;
@@ -219,7 +219,7 @@ async function authBoot(url,anon){
 }
 function showLogin(){
   screen(`<div class="gate">
-    <div class="logo">NOTIME 売上ダッシュボード</div>
+    <div class="logo">売上KPI管理</div>
     <div class="t">ログイン</div>
     <div class="m">許可されたメンバー専用です。<br>
       管理者に登録された Google アカウントでログインしてください。<br>
@@ -230,7 +230,7 @@ function showLogin(){
 }
 function showDenied(email){
   screen(`<div class="gate">
-    <div class="logo">NOTIME 売上ダッシュボード</div>
+    <div class="logo">売上KPI管理</div>
     <div class="t">アクセス権がありません</div>
     <div class="m"><b>${esc(email)}</b> はまだ登録されていません。<br>
       管理者（Shoさん）にユーザー追加を依頼してください。<br>
@@ -319,7 +319,7 @@ function render(){
   const stores=[{id:"all",name:"総合（全店）"},...us.map(s=>({id:s.id,name:s.name}))];
   document.getElementById("app").innerHTML=`
     <header>
-      <h1>NOTIME 売上ダッシュボード</h1>
+      <h1>売上KPI管理</h1>
       ${ME.role==="admin"?'<a class="navlink" href="admin.html" style="margin-left:auto">⚙ 管理</a>':''}
       <button class="themebtn" id="themebtn" style="${ME.role==="admin"?"":"margin-left:auto"}">◐ 表示切替</button>
       ${SB?'<button class="themebtn" id="logoutbtn" style="margin-left:8px">ログアウト</button>':''}
