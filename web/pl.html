@@ -34,6 +34,9 @@
   .themebtn{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:9px;padding:7px 10px;font-size:12px;cursor:pointer;}
   .chip{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:8px;padding:7px 11px;font-size:12px;font-weight:600;cursor:pointer;}
   .chip:hover{color:var(--ink);border-color:var(--accent);}
+  .subtoggle{display:inline-flex;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:3px;gap:2px;margin:10px 0 2px;}
+  .subtoggle button{border:0;background:transparent;color:var(--ink2);font-size:13px;font-weight:700;padding:8px 16px;border-radius:8px;cursor:pointer;font-family:inherit;}
+  .subtoggle button.on{background:var(--accent);color:#fff;}
   .panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px 16px 12px;margin:14px 0;}
   .panel h2{font-size:14px;margin:0 0 8px;font-weight:700;}
   .hero{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;}
@@ -41,6 +44,15 @@
   .hcard .k{font-size:12px;color:var(--ink2);font-weight:600;}
   .hcard .v{font-size:22px;font-weight:800;margin-top:3px;line-height:1.1;}
   .hcard .s{font-size:11.5px;color:var(--muted);margin-top:3px;font-weight:600;}
+  .fhero{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 18px;}
+  .fhero .big{font-size:34px;font-weight:800;letter-spacing:-.01em;line-height:1.05;}
+  .fhero .lbl2{font-size:12px;color:var(--ink2);font-weight:600;}
+  .pills{display:flex;flex-wrap:wrap;gap:8px 10px;margin-top:8px;}
+  .pill{background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:6px 10px;font-size:12px;color:var(--ink2);font-weight:600;}
+  .pill b{color:var(--ink);}
+  .delta{font-weight:700;}
+  .rowflex{display:flex;flex-wrap:wrap;gap:16px 22px;align-items:center;margin:2px 0 6px;}
+  .field{display:flex;align-items:center;gap:8px;} .field label{font-size:12.5px;color:var(--ink2);font-weight:600;}
   .tblwrap{overflow-x:auto;}
   table{width:100%;border-collapse:collapse;font-size:13px;min-width:520px;}
   th,td{padding:7px 8px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--border);}
@@ -50,9 +62,11 @@
   tr.total td{font-weight:750;border-top:2px solid var(--border);background:var(--surface2);}
   input.num{width:104px;background:var(--surface);color:var(--ink);border:1px solid var(--border);border-radius:8px;padding:6px 8px;font-size:13px;font-weight:600;text-align:right;font-family:inherit;}
   input.num:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-weak);}
+  input.num.edit{color:var(--accent);}
   .auto{color:var(--ink);font-weight:700;}
   .up{color:var(--good);} .down{color:var(--bad);} .mut{color:var(--muted);}
   .note{font-size:11.5px;color:var(--muted);margin:8px 0 0;line-height:1.7;}
+  .foot{color:var(--muted);font-size:11px;margin-top:18px;line-height:1.7;}
   .err{padding:20px;color:var(--bad);font-weight:600;}
 </style>
 </head>
@@ -61,7 +75,6 @@
 <nav class="tabbar"><div class="tabbar-in">
   <a href="index.html"><span class="ic">📊</span>サマリー</a>
   <a href="pl.html" class="on"><span class="ic">📋</span>予実</a>
-  <a href="forecast.html"><span class="ic">🎯</span>見込</a>
   <a href="trends.html"><span class="ic">📈</span>推移</a>
 </div></nav>
 <script>
@@ -70,8 +83,8 @@ const YEN=n=>Math.round(n).toLocaleString("ja-JP");
 const NUM=n=>Math.round(n).toLocaleString("ja-JP");
 const F1=n=>(Math.round(n*10)/10).toLocaleString("ja-JP",{minimumFractionDigits:1,maximumFractionDigits:1});
 const F2=n=>(Math.round(n*100)/100).toLocaleString("ja-JP",{minimumFractionDigits:2,maximumFractionDigits:2});
-const state={store:"all",ym:null};
-let DATA=null, A=null, M={};
+const state={store:"all",ym:null,view:"pl"};   // view: "pl"=月次予実 / "fc"=着地見込み
+let DATA=null, A=null, M={}, AUTO=null, fc=null;
 
 const SUPA_URL="__SUPABASE_URL__", SUPA_ANON="__SUPABASE_ANON_KEY__", PUBLIC_DATA_URL="__PUBLIC_DATA_URL__";
 const ALLOW_DOMAIN="@avend.co.jp"; let SB=null; const isPH=s=>!s||s.slice(0,2)==="__";
@@ -148,6 +161,11 @@ function storeSeed(sid,ym){
   if(Number.isFinite(b.v))o.b_v=b.v;
   return o;
 }
+// 着地見込みの目標（税込予算）。総合は各店合計（登録のある店だけ）。
+function fcBudget(store,ym){
+  if(store==="all"){let sum=0;(DATA.stores||[]).forEach(s=>{const b=(BUDGETS[s.name]||{})[ym];if(b&&Number.isFinite(b.in))sum+=b.in;});return sum;}
+  const b=(BUDGETS[budStoreName(store)]||{})[ym]; return (b&&Number.isFinite(b.in))?b.in:0;
+}
 
 function mkey(){return `notime-pl-${state.store}-${state.ym}`;}
 function loadM(){
@@ -192,26 +210,83 @@ function budCell(m){ if(!m.budget) return "";
   if(!isAll()) return inp("b_"+m.k, m.k==="pr"?0.1:(m.k==="upt"?0.01:(["v","tx","it","bagq"].includes(m.k)?1:1000)));
   const v=budKPI(m.k); return `<span class="auto">${v==null?"—":m.fmt(v)+m.u}</span>`; }
 
+// ======= 着地見込み（旧・別ページを予実タブに統合）=======
+function isWeekend(d){const g=new Date(d+"T00:00:00Z").getUTCDay();return g===0||g===6;}
+function addDays(d,n){const t=new Date(d+"T00:00:00Z");t.setUTCDate(t.getUTCDate()+n);return t.toISOString().slice(0,10);}
+function monthEnd(ym){const[y,m]=ym.split("-").map(Number);const last=new Date(Date.UTC(y,m,0)).getUTCDate();return `${ym}-${String(last).padStart(2,"0")}`;}
+function todayStr(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;}
+const METS=["in","ex","tx","it","v"];
+function computeAuto(store, ym){
+  const ids = store==="all" ? new Set(usableStores().map(s=>s.id)) : new Set([store]);
+  const mS=ym+"-01", mE=monthEnd(ym), today=todayStr(), winStart=addDays(mS,-56);
+  const byDate={};
+  for(const r of DATA.daily){ if(!ids.has(r.s))continue; if(r.d<winStart||r.d>mE)continue;
+    const a=byDate[r.d]||(byDate[r.d]={in:0,ex:0,tx:0,it:0,v:0,hasV:false});
+    a.in+=r.in||0;a.ex+=r.ex||0;a.tx+=r.tx||0;a.it+=r.it||0;if(r.v!=null){a.v+=r.v;a.hasV=true;} }
+  const monthDates=Object.keys(byDate).filter(d=>d>=mS&&d<=mE).sort();
+  const closing = monthDates.filter(d=>d<=today).slice(-1)[0] || null;
+  const td={in:0,ex:0,tx:0,it:0,v:0};
+  const wk={in:0,ex:0,tx:0,it:0,v:0,n:0}, we={in:0,ex:0,tx:0,it:0,v:0,n:0};
+  if(closing) for(const d of monthDates){ if(d>closing)continue; const a=byDate[d]; const b=isWeekend(d)?we:wk;
+    METS.forEach(k=>{b[k]+=a[k];td[k]+=a[k];}); b.n++; }
+  const trWk={in:0,ex:0,tx:0,it:0,v:0,n:0}, trWe={in:0,ex:0,tx:0,it:0,v:0,n:0};
+  const trFrom=addDays(closing||today,-56), trTo=closing||addDays(today,-1);
+  for(const d of Object.keys(byDate)){ if(d<trFrom||d>trTo)continue; const a=byDate[d]; const b=isWeekend(d)?trWe:trWk; METS.forEach(k=>b[k]+=a[k]); b.n++; }
+  const avgOf=(m,t,k)=> m.n? m[k]/m.n : (t.n? t[k]/t.n : 0);
+  const avg={}; METS.forEach(k=>avg[k]={wk:avgOf(wk,trWk,k), we:avgOf(we,trWe,k)});
+  let remWk=0,remWe=0; const start = closing? addDays(closing,1): mS;
+  for(let d=start; d<=mE; d=addDays(d,1)){ if(isWeekend(d))remWe++; else remWk++; }
+  const exRatio = td.in? td.ex/td.in : 0.91;
+  return {closing, mS, mE, td, wkN:wk.n, weN:we.n, avg, remWk, remWe, exRatio};
+}
+function fcKey(){return `notime-fc-${state.store}-${state.ym}`;}
+function fcNum(v,d){const n=Number(v);return Number.isFinite(n)?n:d;}
+function fcMrg(o,def,k){const a=(o.avg&&o.avg[k])||{};return {wk:fcNum(a.wk,def.avg[k].wk),we:fcNum(a.we,def.avg[k].we)};}
+function loadFc(){
+  const def={remWk:AUTO.remWk, remWe:AUTO.remWe, budget:fcBudget(state.store,state.ym),
+    avg:{in:{wk:Math.round(AUTO.avg.in.wk),we:Math.round(AUTO.avg.in.we)},
+         v:{wk:Math.round(AUTO.avg.v.wk),we:Math.round(AUTO.avg.v.we)},
+         tx:{wk:Math.round(AUTO.avg.tx.wk),we:Math.round(AUTO.avg.tx.we)},
+         it:{wk:Math.round(AUTO.avg.it.wk),we:Math.round(AUTO.avg.it.we)}}};
+  try{const s=localStorage.getItem(fcKey()); if(s){const o=JSON.parse(s);
+    return {remWk:fcNum(o.remWk,def.remWk),remWe:fcNum(o.remWe,def.remWe),budget:fcNum(o.budget,def.budget),
+      avg:{in:fcMrg(o,def,"in"),v:fcMrg(o,def,"v"),tx:fcMrg(o,def,"tx"),it:fcMrg(o,def,"it")}};}
+  }catch(e){}
+  return def;
+}
+function saveFc(){try{localStorage.setItem(fcKey(),JSON.stringify(fc));}catch(e){}}
+function resetFc(){try{localStorage.removeItem(fcKey());}catch(e){} render(); }
+function landing(){
+  const L={};
+  METS.forEach(k=>{ if(k==="ex")return;
+    L[k]=AUTO.td[k] + fc.remWk*(fc.avg[k]?fc.avg[k].wk:0) + fc.remWe*(fc.avg[k]?fc.avg[k].we:0); });
+  L.ex=L.in*AUTO.exRatio;
+  return L;
+}
+const FKPI=[
+  {k:"ex", name:"税抜売上", fmt:v=>YEN(v)+"円", calc:t=>t.ex},
+  {k:"pr", name:"購入率",   fmt:v=>F1(v)+"%",   calc:t=>t.v>0?t.tx/t.v*100:null},
+  {k:"aov",name:"客単価（税込）",   fmt:v=>YEN(v)+"円", calc:t=>t.tx>0?t.in/t.tx:null},
+  {k:"upt",name:"平均購入数",fmt:v=>F2(v)+"点", calc:t=>t.tx>0?t.it/t.tx:null},
+  {k:"aup",name:"平均商品単価（税抜）",fmt:v=>YEN(v)+"円",calc:t=>t.it>0?t.ex/t.it:null},
+];
+const DRIVERS=[
+  {k:"in",name:"税込売上",fmt:v=>YEN(v),unit:"円",step:1000},
+  {k:"v", name:"来店客数",fmt:v=>NUM(v),unit:"人",step:1},
+  {k:"tx",name:"取引数",  fmt:v=>NUM(v),unit:"件",step:1},
+  {k:"it",name:"販売点数",fmt:v=>NUM(v),unit:"点",step:1},
+];
+function fmtMD(d){const[,m,dd]=d.split("-");return `${+m}/${+dd}`;}
+
+// ======= 画面描画 =======
 function render(){
   const us=usableStores(), months=monthsInData();
   if(!state.ym||!months.includes(state.ym)) state.ym=(DATA._salesMax||months[months.length-1]).slice(0,7);
-  A=computeActual(state.store,state.ym); M=loadM();
   const stores=[{id:"all",name:"総合（全店）"},...us.map(s=>({id:s.id,name:s.name}))];
   const storeName=state.store==="all"?"総合（全店）":(us.find(s=>s.id===state.store)||{}).name||"";
-  const[y,mm]=state.ym.split("-");
+  const[y,mm]=state.ym.split("-"); const monthLabel=`${y}年${+mm}月`;
 
-  const kpiRows=KPIS.map(m=>{const av=m.av(A);
-    return `<tr><td>${m.name}</td>
-      <td>${budCell(m)}</td>
-      <td class="auto">${av==null?"—":m.fmt(av)+m.u}</td>
-      <td id="ach_${m.k}" class="mut">—</td>
-      <td id="dif_${m.k}" class="mut">—</td></tr>`;}).join("");
-
-  const costRows=COSTS.map((c,i)=>`<tr><td>${esc(c)}</td><td>${amtCell("cb_"+i)}</td><td>${amtCell("ca_"+i)}</td><td id="cd_${i}" class="mut"></td></tr>`).join("");
-
-  const payRows=PAYS.map((p,i)=>`<tr><td>${p}</td><td>${amtCell("pay_"+i)}</td></tr>`).join("");
-
-  document.getElementById("app").innerHTML=`
+  const top=`
     <header>
       <h1>NOTIME 月次予実</h1>
       <button class="themebtn" id="themebtn" style="margin-left:auto">◐ 表示切替</button>
@@ -221,12 +296,52 @@ function render(){
       <select id="store">${stores.map(s=>`<option value="${s.id}" ${String(s.id)===String(state.store)?"selected":""}>${s.name}</option>`).join("")}</select>
       <label class="lbl" style="margin-left:6px">対象月</label>
       <select id="ym">${months.slice().reverse().map(m=>{const[a,b]=m.split("-");return `<option value="${m}" ${m===state.ym?"selected":""}>${a}年${+b}月</option>`;}).join("")}</select>
-      ${isAll()?"":'<button class="chip" id="reset">この月の入力を消す</button>'}
     </div>
-    ${isAll()?'<p class="note" style="margin:2px 0 0">総合（全店）の予算・コストは<b>各店に入力した値の合計</b>です（自動）。編集は店舗を選んでください。</p>':''}
+    <div class="subtoggle">
+      <button data-view="pl" class="${state.view==="pl"?"on":""}">月次予実</button>
+      <button data-view="fc" class="${state.view==="fc"?"on":""}">🎯 着地見込み</button>
+    </div>`;
 
+  if(state.view==="fc"){
+    AUTO=computeAuto(state.store,state.ym); fc=loadFc();
+    document.getElementById("app").innerHTML=top+fcBody(monthLabel,storeName);
+    bindCommon(); bindFc();
+    drawDriver(); fcRecompute();
+    return;
+  }
+
+  // 月次予実ビュー
+  A=computeActual(state.store,state.ym); M=loadM();
+  document.getElementById("app").innerHTML=top+plBody(monthLabel,storeName);
+  bindCommon();
+  const rb=document.getElementById("reset");
+  if(rb)rb.onclick=()=>{if(confirm("この店舗・この月の記入値を消しますか？")){try{localStorage.removeItem(mkey());}catch(e){}M={};render();}};
+  document.querySelectorAll(".pin").forEach(el=>el.oninput=()=>{const k=el.dataset.k;
+    if(el.value===""){delete M[k];}else{const v=Number(el.value);if(Number.isFinite(v))M[k]=v;else delete M[k];}
+    saveM();recompute();});
+  recompute();
+}
+
+function bindCommon(){
+  document.getElementById("store").onchange=e=>{state.store=e.target.value==="all"?"all":+e.target.value;render();};
+  document.getElementById("ym").onchange=e=>{state.ym=e.target.value;render();};
+  document.getElementById("themebtn").onclick=toggleTheme;
+  document.querySelectorAll(".subtoggle button").forEach(b=>b.onclick=()=>{state.view=b.dataset.view;render();});
+}
+
+function plBody(monthLabel,storeName){
+  const kpiRows=KPIS.map(m=>{const av=m.av(A);
+    return `<tr><td>${m.name}</td>
+      <td>${budCell(m)}</td>
+      <td class="auto">${av==null?"—":m.fmt(av)+m.u}</td>
+      <td id="ach_${m.k}" class="mut">—</td>
+      <td id="dif_${m.k}" class="mut">—</td></tr>`;}).join("");
+  const costRows=COSTS.map((c,i)=>`<tr><td>${esc(c)}</td><td>${amtCell("cb_"+i)}</td><td>${amtCell("ca_"+i)}</td><td id="cd_${i}" class="mut"></td></tr>`).join("");
+  const payRows=PAYS.map((p,i)=>`<tr><td>${p}</td><td>${amtCell("pay_"+i)}</td></tr>`).join("");
+  return `
+    ${isAll()?'<p class="note" style="margin:2px 0 0">総合（全店）の予算・コストは<b>各店に入力した値の合計</b>です（自動）。編集は店舗を選んでください。</p>':'<div style="margin:4px 0 0"><button class="chip" id="reset">この月の入力を消す</button></div>'}
     <div class="panel">
-      <h2>${y}年${+mm}月・${esc(storeName)} サマリー</h2>
+      <h2>${monthLabel}・${esc(storeName)} サマリー</h2>
       <div class="hero">
         <div class="hcard"><div class="k">税込売上（レジ袋込）</div><div class="v" id="h-sales">—</div><div class="s" id="h-sales-s"></div></div>
         <div class="hcard"><div class="k">売上 予実達成率</div><div class="v" id="h-ach">—</div><div class="s">予算に対して</div></div>
@@ -234,16 +349,14 @@ function render(){
         <div class="hcard"><div class="k">営業利益率</div><div class="v" id="h-opr">—</div><div class="s">対 税抜売上</div></div>
       </div>
     </div>
-
     <div class="panel">
       <h2>KPI 予実</h2>
       <div class="tblwrap"><table>
         <thead><tr><th>指標</th><th>予算(記入)</th><th>実績(自動)</th><th>達成率</th><th>差異</th></tr></thead>
         <tbody>${kpiRows}</tbody>
       </table></div>
-      <p class="note">実績はアプリの取込データから自動計算（レジ袋・クーポンはKPIから除外、レジ袋は別行で表示）。予算に数値を入れると達成率・差異が出ます。</p>
+      <p class="note">実績はアプリの取込データから自動計算（レジ袋・クーポンはKPIから除外、レジ袋は別行で表示）。予算に数値を入れると達成率・差異が出ます。予算(税込/税抜/来店)は月次予実シートから初期表示。</p>
     </div>
-
     <div class="panel">
       <h2>損益（P&amp;L）予実 <span class="sub" style="font-weight:500">※コストは記入式・空欄OK</span></h2>
       <div class="tblwrap"><table>
@@ -261,7 +374,6 @@ function render(){
       </table></div>
       <p class="note">粗利＝税抜売上−売上原価／営業利益＝粗利−販管費合計／営業利益率＝営業利益÷税抜売上。税抜売上の実績は自動。原価率＝売上原価÷税抜売上（差異/率の欄に表示）。</p>
     </div>
-
     <div class="panel">
       <h2>決済手段別売上（記入式）</h2>
       <div class="tblwrap"><table style="min-width:360px">
@@ -272,33 +384,98 @@ function render(){
         </tbody>
       </table></div>
     </div>
+    <div class="foot">実績＝アプリの取込データ（cashier売上・デジテール来店）から自動。予算・原価・販管費・決済手段別は<b>この端末に保存</b>されます（店舗×月ごと）。「この月の入力を消す」で空に戻せます。</div>`;
+}
 
-    <div class="foot sub" style="margin-top:16px;line-height:1.7">
-      実績＝アプリの取込データ（cashier売上・デジテール来店）から自動。予算・原価・販管費・決済手段別は<b>この端末に保存</b>されます（店舗×月ごと）。「この月の入力を消す」で空に戻せます。スプレッドシートの月次予実に合わせた項目立てです。
-    </div>`;
+function fcBody(monthLabel,storeName){
+  return `
+    <div class="panel">
+      <h2>${monthLabel}・${esc(storeName)} の着地見込み</h2>
+      <div class="fhero">
+        <span class="lbl2">着地見込み（税込）</span>
+        <span class="big" id="land-in">—</span>
+        <span id="land-vs"></span>
+      </div>
+      <div class="pills" id="pills"></div>
+      <p class="note">締日（最新データ）: <b id="closing">—</b> ／ 締日までの税込売上: <b id="td-in">—</b>。締日より後の日数×下の「見込み平均／日」で着地を計算しています。</p>
+    </div>
+    <div class="panel">
+      <h2>前提（ここを直すと即反映・この端末に保存されます）</h2>
+      <div class="rowflex">
+        <div class="field"><label>残 平日日数</label><input class="num" id="remWk" type="number" min="0" step="1" value="${fc.remWk}" style="width:70px"></div>
+        <div class="field"><label>残 土日祝日数</label><input class="num" id="remWe" type="number" min="0" step="1" value="${fc.remWe}" style="width:70px"></div>
+        <div class="field"><label>目標（税込予算）</label><input class="num" id="budget" type="number" min="0" step="10000" value="${fc.budget||""}" placeholder="未登録"></div>
+        <button class="chip" id="fcreset">自動見込みに戻す</button>
+      </div>
+      <p class="note">土日祝の残日数は「土日」を自動で数えています。<b>祝日がある月は手で足して</b>ください。目標（税込予算）は<b>月次予実シートから自動表示</b>。違っていれば上書きできます（進捗率・計画比・差額が出ます）。</p>
+      <div class="tblwrap"><table id="driver"></table></div>
+    </div>
+    <div class="panel">
+      <h2>KPI 着地見込み</h2>
+      <div class="tblwrap"><table id="kpi"></table></div>
+      <p class="note">税抜売上＝税込×実績税率(${(AUTO.exRatio).toFixed(3)})。購入率＝取引数÷来店客数／客単価（税込）＝税込÷取引数／平均購入数＝点数÷取引数／平均商品単価（税抜）＝税抜÷点数。レジ袋・クーポンは除外済み。</p>
+    </div>
+    <div class="foot">「私の見込み」はデータから自動算出した初期値です（平日／土日祝それぞれの1日あたり平均。当月の実績、無ければ直近8週）。ズレていれば数値を上書きしてください（この端末に保存）。「自動見込みに戻す」で初期値に戻せます。締日＝取り込み済みの最新日。</div>`;
+}
 
-  document.getElementById("store").onchange=e=>{state.store=e.target.value==="all"?"all":+e.target.value;render();};
-  document.getElementById("ym").onchange=e=>{state.ym=e.target.value;render();};
-  document.getElementById("themebtn").onclick=toggleTheme;
-  const rb=document.getElementById("reset");
-  if(rb)rb.onclick=()=>{if(confirm("この店舗・この月の記入値を消しますか？")){try{localStorage.removeItem(mkey());}catch(e){}M={};render();}};
-  document.querySelectorAll(".pin").forEach(el=>el.oninput=()=>{const k=el.dataset.k;
-    if(el.value===""){delete M[k];}else{const v=Number(el.value);if(Number.isFinite(v))M[k]=v;else delete M[k];}
-    saveM();recompute();});
-  recompute();
+function bindFc(){
+  document.getElementById("fcreset").onclick=resetFc;
+  bindFcInput("remWk",v=>fc.remWk=Math.max(0,Math.round(v)));
+  bindFcInput("remWe",v=>fc.remWe=Math.max(0,Math.round(v)));
+  bindFcInput("budget",v=>fc.budget=Math.max(0,v));
+}
+function bindFcInput(id,setter){const el=document.getElementById(id);if(!el)return;
+  el.oninput=()=>{const v=Number(el.value); if(el.value===""){setter(0);}else if(Number.isFinite(v)){setter(v);} saveFc(); fcRecompute();};}
+function drawDriver(){
+  const head=`<thead><tr><th>指標</th><th>締日まで(実績)</th><th>平日 見込/日</th><th>土日祝 見込/日</th><th>着地見込み</th></tr></thead>`;
+  const rows=DRIVERS.map(d=>`<tr>
+    <td>${d.name}</td>
+    <td>${d.fmt(AUTO.td[d.k])}${d.unit}</td>
+    <td><input class="num edit" data-k="${d.k}" data-t="wk" type="number" min="0" step="${d.step}" value="${Math.round(fc.avg[d.k].wk)}"></td>
+    <td><input class="num edit" data-k="${d.k}" data-t="we" type="number" min="0" step="${d.step}" value="${Math.round(fc.avg[d.k].we)}"></td>
+    <td id="land-${d.k}">—</td>
+  </tr>`).join("");
+  document.getElementById("driver").innerHTML=head+"<tbody>"+rows+"</tbody>";
+  document.querySelectorAll('#driver input.edit').forEach(el=>{
+    el.oninput=()=>{const v=Number(el.value);const k=el.dataset.k,t=el.dataset.t;
+      fc.avg[k][t]=(el.value===""||!Number.isFinite(v))?0:Math.max(0,v); saveFc(); fcRecompute();};});
+}
+function fcRecompute(){
+  const L=landing(), td=AUTO.td;
+  document.getElementById("land-in").textContent=YEN(L.in)+"円";
+  DRIVERS.forEach(d=>{const c=document.getElementById("land-"+d.k);if(c)c.textContent=d.fmt(L[d.k])+d.unit;});
+  document.getElementById("closing").textContent=AUTO.closing?fmtMD(AUTO.closing):"—（当月データなし）";
+  document.getElementById("td-in").textContent=YEN(td.in)+"円";
+  const b=fc.budget, pills=[];
+  pills.push(`<span class="pill">締日まで <b>${YEN(td.in)}円</b></span>`);
+  pills.push(`<span class="pill">残 平日<b>${fc.remWk}</b>・土日祝<b>${fc.remWe}</b>日</span>`);
+  if(b>0){
+    const prog=td.in/b*100, ratio=L.in/b*100, diff=L.in-b;
+    pills.push(`<span class="pill">🎯 目標(税込) <b>${YEN(b)}円</b></span>`);
+    pills.push(`<span class="pill">進捗率 <b>${F1(prog)}%</b></span>`);
+    pills.push(`<span class="pill">計画比 <b>${F1(ratio)}%</b></span>`);
+    const cls=diff>=0?"up":"down";
+    pills.push(`<span class="pill">計画差額 <b class="delta ${cls}">${diff>=0?"+":"−"}${YEN(Math.abs(diff))}円</b></span>`);
+    document.getElementById("land-vs").innerHTML=`<span class="lbl2 delta ${ratio>=100?"up":"down"}">（対予算 ${F1(ratio)}%）</span>`;
+  }else{
+    pills.push(`<span class="pill" style="opacity:.75">🎯 目標 未登録（この店舗）</span>`);
+    document.getElementById("land-vs").innerHTML="";
+  }
+  document.getElementById("pills").innerHTML=pills.join("");
+  const head=`<thead><tr><th>指標</th><th>締日まで(実績)</th><th>着地見込み</th></tr></thead>`;
+  const body=FKPI.map(m=>{const tv=m.calc(td),lv=m.calc(L);
+    return `<tr><td>${m.name}</td><td>${tv==null?"—":m.fmt(tv)}</td><td>${lv==null?"—":m.fmt(lv)}</td></tr>`;}).join("");
+  document.getElementById("kpi").innerHTML=head+"<tbody>"+body+"</tbody>";
 }
 
 function setTxt(id,txt,cls){const el=document.getElementById(id);if(!el)return;el.textContent=txt;if(cls!==undefined)el.className=cls;}
 function recompute(){
   const AV={}; KPIS.forEach(m=>AV[m.k]=m.av(A));
-  // KPI 達成率・差異（予算は店舗なら入力値、総合なら各店合計/派生）
   KPIS.forEach(m=>{ if(!m.budget)return; const b=budKPI(m.k), av=AV[m.k];
     if(Number.isFinite(b)&&b!==0&&av!=null){ const ach=av/b*100, dif=av-b;
       setTxt("ach_"+m.k, F1(ach)+"%", ach>=100?"up":"down");
       setTxt("dif_"+m.k, (dif>=0?"+":"−")+m.fmt(Math.abs(dif))+m.u, dif>=0?"up":"down");
     }else{ setTxt("ach_"+m.k,"—","mut"); setTxt("dif_"+m.k,"—","mut"); } });
-
-  // 損益（金額は店舗なら入力値、総合なら各店合計）
   const exA=A.ex, exB=E("pl_ex_b");
   setTxt("pl_ex_a", YEN(exA)+"円");
   setTxt("pl_ex_d", exB>0?diffStr(exA-exB):"", exB>0?dc(exA-exB):"mut");
@@ -317,14 +494,10 @@ function recompute(){
   setTxt("op_d", (exB||genB||sgaB)?diffStr(opA-opB):"", (exB||genB||sgaB)?dc(opA-opB):"mut");
   setTxt("opr_a", exA>0?F1(opA/exA*100)+"%":"—", opA>=0?"auto up":"auto down");
   setTxt("opr_b", exB>0?F1(opB/exB*100)+"%":"—");
-
-  // 決済
   let payT=0; PAYS.forEach((p,i)=>payT+=E("pay_"+i));
   setTxt("pay_total", YEN(payT)+"円");
   const salesIn=A.in+A.bag;
   setTxt("pay_diff", payT>0?diffStr(payT-salesIn):"—", "mut");
-
-  // hero
   setTxt("h-sales", YEN(salesIn)+"円");
   const bIn=budKPI("inTax");
   if(Number.isFinite(bIn)&&bIn!==0){ setTxt("h-ach", F1(salesIn/bIn*100)+"%", salesIn>=bIn?"v up":"v down");
@@ -339,6 +512,7 @@ function diffStr(d){return (d>=0?"+":"−")+YEN(Math.abs(d))+"円";}
 function dc(d){return d>=0?"up":"down";}
 function toggleTheme(){const r=document.documentElement;const cur=r.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");
   r.setAttribute("data-theme",cur==="dark"?"light":"dark");}
+if(location.hash==="#fc")state.view="fc";   // forecast.html からの転送で着地見込みを開く
 boot();
 </script>
 </body>
