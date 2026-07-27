@@ -73,6 +73,14 @@
   th{color:var(--ink2);font-weight:700;font-size:11.5px;position:sticky;top:0;background:var(--surface);}
   tbody tr:hover td{background:var(--surface2);}
   tfoot td{font-weight:750;border-top:2px solid var(--border);background:var(--surface2);}
+  tr.catrow.clk{cursor:pointer;}
+  .caret{display:inline-block;width:1.1em;color:var(--muted);font-size:11px;}
+  .catdetail>td{padding:0 !important;background:var(--surface2);}
+  .subtbl{width:100%;border-collapse:collapse;margin:0;}
+  .subtbl th,.subtbl td{padding:6px 10px;font-size:12px;border-bottom:1px solid var(--border);text-align:right;background:var(--surface2);}
+  .subtbl th:first-child,.subtbl td:first-child{text-align:left;padding-left:26px;color:var(--ink2);}
+  .subtbl th{color:var(--muted);font-weight:600;}
+  .subtbl tr:last-child td{border-bottom:0;}
   .foot{color:var(--muted);font-size:11px;margin-top:18px;line-height:1.7;}
   .err{padding:20px;color:var(--bad);font-weight:600;}
   .themebtn{margin-left:auto;border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:9px;padding:7px 10px;font-size:12px;cursor:pointer;}
@@ -255,6 +263,14 @@ function catIn(from,to,storeId){
     let c=map.get(r.c);if(!c){c={c:r.c,a:0,q:0};map.set(r.c,c);}c.a+=r.a||0;c.q+=r.q||0;}
   return [...map.values()];
 }
+// カテゴリを1つ選び、対象期間・店舗でしぼって価格帯（単価）別に集計。売上降順。
+function catPriceIn(from,to,storeId,category){
+  if(!DATA.catp)return null;
+  const map=new Map();
+  for(const r of DATA.catp){if(r.c!==category)continue;if(storeId!=="all"&&r.s!==storeId)continue;if(r.d<from||r.d>to)continue;
+    let e=map.get(r.p);if(!e){e={p:r.p,a:0,q:0};map.set(r.p,e);}e.a+=r.a||0;e.q+=r.q||0;}
+  return [...map.values()].sort((a,b)=>b.a-a.a);
+}
 function usableStores(){const w=new Set(DATA.daily.map(r=>r.s));return DATA.stores.filter(s=>w.has(s.id));}
 function periodSpan(key,g){
   if(g==="day")return[key,key];
@@ -404,11 +420,33 @@ function drawCompare(rows){
   document.getElementById("cmp").innerHTML=head+"<tbody>"+body+"</tbody>";
 }
 function drawCatTable(cats){
+  const hasP=!!(DATA.catp&&DATA.catp.length);
   const head=`<thead><tr><th>カテゴリ</th><th>売上</th><th>販売数</th><th>点あたり</th></tr></thead>`;
-  const body=cats.map(c=>`<tr><td>${esc(c.c)}</td><td>${YEN(c.a)}円</td><td>${NUM(c.q)}点</td><td>${c.q>0?YEN(c.a/c.q)+"円":"—"}</td></tr>`).join("");
+  const body=cats.map(c=>{
+    const main=`<tr class="catrow${hasP?" clk":""}" data-cat="${esc(c.c)}">`+
+      `<td>${hasP?'<span class="caret">▸</span>':''}${esc(c.c)}</td>`+
+      `<td>${YEN(c.a)}円</td><td>${NUM(c.q)}点</td><td>${c.q>0?YEN(c.a/c.q)+"円":"—"}</td></tr>`;
+    const detail=`<tr class="catdetail" style="display:none"><td colspan="4"></td></tr>`;
+    return main+detail;
+  }).join("");
   const ta=cats.reduce((s,c)=>s+c.a,0),tq=cats.reduce((s,c)=>s+c.q,0);
-  document.getElementById("cat-t").innerHTML=head+"<tbody>"+body+"</tbody>"+
+  const t=document.getElementById("cat-t");
+  t.innerHTML=head+"<tbody>"+body+"</tbody>"+
     `<tfoot><tr><td>合計</td><td>${YEN(ta)}円</td><td>${NUM(tq)}点</td><td>${tq>0?YEN(ta/tq)+"円":"—"}</td></tr></tfoot>`;
+  if(!hasP)return;
+  t.querySelectorAll("tr.catrow.clk").forEach(tr=>tr.onclick=()=>{
+    const det=tr.nextElementSibling, caret=tr.querySelector(".caret");
+    if(!det)return;
+    if(det.style.display!=="none"){det.style.display="none";if(caret)caret.textContent="▸";return;}
+    const rows=catPriceIn(state.from,state.to,state.store,tr.dataset.cat)||[];
+    const cell=det.firstElementChild;
+    if(!rows.length){cell.innerHTML=`<div class="sub" style="padding:8px 26px">価格帯データはありません（次回の集計更新後に表示されます）。</div>`;}
+    else{const tot=rows.reduce((s,r)=>s+r.a,0);
+      cell.innerHTML=`<table class="subtbl"><thead><tr><th>価格帯</th><th>売上</th><th>販売数</th><th>構成比</th></tr></thead><tbody>`+
+        rows.map(r=>`<tr><td>${YEN(r.p)}円</td><td>${YEN(r.a)}円</td><td>${NUM(r.q)}点</td><td>${tot>0?F1(r.a/tot*100)+"%":"—"}</td></tr>`).join("")+
+        `</tbody></table>`;}
+    det.style.display="";if(caret)caret.textContent="▾";
+  });
 }
 function drawTable(ps){
   const cols=KPI_ORDER.map(M);
