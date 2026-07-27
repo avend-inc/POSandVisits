@@ -403,9 +403,10 @@ function draw(){
   }).join("");
 
   // ---- 店舗比較（対象期間の合計）----
-  const cmp=us.map(s=>{const p=sumRows(rowsIn(state.from,state.to,s.id));p._name=s.name;return p;});
-  const tot=sumRows(rowsIn(state.from,state.to,"all"));tot._name="総合";
-  drawCompare([...cmp,tot]);
+  const fym=state.to.slice(0,7);
+  const cmp=us.map(s=>{const p=sumRows(rowsIn(state.from,state.to,s.id));p._name=s.name;p._land=computeAutoLandingIn(s.id,fym);return p;});
+  const tot=sumRows(rowsIn(state.from,state.to,"all"));tot._name="総合";tot._land=computeAutoLandingIn("all",fym);
+  drawCompare([...cmp,tot],fym);
   document.getElementById("cmp-note").textContent=`${state.from} 〜 ${state.to}`;
 
   // ---- 推移（grainで刻む）----
@@ -423,10 +424,35 @@ function draw(){
   drawTable(periods(state.from,state.to,state.grain,state.store));
 }
 
-function drawCompare(rows){
+// 着地見込み（自動・税込）：対象月の残日数×平日/土日祝の平均で月末を予測（店舗比較用）。
+//  過去の月は残日数0＝実績と一致。当月は予測になる。月次予実の見込みと同じ算出方法。
+function fIsWeekend(d){const g=new Date(d+"T00:00:00Z").getUTCDay();return g===0||g===6;}
+function fMonthEnd(ym){const[y,m]=ym.split("-").map(Number);const last=new Date(Date.UTC(y,m,0)).getUTCDate();return `${ym}-${String(last).padStart(2,"0")}`;}
+function computeAutoLandingIn(store,ym){
+  const ids=store==="all"?new Set(usableStores().map(s=>s.id)):new Set([store]);
+  const mS=ym+"-01",mE=fMonthEnd(ym),today=todayStr(),winStart=addDays(mS,-56);
+  const byDate={};
+  for(const r of DATA.daily){ if(!ids.has(r.s))continue; if(r.d<winStart||r.d>mE)continue;
+    (byDate[r.d]=byDate[r.d]||{in:0}).in+=r.in||0; }
+  const monthDates=Object.keys(byDate).filter(d=>d>=mS&&d<=mE).sort();
+  const closing=monthDates.filter(d=>d<=today).slice(-1)[0]||null;
+  let tdIn=0,wkIn=0,wkN=0,weIn=0,weN=0;
+  if(closing) for(const d of monthDates){ if(d>closing)continue; const v=byDate[d].in;
+    tdIn+=v; if(fIsWeekend(d)){weIn+=v;weN++;}else{wkIn+=v;wkN++;} }
+  let twkIn=0,twkN=0,tweIn=0,tweN=0; const trFrom=addDays(closing||today,-56),trTo=closing||addDays(today,-1);
+  for(const d of Object.keys(byDate)){ if(d<trFrom||d>trTo)continue; const v=byDate[d].in;
+    if(fIsWeekend(d)){tweIn+=v;tweN++;}else{twkIn+=v;twkN++;} }
+  const wkAvg=wkN?wkIn/wkN:(twkN?twkIn/twkN:0), weAvg=weN?weIn/weN:(tweN?tweIn/tweN:0);
+  let remWk=0,remWe=0; const start=closing?addDays(closing,1):mS;
+  for(let d=start; d<=mE; d=addDays(d,1)){ if(fIsWeekend(d))remWe++; else remWk++; }
+  return tdIn + remWk*wkAvg + remWe*weAvg;
+}
+function drawCompare(rows,fym){
   const cols=KPI_ORDER.map(M);
-  const head=`<thead><tr><th>店舗</th>${cols.map(c=>`<th>${c.name}</th>`).join("")}</tr></thead>`;
-  const body=rows.map(p=>`<tr${p._name==="総合"?' style="font-weight:750"':''}><td>${esc(p._name)}</td>${cols.map(c=>{const v=c.calc(p);return `<td>${v==null?"—":c.fmt(v)}</td>`;}).join("")}</tr>`).join("");
+  const mn=fym?(+fym.split("-")[1]):null;
+  const landHead=`着地見込み<br><span class="sub" style="font-weight:500">${mn?mn+"月":""}・税込</span>`;
+  const head=`<thead><tr><th>店舗</th>${cols.map(c=>`<th>${c.name}</th>`).join("")}<th>${landHead}</th></tr></thead>`;
+  const body=rows.map(p=>`<tr${p._name==="総合"?' style="font-weight:750"':''}><td>${esc(p._name)}</td>${cols.map(c=>{const v=c.calc(p);return `<td>${v==null?"—":c.fmt(v)}</td>`;}).join("")}<td>${p._land!=null?YEN(p._land)+"円":"—"}</td></tr>`).join("");
   document.getElementById("cmp").innerHTML=head+"<tbody>"+body+"</tbody>";
 }
 function drawCatTable(cats){
