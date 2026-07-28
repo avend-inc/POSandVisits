@@ -1,0 +1,7 @@
+# Supabase プロジェクト設定（Edge Function デプロイ用の最小構成）
+# project_id はプロジェクトの参照ID（公開URLのサブドメイン）。秘密情報ではありません。
+project_id = "rwfcsanmqvkxiuwdeddv"
+
+[functions.ask]
+# 呼び出し前にログイン(JWT)を必須にする。関数内でも許可リストを再チェックしています。
+verify_jwt = true
