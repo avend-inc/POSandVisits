@@ -156,7 +156,9 @@ function buildDigest(){
   const stores=usableStores(), byStore={};
   for(const r of DATA.daily){ (byStore[r.s]||(byStore[r.s]=[])).push([r.d,Math.round(r.in||0),Math.round(r.ex||0),r.tx||0,r.it||0,(r.v!=null?r.v:null)]); }
   const series={}; stores.forEach(s=>{ series[s.name]=(byStore[s.id]||[]).slice().sort((a,b)=>a[0]<b[0]?-1:1); });
-  return {today:todayStr(), closing:DATA._salesMax, stores:stores.map(s=>s.name),
+  return {today:todayStr(), closing:DATA._salesMax,
+    stores:stores.map(s=>({name:s.name, own:s.own||"直営", kpi_visitors:(s.kv!==false)})),
+    note:"own=直営/FC。kpi_visitors=false の店（例:下北沢）は来店vが夜間のみの参考値なので、来店数・購入率のKPI計算からは除外する（売上・客単価には含めてよい）。直営合計は own=直営 の店だけを合計する。",
     legend:"[日付, 税込売上in, 税抜売上ex, 取引tx(購入客数), 点数it(販売数), 来店v(来店客数)]", series};
 }
 
