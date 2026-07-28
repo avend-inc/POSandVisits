@@ -72,12 +72,16 @@ def build_data(sb: Supabase) -> dict:
     stores = sb.select("stores", {"select": "*", "order": "id"})
     name_by_id = {s["id"]: s["name"] for s in stores}
     own_by_id = {s["id"]: (s.get("ownership") or "直営") for s in stores}
+    # KPIに来店数を使うか（列が未追加でも既定 True）。False の店は来店・購入率をKPIから外す。
+    kv_by_id = {s["id"]: bool(s.get("kpi_visitors", True)) for s in stores}
 
     # --- sales: 伝票(税込/税抜/点数)は明細行に繰り返し入っているので、
     #     伝票単位では tx_id ごとに1回だけ数える。明細(金額/点数)は行ごとに合計。
+    #     ※ pos_name も取得：1店舗に複数レジ(下北沢=Airレジ+EZレジ)がある場合、
+    #        別レジで伝票番号が偶然かぶっても別取引として数える（合算漏れ防止）。
     sales = _select_all(
         sb, "sales",
-        "business_date,store_id,tx_id,sales_in_tax,sales_ex_tax,tx_qty,"
+        "business_date,store_id,pos_name,tx_id,sales_in_tax,sales_ex_tax,tx_qty,"
         "line_category,line_amount,line_qty",
         order="id",
     )
@@ -114,8 +118,9 @@ def build_data(sb: Supabase) -> dict:
         ex_tax = _num(r["sales_ex_tax"])
         in_tax = _num(r["sales_in_tax"])
 
-        # 伝票単位の値（税込/税抜合計・伝票数）は tx_id ごとに1回だけ
-        txkey = (sid, r["tx_id"])
+        # 伝票単位の値（税込/税抜合計・伝票数）は 伝票 ごとに1回だけ。
+        # レジ(pos_name)を含めて識別（複数レジ店の番号衝突で取引が消えるのを防ぐ）。
+        txkey = (sid, r.get("pos_name") or "", r["tx_id"])
         if txkey not in tx_seen:
             tx_seen.add(txkey)
             rec["in"] += in_tax
@@ -186,7 +191,8 @@ def build_data(sb: Supabase) -> dict:
     return {
         "generated_at": datetime.now(JST).isoformat(timespec="seconds"),
         "stores": [{"id": s["id"], "name": name_by_id.get(s["id"], str(s["id"])),
-                    "own": own_by_id.get(s["id"], "直営")}
+                    "own": own_by_id.get(s["id"], "直営"),
+                    "kv": kv_by_id.get(s["id"], True)}
                    for s in stores],
         "daily": daily_rows,
         "cat": cat_rows,

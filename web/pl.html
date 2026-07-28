@@ -177,12 +177,24 @@ async function doLogout(){try{await SB.auth.signOut();}catch(e){}location.reload
 function esc(s){return String(s).replace(/[&<>]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[m]));}
 function monthsInData(){return [...new Set(DATA.daily.map(r=>r.d.slice(0,7)))].sort();}
 function usableStores(){const w=new Set(DATA.daily.map(r=>r.s));return DATA.stores.filter(s=>w.has(s.id));}
+function storeMeta(sid){return (DATA.stores||[]).find(x=>String(x.id)===String(sid))||null;}
+function ownOf(sid){const s=storeMeta(sid);return (s&&s.own)?s.own:"直営";}          // 直営 / FC
+function kvOf(sid){const s=storeMeta(sid);return s?(s.kv!==false):true;}             // 来店数をKPIに使うか
+function hasFCStores(){return usableStores().some(s=>ownOf(s.id)!=="直営");}
+function isAgg(){return state.store==="all"||state.store==="own";}                    // 集計スコープ（全店/直営）
+function idsForScope(store){
+  if(store==="all")return new Set(usableStores().map(s=>s.id));
+  if(store==="own")return new Set(usableStores().filter(s=>ownOf(s.id)==="直営").map(s=>s.id));
+  return new Set([store]);
+}
+function aggStores(){const us=usableStores();return state.store==="own"?us.filter(s=>ownOf(s.id)==="直営"):us;}
 function computeActual(store,ym){
-  const ids=store==="all"?new Set(usableStores().map(s=>s.id)):new Set([store]);
-  const a={in:0,ex:0,tx:0,it:0,v:0,bag:0,bagq:0,hasV:false};
+  const ids=idsForScope(store);
+  // in/ex/tx/it=売上系（全店）。txv=来店をKPIに使う店だけの取引（購入率の分子）、v=同店の来店（分母）。
+  const a={in:0,ex:0,tx:0,txv:0,it:0,v:0,bag:0,bagq:0,hasV:false};
   for(const r of DATA.daily){ if(!ids.has(r.s))continue; if(r.d.slice(0,7)!==ym)continue;
     a.in+=r.in||0;a.ex+=r.ex||0;a.tx+=r.tx||0;a.it+=r.it||0;a.bag+=r.bag||0;a.bagq+=r.bagq||0;
-    if(r.v!=null){a.v+=r.v;a.hasV=true;} }
+    if(kvOf(r.s)){ a.txv+=r.tx||0; if(r.v!=null){a.v+=r.v;a.hasV=true;} } }
   if(!a.hasV)a.v=0; return a;
 }
 
@@ -193,7 +205,7 @@ const KPIS=[
   {k:"ex",   name:"税抜売上",           fmt:YEN,u:"円",budget:true, av:a=>a.ex},
   {k:"v",    name:"来店客数",           fmt:NUM,u:"人",budget:true, av:a=>a.v},
   {k:"tx",   name:"購入客数（取引数）",  fmt:NUM,u:"件",budget:true, av:a=>a.tx},
-  {k:"pr",   name:"購入率",             fmt:F1, u:"%", budget:true, av:a=>a.v?a.tx/a.v*100:null},
+  {k:"pr",   name:"購入率",             fmt:F1, u:"%", budget:true, av:a=>a.v?a.txv/a.v*100:null},
   {k:"aov",  name:"客単価（税込）",       fmt:YEN,u:"円",budget:true, av:a=>a.tx?a.in/a.tx:null},
   {k:"it",   name:"販売数",             fmt:NUM,u:"点",budget:true, av:a=>a.it},
   {k:"aup",  name:"商品単価（税抜）",     fmt:YEN,u:"円",budget:true, av:a=>a.it?a.ex/a.it:null},
@@ -259,9 +271,9 @@ const parseNum=s=>{const n=Number(String(s).replace(/[,，\s]/g,""));return Numb
 function inp(k,step){return `<input class="num pin" data-k="${k}" type="text" inputmode="decimal" value="${has(k)?NUMc(M[k]):""}" placeholder="—"${CANEDIT?"":" disabled"}>`;}
 
 // 総合（全店）は各店の入力値の合計。金額系は合計、比率は合計した基礎値から計算。
-function isAll(){return state.store==="all";}
+function isAll(){return isAgg();}   // 集計スコープ（総合/直営）はまとめて扱う（合計・読み取り専用）
 function storeMof(sid){ const d=MALL[String(sid)]; return (d&&Object.keys(d).length)?d:storeSeed(sid,state.ym); }
-function sumStores(key){let t=0,any=false;for(const s of usableStores()){const m=storeMof(s.id);if(Number.isFinite(m[key])){t+=m[key];any=true;}}return any?t:null;}
+function sumStores(key){let t=0,any=false;for(const s of aggStores()){const m=storeMof(s.id);if(Number.isFinite(m[key])){t+=m[key];any=true;}}return any?t:null;}
 function effNum(key){ return isAll()? sumStores(key) : (Number.isFinite(M[key])?M[key]:null); }
 function E(key){const v=effNum(key);return Number.isFinite(v)?v:0;}
 function budKPI(k){
@@ -288,21 +300,22 @@ function isWeekend(d){const g=new Date(d+"T00:00:00Z").getUTCDay();return g===0|
 function addDays(d,n){const t=new Date(d+"T00:00:00Z");t.setUTCDate(t.getUTCDate()+n);return t.toISOString().slice(0,10);}
 function monthEnd(ym){const[y,m]=ym.split("-").map(Number);const last=new Date(Date.UTC(y,m,0)).getUTCDate();return `${ym}-${String(last).padStart(2,"0")}`;}
 function todayStr(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;}
-const METS=["in","ex","tx","it","v"];
+const METS=["in","ex","tx","txv","it","v"];   // txv=来店をKPIに使う店だけの取引（購入率の分子）
 function computeAuto(store, ym){
-  const ids = store==="all" ? new Set(usableStores().map(s=>s.id)) : new Set([store]);
+  const ids = idsForScope(store);
   const mS=ym+"-01", mE=monthEnd(ym), today=todayStr(), winStart=addDays(mS,-56);
   const byDate={};
   for(const r of DATA.daily){ if(!ids.has(r.s))continue; if(r.d<winStart||r.d>mE)continue;
-    const a=byDate[r.d]||(byDate[r.d]={in:0,ex:0,tx:0,it:0,v:0,hasV:false});
-    a.in+=r.in||0;a.ex+=r.ex||0;a.tx+=r.tx||0;a.it+=r.it||0;if(r.v!=null){a.v+=r.v;a.hasV=true;} }
+    const a=byDate[r.d]||(byDate[r.d]={in:0,ex:0,tx:0,txv:0,it:0,v:0,hasV:false});
+    a.in+=r.in||0;a.ex+=r.ex||0;a.tx+=r.tx||0;a.it+=r.it||0;
+    if(kvOf(r.s)){ a.txv+=r.tx||0; if(r.v!=null){a.v+=r.v;a.hasV=true;} } }
   const monthDates=Object.keys(byDate).filter(d=>d>=mS&&d<=mE).sort();
   const closing = monthDates.filter(d=>d<=today).slice(-1)[0] || null;
-  const td={in:0,ex:0,tx:0,it:0,v:0};
-  const wk={in:0,ex:0,tx:0,it:0,v:0,n:0}, we={in:0,ex:0,tx:0,it:0,v:0,n:0};
+  const td={in:0,ex:0,tx:0,txv:0,it:0,v:0};
+  const wk={in:0,ex:0,tx:0,txv:0,it:0,v:0,n:0}, we={in:0,ex:0,tx:0,txv:0,it:0,v:0,n:0};
   if(closing) for(const d of monthDates){ if(d>closing)continue; const a=byDate[d]; const b=isWeekend(d)?we:wk;
     METS.forEach(k=>{b[k]+=a[k];td[k]+=a[k];}); b.n++; }
-  const trWk={in:0,ex:0,tx:0,it:0,v:0,n:0}, trWe={in:0,ex:0,tx:0,it:0,v:0,n:0};
+  const trWk={in:0,ex:0,tx:0,txv:0,it:0,v:0,n:0}, trWe={in:0,ex:0,tx:0,txv:0,it:0,v:0,n:0};
   const trFrom=addDays(closing||today,-56), trTo=closing||addDays(today,-1);
   for(const d of Object.keys(byDate)){ if(d<trFrom||d>trTo)continue; const a=byDate[d]; const b=isWeekend(d)?trWe:trWk; METS.forEach(k=>b[k]+=a[k]); b.n++; }
   const avgOf=(m,t,k)=> m.n? m[k]/m.n : (t.n? t[k]/t.n : 0);
@@ -332,14 +345,15 @@ function resetFc(){ planDelete("fc",state.store,state.ym); reload(); }
 function landing(){
   const L={};
   METS.forEach(k=>{ if(k==="ex")return;
-    L[k]=AUTO.td[k] + fc.remWk*(fc.avg[k]?fc.avg[k].wk:0) + fc.remWe*(fc.avg[k]?fc.avg[k].we:0); });
+    const a=(fc.avg&&fc.avg[k])||(AUTO.avg&&AUTO.avg[k])||{wk:0,we:0};   // txv等の未編集項目はAUTO平均で補完
+    L[k]=AUTO.td[k] + fc.remWk*(a.wk||0) + fc.remWe*(a.we||0); });
   L.ex=L.in*AUTO.exRatio;
   return L;
 }
 // 主要KPI(key)＝売上を動かす3要素、その他(sub)＝参考。売上(KGI)はヒーローに別表示。
 const FKPI=[
   {k:"v",  name:"来店数",         tier:"key", fmt:v=>NUM(v)+"人", calc:t=>t.v},
-  {k:"pr", name:"購入率",         tier:"key", fmt:v=>F1(v)+"%",   calc:t=>t.v>0?t.tx/t.v*100:null},
+  {k:"pr", name:"購入率",         tier:"key", fmt:v=>F1(v)+"%",   calc:t=>t.v>0?(t.txv!=null?t.txv:t.tx)/t.v*100:null},
   {k:"aov",name:"客単価（税込）",   tier:"key", fmt:v=>YEN(v)+"円", calc:t=>t.tx>0?t.in/t.tx:null},
   {k:"ex", name:"税抜売上",       tier:"sub", fmt:v=>YEN(v)+"円", calc:t=>t.ex},
   {k:"upt",name:"平均購入数",     tier:"sub", fmt:v=>F2(v)+"点", calc:t=>t.tx>0?t.it/t.tx:null},
@@ -385,8 +399,8 @@ function subscribeRealtime(){
 function render(){
   const us=usableStores(), months=monthsInData();
   if(!state.ym||!months.includes(state.ym)) state.ym=(DATA._salesMax||months[months.length-1]).slice(0,7);
-  const stores=[{id:"all",name:"総合（全店）"},...us.map(s=>({id:s.id,name:s.name}))];
-  const storeName=state.store==="all"?"総合（全店）":(us.find(s=>s.id===state.store)||{}).name||"";
+  const stores=[{id:"all",name:"総合（全店）"},...(hasFCStores()?[{id:"own",name:"直営（合計）"}]:[]),...us.map(s=>({id:s.id,name:s.name}))];
+  const storeName=state.store==="all"?"総合（全店）":state.store==="own"?"直営（合計）":(us.find(s=>s.id===state.store)||{}).name||"";
   const[y,mm]=state.ym.split("-"); const monthLabel=`${y}年${+mm}月`;
 
   const top=`
@@ -437,7 +451,7 @@ function render(){
 }
 
 function bindCommon(){
-  document.getElementById("store").onchange=e=>{if(DIRTY&&!confirm("未保存の変更があります。切り替えると破棄されます。よろしいですか？")){e.target.value=String(state.store);return;}state.store=e.target.value==="all"?"all":+e.target.value;reload();};
+  document.getElementById("store").onchange=e=>{if(DIRTY&&!confirm("未保存の変更があります。切り替えると破棄されます。よろしいですか？")){e.target.value=String(state.store);return;}const v=e.target.value;state.store=(v==="all"||v==="own")?v:+v;reload();};
   document.getElementById("ym").onchange=e=>{if(DIRTY&&!confirm("未保存の変更があります。切り替えると破棄されます。よろしいですか？")){e.target.value=state.ym;return;}state.ym=e.target.value;reload();};
   document.getElementById("themebtn").onclick=toggleTheme;
   document.querySelectorAll(".subtoggle button").forEach(b=>b.onclick=()=>{if(DIRTY&&!confirm("未保存の変更があります。切り替えると破棄されます。よろしいですか？"))return;state.view=b.dataset.view;reload();});
@@ -465,7 +479,11 @@ async function commitPlan(){
 }
 
 function plBody(monthLabel,storeName){
+  const exclV = !isAgg() && !kvOf(state.store);   // 単店・来店をKPIに使わない店（下北沢など）
   const kpiRows=KPIS.map(m=>{const av=m.av(A);
+    const isVK=(m.k==="v"||m.k==="pr");
+    if(exclV&&isVK){ return `<tr><td>${m.name}</td><td>${budCell(m)}</td>
+      <td class="mut">対象外（夜間のみ）</td><td class="mut">—</td><td class="mut">—</td></tr>`; }
     return `<tr><td>${m.name}</td>
       <td>${budCell(m)}</td>
       <td class="auto">${av==null?"—":m.fmt(av)+m.u}</td>
@@ -474,7 +492,7 @@ function plBody(monthLabel,storeName){
   const costRows=COSTS.map((c,i)=>`<tr><td>${esc(c)}</td><td>${amtCell("cb_"+i)}</td><td>${amtCell("ca_"+i)}</td><td id="cd_${i}" class="mut"></td></tr>`).join("");
   const payRows=PAYS.map((p,i)=>`<tr><td>${p}</td><td>${amtCell("pay_"+i)}</td></tr>`).join("");
   return `
-    ${isAll()?'<p class="note" style="margin:2px 0 0">総合（全店）の予算・コストは<b>各店に入力した値の合計</b>です（自動）。編集は店舗を選んでください。</p>':(CANEDIT?'<div style="margin:4px 0 0"><button class="chip" id="reset">この月の入力を消す</button></div>':'<p class="note" style="margin:2px 0 0">閲覧のみ（入力・編集は「編集」または「管理」権限の方）。</p>')}
+    ${isAll()?`<p class="note" style="margin:2px 0 0">${state.store==="own"?"直営（合計）":"総合（全店）"}の予算・コストは<b>各店に入力した値の合計</b>です（自動）。編集は店舗を選んでください。</p>`:(CANEDIT?'<div style="margin:4px 0 0"><button class="chip" id="reset">この月の入力を消す</button></div>':'<p class="note" style="margin:2px 0 0">閲覧のみ（入力・編集は「編集」または「管理」権限の方）。</p>')}
     <div class="panel">
       <h2>${monthLabel}・${esc(storeName)} サマリー</h2>
       <div class="hero">
@@ -621,13 +639,14 @@ function weeksMonSun(ym,upto){
   return weeks;
 }
 function actIn(store,from,to){
-  const ids=store==="all"?new Set(usableStores().map(s=>s.id)):new Set([store]);
-  const a={in:0,ex:0,tx:0,it:0,v:0};
+  const ids=idsForScope(store);
+  const a={in:0,ex:0,tx:0,txv:0,it:0,v:0};
   for(const r of DATA.daily){ if(!ids.has(r.s))continue; if(r.d<from||r.d>to)continue;
-    a.in+=r.in||0;a.ex+=r.ex||0;a.tx+=r.tx||0;a.it+=r.it||0;a.v+=r.v||0; }
+    a.in+=r.in||0;a.ex+=r.ex||0;a.tx+=r.tx||0;a.it+=r.it||0;
+    if(kvOf(r.s)){ a.txv+=r.tx||0; a.v+=r.v||0; } }
   return a;
 }
-function kpiPr(a){return a.v>0?a.tx/a.v*100:null;}
+function kpiPr(a){return a.v>0?((a.txv!=null?a.txv:a.tx)/a.v*100):null;}
 function kpiAov(a){return a.tx>0?a.in/a.tx:null;}
 function acNewId(){return "a"+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36);}
 async function acLoad(){const d=await planLoad("action",state.store,"all");AC=(d&&Array.isArray(d.items))?{items:d.items}:{items:[]};}

@@ -115,10 +115,10 @@ const F2 =n=>(Math.round(n*100)/100).toLocaleString("ja-JP",{minimumFractionDigi
 const METRICS=[
   {key:"in", name:"税込売上",     fmt:v=>YEN(v)+"円", calc:p=>p.in},
   {key:"ex", name:"税抜売上",     fmt:v=>YEN(v)+"円", calc:p=>p.ex},
-  {key:"v",  name:"来店客数",     fmt:v=>NUM(v)+"人", calc:p=>p.v},
+  {key:"v",  name:"来店客数",     fmt:v=>NUM(v)+"人", calc:p=>p.hasV?p.v:null},
   {key:"tx", name:"取引数",       fmt:v=>NUM(v)+"件", calc:p=>p.tx},
   {key:"qty",name:"販売数",       fmt:v=>NUM(v)+"点", calc:p=>p.it},
-  {key:"pr", name:"購入率",       fmt:v=>F1(v)+"%",   calc:p=>p.v>0?p.tx/p.v*100:null},
+  {key:"pr", name:"購入率",       fmt:v=>F1(v)+"%",   calc:p=>(p.hasV&&p.v>0)?(p.txv!=null?p.txv:p.tx)/p.v*100:null},
   {key:"aov",name:"客単価（税込）",   fmt:v=>YEN(v)+"円", calc:p=>p.tx>0?p.in/p.tx:null},
   {key:"upt",name:"平均購入数",   fmt:v=>F2(v)+"点",  calc:p=>p.tx>0?p.it/p.tx:null},
   {key:"aup",name:"平均商品単価（税抜）", fmt:v=>YEN(v)+"円", calc:p=>p.it>0?p.ex/p.it:null},
@@ -198,8 +198,9 @@ function pLabel(k,g){
 function addDays(d,n){const t=new Date(d+"T00:00:00Z");t.setUTCDate(t.getUTCDate()+n);return t.toISOString().slice(0,10);}
 function daysBetween(a,b){return Math.round((Date.parse(b)-Date.parse(a))/86400000)+1;}
 function clampLo(d){return d<DATA._min?DATA._min:d;} function clampHi(d){return d>DATA._max?DATA._max:d;}
-function sumRows(rows){const p={in:0,ex:0,tx:0,it:0,v:0,hasV:false};
-  for(const r of rows){p.in+=r.in||0;p.ex+=r.ex||0;p.tx+=r.tx||0;p.it+=r.it||0;if(r.v!=null){p.v+=r.v;p.hasV=true;}}
+function kvOf(sid){const s=(DATA.stores||[]).find(x=>String(x.id)===String(sid));return s?(s.kv!==false):true;} // 来店をKPIに使うか
+function sumRows(rows){const p={in:0,ex:0,tx:0,txv:0,it:0,v:0,hasV:false};
+  for(const r of rows){p.in+=r.in||0;p.ex+=r.ex||0;p.tx+=r.tx||0;p.it+=r.it||0;if(kvOf(r.s)){p.txv+=r.tx||0;if(r.v!=null){p.v+=r.v;p.hasV=true;}}}
   if(!p.hasV)p.v=0;return p;}
 function rowsIn(from,to,storeId){return DATA.daily.filter(r=>(storeId==="all"||r.s===storeId)&&r.d>=from&&r.d<=to);}
 function periods(from,to,g,storeId){
