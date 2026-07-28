@@ -10,7 +10,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // 使うAIモデル。より深い分析にしたいときは claude-opus-5 に変更可（コスト増）。
 const MODEL = "claude-sonnet-5";
-const MAX_TOKENS = 1800;
+// このモデルは「思考(thinking)」してから回答する。思考＋回答が収まるよう上限を広めに、
+// 思考の予算(budget)を区切って、回答テキスト用の枠を必ず確保する。
+const THINK_BUDGET = 3000;
+const MAX_TOKENS = 8000;
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -93,7 +96,13 @@ Deno.serve(async (req) => {
         "x-api-key": apiKey,
         "anthropic-version": "2023-06-01",
       },
-      body: JSON.stringify({ model: MODEL, max_tokens: MAX_TOKENS, system, messages: msgs }),
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: MAX_TOKENS,
+        thinking: { type: "enabled", budget_tokens: THINK_BUDGET },
+        system,
+        messages: msgs,
+      }),
     });
     const raw = await r.text();
     if (!r.ok) {
