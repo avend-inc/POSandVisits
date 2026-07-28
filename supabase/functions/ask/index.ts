@@ -122,7 +122,29 @@ Deno.serve(async (req) => {
     if (!answer) {
       return json({ error: `AIから空の回答（stop=${dataOut?.stop_reason || "?"}）：${raw.slice(0, 300)}` }, 502);
     }
-    return json({ answer, model: MODEL });
+
+    // 最初の質問のときは、一覧用の短いタイトルをAIに要約させる（軽量モデル・失敗しても無視）
+    let title: string | null = null;
+    if (history.length === 0) {
+      try {
+        const tr = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+          body: JSON.stringify({
+            model: "claude-haiku-4-5-20251001",
+            max_tokens: 60,
+            system: "ユーザーの質問を、日本語で18文字以内の短い見出し（体言止め）に要約してください。記号・引用符・説明は付けず、見出しの文字列だけを返します。",
+            messages: [{ role: "user", content: question }],
+          }),
+        });
+        if (tr.ok) {
+          const tj = await tr.json();
+          const t = (tj?.content || []).filter((c: { type: string }) => c.type === "text").map((c: { text: string }) => c.text).join("").trim();
+          if (t) title = t.replace(/^["'「『]|["'」』]$/g, "").slice(0, 30);
+        }
+      } catch (_) { /* タイトルは無くてもよい */ }
+    }
+    return json({ answer, title, model: MODEL });
   } catch (e) {
     return json({ error: String((e as Error)?.message || e) }, 500);
   }
