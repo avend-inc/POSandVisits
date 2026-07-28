@@ -1,0 +1,82 @@
+# ============================================================
+#  過去データ 一括取り込み（POSのCSV）
+#
+#  使い方:
+#   1. Supabase → Storage で「非公開」バケット（例: imports）を作る
+#   2. そこへ取り込みたいCSV（例: 【Si】DB をCSVでダウンロードしたもの）をアップロード
+#   3. Actions タブ →「POS CSV 取り込み」→ Run workflow で、バケット名/パス等を指定して実行
+#
+#  ※ 認証情報は既存の日次ETL用シークレット（SUPABASE_URL / SUPABASE_SERVICE_KEY /
+#     任意で SUPABASE_ANON_KEY）を流用します。
+# ============================================================
+name: POS CSV 取り込み
+
+on:
+  workflow_dispatch:
+    inputs:
+      bucket:
+        description: "非公開バケット名"
+        required: true
+        default: "imports"
+      path:
+        description: "CSVのパス（バケット内のファイル名）"
+        required: true
+        default: "si_history.csv"
+      adapter:
+        description: "CSVの種類"
+        required: true
+        default: "ezregi"
+        type: choice
+        options: [ezregi, cashier, airregi]
+      pos_name:
+        description: "pos_name（sales.pos_name に入る識別名）"
+        required: false
+        default: "Si"
+      ownership:
+        description: "取り込んだ店舗の区分を一括設定"
+        required: false
+        default: "FC"
+        type: choice
+        options: ["", "直営", "FC"]
+      export:
+        description: "取り込み後にダッシュボードも更新する"
+        required: false
+        default: true
+        type: boolean
+
+concurrency:
+  group: notime-import-pos
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TZ: Asia/Tokyo
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: ライブラリをインストール
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pandas requests
+      - name: 設定確認
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_KEY" ]; then
+            echo "::error::SUPABASE_URL / SUPABASE_SERVICE_KEY が未登録です"; exit 1
+          fi
+      - name: 取り込み実行
+        run: |
+          ARGS="--bucket '${{ inputs.bucket }}' --path '${{ inputs.path }}' --adapter '${{ inputs.adapter }}' --pos-name '${{ inputs.pos_name }}'"
+          if [ -n "${{ inputs.ownership }}" ]; then ARGS="$ARGS --ownership '${{ inputs.ownership }}'"; fi
+          if [ "${{ inputs.export }}" = "true" ]; then ARGS="$ARGS --export"; fi
+          echo "python -m tools.import_pos_csv $ARGS"
+          eval python -m tools.import_pos_csv $ARGS
