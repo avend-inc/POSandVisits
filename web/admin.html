@@ -147,7 +147,8 @@ async function render(){
     <div class="panel">
       <h2>レジ接続（自動取得の設定）</h2>
       <p class="note">店舗ごとに<b>レジ種類・URL・ID・パスワード</b>を登録すると、日次の自動取得がここを読み込んでログインします（GitHubのSecret登録は不要）。
-        <b>パスワードは保存後は表示されません</b>（安全のため書き込み専用）。変更するときだけ入力してください。1店舗に複数レジ（例：下北沢＝Airレジ＋EZレジ）も登録できます。</p>
+        <b>パスワードは保存後は表示されません</b>（安全のため書き込み専用）。変更するときだけ入力してください。1店舗に複数レジ（例：下北沢＝Airレジ＋EZレジ）も可。<br>
+        Si(EZレジ)のように<b>1アカウントで複数店</b>の場合は、店舗を「<b>（アカウント全体・複数店）</b>」にして登録（店舗はデータの店舗名で自動作成されます）。</p>
       <div class="tblwrap"><table id="ptbl"><tbody><tr><td class="sub">読み込み中…</td></tr></tbody></table></div>
       <div class="addrow">
         <select id="p_store"></select>
@@ -209,7 +210,7 @@ async function loadStores(){
   if(error){tb.innerHTML=`<tbody><tr><td class="err">読み込み失敗：${esc(error.message)}</td></tr></tbody>`;return;}
   STORESCACHE=data||[];
   const psel=document.getElementById("p_store");
-  if(psel)psel.innerHTML=STORESCACHE.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join("");
+  if(psel)psel.innerHTML='<option value="">（アカウント全体・複数店）</option>'+STORESCACHE.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join("");
   const head=`<thead><tr><th>店舗</th><th>区分</th><th>入店slug</th><th>入店取得</th><th>KPIに来店</th><th>オープン日</th><th></th></tr></thead>`;
   const rows=data.map(s=>`<tr>
     <td>${esc(s.name)} <span class="sub">${esc(s.code||"")}</span></td>
@@ -252,20 +253,20 @@ async function loadPos(){
   const nameById=Object.fromEntries((STORESCACHE||[]).map(s=>[String(s.id),s.name]));
   const head=`<thead><tr><th>店舗</th><th>レジ</th><th>URL</th><th>ID</th><th>PW</th><th>稼働</th><th></th></tr></thead>`;
   const rows=(data||[]).map(p=>`<tr>
-    <td>${esc(nameById[String(p.store_id)]||p.store_id)}</td>
+    <td>${esc(nameById[String(p.store_id)]||(p.store_id==null?"（アカウント全体）":p.store_id))}</td>
     <td><select data-id="${p.id}" class="ptype">${POS_TYPES.map(([v,t])=>`<option value="${v}" ${p.pos_type===v?"selected":""}>${t}</option>`).join("")}</select>
       <input data-id="${p.id}" class="pname" value="${esc(p.pos_name||"")}" placeholder="表示名" style="width:110px;margin-top:4px"></td>
     <td><input data-id="${p.id}" class="purl" value="${esc(p.url||"")}" style="width:180px"></td>
     <td><input data-id="${p.id}" class="pid" value="${esc(p.login_id||"")}" style="width:110px"></td>
     <td><input data-id="${p.id}" class="ppw" type="password" placeholder="${p.pw_secret_id?"●●設定済み（変更時のみ）":"未設定"}" style="width:150px"></td>
     <td style="text-align:center"><input type="checkbox" data-id="${p.id}" class="pact" ${p.active?"checked":""}></td>
-    <td><button class="btn ghost" data-psave="${p.id}" data-store="${p.store_id}">保存</button> <button class="btn danger" data-pdel="${p.id}">削除</button></td></tr>`).join("");
+    <td><button class="btn ghost" data-psave="${p.id}" data-store="${p.store_id==null?'':p.store_id}">保存</button> <button class="btn danger" data-pdel="${p.id}">削除</button></td></tr>`).join("");
   tb.innerHTML=head+"<tbody>"+(rows||'<tr><td class="sub" colspan="7">まだレジ接続がありません。下の行から追加してください。</td></tr>')+"</tbody>";
   tb.querySelectorAll("[data-psave]").forEach(b=>b.onclick=async()=>{
     const id=b.dataset.psave, q=c=>tb.querySelector(`.${c}[data-id="${id}"]`);
     const pw=q("ppw").value;
     const {error}=await SB.rpc("admin_upsert_pos",{
-      p_id:Number(id), p_store_id:Number(b.dataset.store), p_pos_type:q("ptype").value,
+      p_id:Number(id), p_store_id:b.dataset.store?Number(b.dataset.store):null, p_pos_type:q("ptype").value,
       p_pos_name:q("pname").value.trim(), p_url:q("purl").value.trim()||null,
       p_login_id:q("pid").value.trim()||null, p_pw:pw||null, p_active:q("pact").checked});
     msg("p_msg", error?("保存失敗："+error.message):"レジ接続を保存しました"+(pw?"（PW更新）":""), !error);
@@ -281,10 +282,9 @@ async function loadPos(){
 async function addPos(){
   const store_id=document.getElementById("p_store").value;
   const pw=document.getElementById("p_pw").value;
-  if(!store_id){msg("p_msg","店舗を選んでください",false);return;}
   if(!pw){msg("p_msg","パスワードを入れてください",false);return;}
   const {error}=await SB.rpc("admin_upsert_pos",{
-    p_id:null, p_store_id:Number(store_id), p_pos_type:document.getElementById("p_type").value,
+    p_id:null, p_store_id:store_id?Number(store_id):null, p_pos_type:document.getElementById("p_type").value,
     p_pos_name:(document.getElementById("p_name").value||"").trim(),
     p_url:(document.getElementById("p_url").value||"").trim()||null,
     p_login_id:(document.getElementById("p_id").value||"").trim()||null,
