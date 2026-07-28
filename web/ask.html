@@ -272,15 +272,16 @@ async function send(){
   stream.insertAdjacentHTML("beforeend",msgHtml(CUR.messages[CUR.messages.length-1]));
   stream.insertAdjacentHTML("beforeend",`<div class="msg a" id="pending"><div class="bubble"><span class="spin"></span>AIがデータを分析しています…（数十秒かかることがあります）</div></div>`);
   t.value=""; window.scrollTo(0,document.body.scrollHeight);
-  let answer=null, errMsg=null;
+  let answer=null, errMsg=null, newTitle=null;
   try{
     const {data,error}=await SB.functions.invoke("ask",{body:{question:q,digest:buildDigest(),history}});
     if(error){ errMsg=error.message||String(error); try{const ctx=error.context&&await error.context.json();if(ctx&&ctx.error)errMsg=ctx.error;}catch(e){} }
     else if(data&&data.error){ errMsg=data.error; }
-    else { answer=(data&&data.answer)||""; }
+    else { answer=(data&&data.answer)||""; newTitle=(data&&data.title)||null; }
   }catch(e){ errMsg=String(e&&e.message||e); }
   const pending=document.getElementById("pending"); if(pending)pending.remove();
   if(answer){
+    if(newTitle)CUR.title=newTitle;   // AIが要約した一覧タイトル
     CUR.messages.push({role:"assistant",content:answer,by:"AI",at:nowIso()});
     try{ await saveThread(); if(CUR._new){CUR._new=false;THREADS.unshift(CUR);} }
     catch(e){ errMsg="（回答は表示できましたが保存に失敗）"+String(e&&e.message||e); }

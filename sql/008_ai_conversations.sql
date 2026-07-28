@@ -4,7 +4,8 @@
 --  ・1スレッド = 1レコード。messages に [{role, content, by, at}, ...] を蓄積。
 --  ・登録メンバー(app_users)なら全員が閲覧・追加・更新できる（社内ナレッジ共有）。
 --  ・端末間リアルタイム反映のため supabase_realtime に追加。
---  前提: sql/005 の current_app_role() が作成済みであること。
+--  前提: sql/005 の public.current_app_role() が作成済みであること。
+--  ※ 何度実行しても安全（idempotent）。
 -- ============================================================
 create extension if not exists pgcrypto;
 
@@ -21,26 +22,30 @@ create index if not exists ai_conversations_updated_idx on public.ai_conversatio
 
 alter table public.ai_conversations enable row level security;
 
--- 閲覧：登録メンバーは全スレッドを見られる
+-- 閲覧：登録メンバーは全スレッドを見られる（既存 plan_data と同じ書式）
 drop policy if exists ai_conv_select on public.ai_conversations;
 create policy ai_conv_select on public.ai_conversations
-  for select using (current_app_role() is not null);
+  for select to authenticated
+  using ( public.current_app_role() is not null );
 
 -- 追加：登録メンバーなら新規スレッドを作れる
 drop policy if exists ai_conv_insert on public.ai_conversations;
 create policy ai_conv_insert on public.ai_conversations
-  for insert with check (current_app_role() is not null);
+  for insert to authenticated
+  with check ( public.current_app_role() is not null );
 
 -- 更新：登録メンバーなら追記（追加質問）できる
 drop policy if exists ai_conv_update on public.ai_conversations;
 create policy ai_conv_update on public.ai_conversations
-  for update using (current_app_role() is not null)
-  with check (current_app_role() is not null);
+  for update to authenticated
+  using ( public.current_app_role() is not null )
+  with check ( public.current_app_role() is not null );
 
 -- 削除：管理者のみ
 drop policy if exists ai_conv_delete on public.ai_conversations;
 create policy ai_conv_delete on public.ai_conversations
-  for delete using (current_app_role() = 'admin');
+  for delete to authenticated
+  using ( public.current_app_role() = 'admin' );
 
 -- リアルタイム反映（端末間同期）。すでに追加済みならスキップ。
 do $$
@@ -52,3 +57,6 @@ begin
     alter publication supabase_realtime add table public.ai_conversations;
   end if;
 end $$;
+
+-- 確認（任意）：ポリシーが4つ出れば成功
+-- select policyname from pg_policies where tablename='ai_conversations';
