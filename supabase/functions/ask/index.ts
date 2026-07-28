@@ -10,9 +10,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // 使うAIモデル。より深い分析にしたいときは claude-opus-5 に変更可（コスト増）。
 const MODEL = "claude-sonnet-5";
-// このモデルは「思考(thinking)」してから回答する。思考＋回答が収まるよう上限を広めに、
-// 思考の予算(budget)を区切って、回答テキスト用の枠を必ず確保する。
-const THINK_BUDGET = 3000;
+// このモデルは適応思考(adaptive)。思考量は output_config.effort で調整（low/medium/high）。
+// "medium" は分析の質とコスト/速度のバランス。もっと深く→"high"、安く速く→"low"。
+const EFFORT = "medium";
 const MAX_TOKENS = 8000;
 
 const cors = {
@@ -99,7 +99,8 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         model: MODEL,
         max_tokens: MAX_TOKENS,
-        thinking: { type: "enabled", budget_tokens: THINK_BUDGET },
+        thinking: { type: "adaptive" },
+        output_config: { effort: EFFORT },
         system,
         messages: msgs,
       }),
