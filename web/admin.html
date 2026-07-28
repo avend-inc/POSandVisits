@@ -116,10 +116,10 @@ async function render(){
     <div class="panel">
       <h2>ユーザー管理</h2>
       <p class="note">ロール：<b>閲覧</b>＝見るだけ／<b>編集</b>＝＋予算・コスト等の入力／<b>管理</b>＝＋ユーザー・店舗の管理。
-        追加した @avend.co.jp のメールでGoogleログインすると使えます。</p>
+        追加したメール（Googleアカウント。@avend.co.jp 以外の個人Gmail等もOK）でログインすると使えます。</p>
       <div class="tblwrap"><table id="utbl"><tbody><tr><td class="sub">読み込み中…</td></tr></tbody></table></div>
       <div class="addrow">
-        <input id="u_email" class="wide" type="email" placeholder="メール（@avend.co.jp）">
+        <input id="u_email" class="wide" type="email" placeholder="メール（Googleアカウント）">
         <input id="u_name" placeholder="名前（任意）">
         <select id="u_role">${ROLES.map(([v,t])=>`<option value="${v}">${t}</option>`).join("")}</select>
         <button class="btn" id="u_add">ユーザー追加</button>
@@ -128,7 +128,8 @@ async function render(){
     </div>
     <div class="panel">
       <h2>店舗管理</h2>
-      <p class="note">直営/FC の区分や、デジテール入店slug、オープン日などを設定できます。売上取り込みは自動で店舗を追加しますが、ここで事前登録・修正もできます。</p>
+      <p class="note">直営/FC の区分・デジテール入店slug・オープン日などを設定できます。売上取り込みは<b>CSVの店舗名で自動的に店舗を追加</b>します（新しいFC店はここに自動で現れます）。<br>
+        「入店取得」＝夜間などデジテール来店を<b>集める</b>か／「KPIに来店」＝来店数・購入率の<b>KPIに使う</b>か（例：下北沢は取得ON・KPI OFF）。</p>
       <div class="tblwrap"><table id="stbl"><tbody><tr><td class="sub">読み込み中…</td></tr></tbody></table></div>
       <div class="addrow">
         <input id="s_name" placeholder="店舗名（例：下北沢）">
@@ -136,6 +137,7 @@ async function render(){
         <select id="s_own"><option value="直営">直営</option><option value="FC">FC</option></select>
         <input id="s_slug" placeholder="入店slug（任意）">
         <input id="s_open" type="date" title="オープン日">
+        <label class="sub" style="display:inline-flex;align-items:center;gap:5px"><input type="checkbox" id="s_kv" checked> KPIに来店</label>
         <button class="btn" id="s_add">店舗追加</button>
       </div>
       <p class="msg" id="s_msg"></p>
@@ -176,7 +178,7 @@ async function addUser(){
   const email=(document.getElementById("u_email").value||"").trim().toLowerCase();
   const name=(document.getElementById("u_name").value||"").trim();
   const role=document.getElementById("u_role").value;
-  if(!email.endsWith(ALLOW_DOMAIN)){msg("u_msg","@avend.co.jp のメールを入れてください",false);return;}
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){msg("u_msg","正しいメールアドレスを入れてください",false);return;}
   const {error}=await SB.from("app_users").upsert({email,name,role},{onConflict:"email"});
   msg("u_msg", error?("追加失敗："+error.message):`${email} を「${roleJp(role)}」で追加しました`, !error);
   if(!error){document.getElementById("u_email").value="";document.getElementById("u_name").value="";loadUsers();}
@@ -186,12 +188,13 @@ async function loadStores(){
   const {data,error}=await SB.from("stores").select("*").order("id");
   const tb=document.querySelector("#stbl");
   if(error){tb.innerHTML=`<tbody><tr><td class="err">読み込み失敗：${esc(error.message)}</td></tr></tbody>`;return;}
-  const head=`<thead><tr><th>店舗</th><th>区分</th><th>入店slug</th><th>入店集計</th><th>オープン日</th><th></th></tr></thead>`;
+  const head=`<thead><tr><th>店舗</th><th>区分</th><th>入店slug</th><th>入店取得</th><th>KPIに来店</th><th>オープン日</th><th></th></tr></thead>`;
   const rows=data.map(s=>`<tr>
     <td>${esc(s.name)} <span class="sub">${esc(s.code||"")}</span></td>
     <td><select data-id="${s.id}" class="sown"><option value="直営" ${(s.ownership||"直営")==="直営"?"selected":""}>直営</option><option value="FC" ${s.ownership==="FC"?"selected":""}>FC</option></select></td>
     <td><input data-id="${s.id}" class="sslug" value="${esc(s.digitel_slug||"")}" placeholder="—" style="width:130px"></td>
-    <td><input type="checkbox" data-id="${s.id}" class="sentry" ${s.has_entry_data?"checked":""}></td>
+    <td style="text-align:center"><input type="checkbox" data-id="${s.id}" class="sentry" ${s.has_entry_data?"checked":""}></td>
+    <td style="text-align:center"><input type="checkbox" data-id="${s.id}" class="skv" ${s.kpi_visitors!==false?"checked":""}></td>
     <td><input type="date" data-id="${s.id}" class="sopen" value="${esc(s.open_date||"")}"></td>
     <td><button class="btn ghost" data-save="${s.id}">保存</button></td></tr>`).join("");
   tb.innerHTML=head+"<tbody>"+rows+"</tbody>";
@@ -200,8 +203,9 @@ async function loadStores(){
     const own=tb.querySelector(`.sown[data-id="${id}"]`).value;
     const slug=tb.querySelector(`.sslug[data-id="${id}"]`).value.trim()||null;
     const entry=tb.querySelector(`.sentry[data-id="${id}"]`).checked;
+    const kv=tb.querySelector(`.skv[data-id="${id}"]`).checked;
     const open=tb.querySelector(`.sopen[data-id="${id}"]`).value||null;
-    const {error}=await SB.from("stores").update({ownership:own,digitel_slug:slug,has_entry_data:entry,open_date:open}).eq("id",id);
+    const {error}=await SB.from("stores").update({ownership:own,digitel_slug:slug,has_entry_data:entry,kpi_visitors:kv,open_date:open}).eq("id",id);
     msg("s_msg", error?("保存失敗："+error.message):"店舗を保存しました", !error);
   });
 }
@@ -211,10 +215,11 @@ async function addStore(){
   const own=document.getElementById("s_own").value;
   const slug=(document.getElementById("s_slug").value||"").trim()||null;
   const open=document.getElementById("s_open").value||null;
+  const kv=document.getElementById("s_kv").checked;
   if(!name||!code){msg("s_msg","店舗名とコードは必須です",false);return;}
-  const {error}=await SB.from("stores").insert({name,code,ownership:own,digitel_slug:slug,open_date:open,has_entry_data:true});
+  const {error}=await SB.from("stores").insert({name,code,ownership:own,digitel_slug:slug,open_date:open,has_entry_data:true,kpi_visitors:kv});
   msg("s_msg", error?("追加失敗："+error.message):`店舗「${name}」を追加しました`, !error);
-  if(!error){["s_name","s_code","s_slug","s_open"].forEach(id=>document.getElementById(id).value="");loadStores();}
+  if(!error){["s_name","s_code","s_slug","s_open"].forEach(id=>document.getElementById(id).value="");document.getElementById("s_kv").checked=true;loadStores();}
 }
 boot();
 </script>
