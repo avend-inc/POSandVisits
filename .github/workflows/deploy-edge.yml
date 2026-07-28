@@ -1,0 +1,59 @@
+# ============================================================
+#  Edge Function「ask」をデプロイする（分析AIタブの裏側）
+#
+#  はじめの準備（最初の1回だけ／GitHubの Settings → Secrets and variables → Actions）:
+#    - SUPABASE_ACCESS_TOKEN … Supabase の Account → Access Tokens で発行した値
+#    - ANTHROPIC_API_KEY       … Anthropic Console (console.anthropic.com) の API キー
+#    ※ SUPABASE_URL は既存の日次ETL用シークレットを流用します。
+#
+#  実行:
+#    - 自動 : supabase/functions/** を push すると自動デプロイ
+#    - 手動 : Actions タブ →「Edge Function デプロイ (ask)」→ Run workflow
+# ============================================================
+name: Edge Function デプロイ (ask)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/supabase-etl]
+    paths:
+      - "supabase/functions/**"
+      - "supabase/config.toml"
+      - ".github/workflows/deploy-edge.yml"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@v4
+
+      - name: Supabase CLI を用意
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: 設定確認 & プロジェクトrefを取得
+        run: |
+          if [ -z "${{ secrets.SUPABASE_ACCESS_TOKEN }}" ]; then
+            echo "::error::SUPABASE_ACCESS_TOKEN が未登録です（Settings→Secrets→Actions）"; exit 1
+          fi
+          if [ -z "${{ secrets.ANTHROPIC_API_KEY }}" ]; then
+            echo "::error::ANTHROPIC_API_KEY が未登録です（Settings→Secrets→Actions）"; exit 1
+          fi
+          REF="$(echo "${{ secrets.SUPABASE_URL }}" | sed -E 's#https?://([^.]+)\..*#\1#')"
+          if [ -z "$REF" ]; then echo "::error::SUPABASE_URL からプロジェクトrefを取得できません"; exit 1; fi
+          echo "REF=$REF" >> "$GITHUB_ENV"
+          echo "プロジェクトref: $REF"
+
+      - name: AIキーを関数のシークレットに設定
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          supabase secrets set ANTHROPIC_API_KEY="${{ secrets.ANTHROPIC_API_KEY }}" --project-ref "$REF"
+
+      - name: ask 関数をデプロイ
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          supabase functions deploy ask --project-ref "$REF"
