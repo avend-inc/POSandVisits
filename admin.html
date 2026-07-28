@@ -62,6 +62,8 @@
 const CONFIG_URL="https://rwfcsanmqvkxiuwdeddv.supabase.co/storage/v1/object/public/dashboard/config.json";
 let SB=null, ME={email:"",role:null};
 const ROLES=[["viewer","閲覧"],["editor","編集"],["admin","管理"]];
+const POS_TYPES=[["cashier","cashier(レジ)"],["airregi","Airレジ"],["ezregi","EZレジ"]];
+let STORESCACHE=[];
 const roleJp=r=>({viewer:"閲覧",editor:"編集",admin:"管理"}[r]||r);
 function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));}
 function screen(h){document.getElementById("app").innerHTML=h;}
@@ -141,12 +143,29 @@ async function render(){
         <button class="btn" id="s_add">店舗追加</button>
       </div>
       <p class="msg" id="s_msg"></p>
+    </div>
+    <div class="panel">
+      <h2>レジ接続（自動取得の設定）</h2>
+      <p class="note">店舗ごとに<b>レジ種類・URL・ID・パスワード</b>を登録すると、日次の自動取得がここを読み込んでログインします（GitHubのSecret登録は不要）。
+        <b>パスワードは保存後は表示されません</b>（安全のため書き込み専用）。変更するときだけ入力してください。1店舗に複数レジ（例：下北沢＝Airレジ＋EZレジ）も登録できます。</p>
+      <div class="tblwrap"><table id="ptbl"><tbody><tr><td class="sub">読み込み中…</td></tr></tbody></table></div>
+      <div class="addrow">
+        <select id="p_store"></select>
+        <select id="p_type">${POS_TYPES.map(([v,t])=>`<option value="${v}">${t}</option>`).join("")}</select>
+        <input id="p_name" placeholder="表示名（任意・例：EZ下北沢）" style="width:150px">
+        <input id="p_url" class="wide" placeholder="URL（レジ管理画面）">
+        <input id="p_id" placeholder="ID" style="width:120px">
+        <input id="p_pw" type="password" placeholder="パスワード" style="width:120px">
+        <button class="btn" id="p_add">レジ接続を追加</button>
+      </div>
+      <p class="msg" id="p_msg"></p>
     </div>`);
   document.getElementById("themebtn").onclick=()=>{const r=document.documentElement;const c=r.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");r.setAttribute("data-theme",c==="dark"?"light":"dark");};
   document.getElementById("logout").onclick=async()=>{try{await SB.auth.signOut();}catch(e){}location.reload();};
   document.getElementById("u_add").onclick=addUser;
   document.getElementById("s_add").onclick=addStore;
-  await loadUsers(); await loadStores();
+  document.getElementById("p_add").onclick=addPos;
+  await loadUsers(); await loadStores(); await loadPos();
 }
 
 function msg(id,text,ok){const el=document.getElementById(id);if(el){el.textContent=text;el.className="msg "+(ok?"ok":"err");}}
@@ -188,6 +207,9 @@ async function loadStores(){
   const {data,error}=await SB.from("stores").select("*").order("id");
   const tb=document.querySelector("#stbl");
   if(error){tb.innerHTML=`<tbody><tr><td class="err">読み込み失敗：${esc(error.message)}</td></tr></tbody>`;return;}
+  STORESCACHE=data||[];
+  const psel=document.getElementById("p_store");
+  if(psel)psel.innerHTML=STORESCACHE.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join("");
   const head=`<thead><tr><th>店舗</th><th>区分</th><th>入店slug</th><th>入店取得</th><th>KPIに来店</th><th>オープン日</th><th></th></tr></thead>`;
   const rows=data.map(s=>`<tr>
     <td>${esc(s.name)} <span class="sub">${esc(s.code||"")}</span></td>
@@ -220,6 +242,55 @@ async function addStore(){
   const {error}=await SB.from("stores").insert({name,code,ownership:own,digitel_slug:slug,open_date:open,has_entry_data:true,kpi_visitors:kv});
   msg("s_msg", error?("追加失敗："+error.message):`店舗「${name}」を追加しました`, !error);
   if(!error){["s_name","s_code","s_slug","s_open"].forEach(id=>document.getElementById(id).value="");document.getElementById("s_kv").checked=true;loadStores();}
+}
+
+async function loadPos(){
+  // PW本体はVaultにあり、ここでは pw_secret_id の有無だけ分かる（PWは読み出せない）
+  const {data,error}=await SB.from("store_pos").select("id,store_id,pos_type,pos_name,url,login_id,active,pw_secret_id").order("store_id");
+  const tb=document.querySelector("#ptbl");
+  if(error){tb.innerHTML=`<tbody><tr><td class="err">読み込み失敗：${esc(error.message)}</td></tr></tbody>`;return;}
+  const nameById=Object.fromEntries((STORESCACHE||[]).map(s=>[String(s.id),s.name]));
+  const head=`<thead><tr><th>店舗</th><th>レジ</th><th>URL</th><th>ID</th><th>PW</th><th>稼働</th><th></th></tr></thead>`;
+  const rows=(data||[]).map(p=>`<tr>
+    <td>${esc(nameById[String(p.store_id)]||p.store_id)}</td>
+    <td><select data-id="${p.id}" class="ptype">${POS_TYPES.map(([v,t])=>`<option value="${v}" ${p.pos_type===v?"selected":""}>${t}</option>`).join("")}</select>
+      <input data-id="${p.id}" class="pname" value="${esc(p.pos_name||"")}" placeholder="表示名" style="width:110px;margin-top:4px"></td>
+    <td><input data-id="${p.id}" class="purl" value="${esc(p.url||"")}" style="width:180px"></td>
+    <td><input data-id="${p.id}" class="pid" value="${esc(p.login_id||"")}" style="width:110px"></td>
+    <td><input data-id="${p.id}" class="ppw" type="password" placeholder="${p.pw_secret_id?"●●設定済み（変更時のみ）":"未設定"}" style="width:150px"></td>
+    <td style="text-align:center"><input type="checkbox" data-id="${p.id}" class="pact" ${p.active?"checked":""}></td>
+    <td><button class="btn ghost" data-psave="${p.id}" data-store="${p.store_id}">保存</button> <button class="btn danger" data-pdel="${p.id}">削除</button></td></tr>`).join("");
+  tb.innerHTML=head+"<tbody>"+(rows||'<tr><td class="sub" colspan="7">まだレジ接続がありません。下の行から追加してください。</td></tr>')+"</tbody>";
+  tb.querySelectorAll("[data-psave]").forEach(b=>b.onclick=async()=>{
+    const id=b.dataset.psave, q=c=>tb.querySelector(`.${c}[data-id="${id}"]`);
+    const pw=q("ppw").value;
+    const {error}=await SB.rpc("admin_upsert_pos",{
+      p_id:Number(id), p_store_id:Number(b.dataset.store), p_pos_type:q("ptype").value,
+      p_pos_name:q("pname").value.trim(), p_url:q("purl").value.trim()||null,
+      p_login_id:q("pid").value.trim()||null, p_pw:pw||null, p_active:q("pact").checked});
+    msg("p_msg", error?("保存失敗："+error.message):"レジ接続を保存しました"+(pw?"（PW更新）":""), !error);
+    if(!error)loadPos();
+  });
+  tb.querySelectorAll("[data-pdel]").forEach(b=>b.onclick=async()=>{
+    if(!confirm("このレジ接続を削除しますか？（パスワードも消えます）"))return;
+    const {error}=await SB.rpc("admin_delete_pos",{p_id:Number(b.dataset.pdel)});
+    msg("p_msg", error?("削除失敗："+error.message):"削除しました", !error);
+    if(!error)loadPos();
+  });
+}
+async function addPos(){
+  const store_id=document.getElementById("p_store").value;
+  const pw=document.getElementById("p_pw").value;
+  if(!store_id){msg("p_msg","店舗を選んでください",false);return;}
+  if(!pw){msg("p_msg","パスワードを入れてください",false);return;}
+  const {error}=await SB.rpc("admin_upsert_pos",{
+    p_id:null, p_store_id:Number(store_id), p_pos_type:document.getElementById("p_type").value,
+    p_pos_name:(document.getElementById("p_name").value||"").trim(),
+    p_url:(document.getElementById("p_url").value||"").trim()||null,
+    p_login_id:(document.getElementById("p_id").value||"").trim()||null,
+    p_pw:pw, p_active:true});
+  msg("p_msg", error?("追加失敗："+error.message):"レジ接続を追加しました", !error);
+  if(!error){["p_name","p_url","p_id","p_pw"].forEach(id=>document.getElementById(id).value="");loadPos();}
 }
 boot();
 </script>
