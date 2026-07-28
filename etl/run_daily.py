@@ -256,8 +256,8 @@ def main() -> int:
         description="NOTIME 日次ETL（cashier売上 / デジテール来店数 → Supabase）"
     )
     parser.add_argument("--date", help="対象の営業日 YYYY-MM-DD（省略時は前日）")
-    parser.add_argument("--only", choices=["cashier", "digitel"],
-                        help="片方だけ動かす")
+    parser.add_argument("--only", choices=["cashier", "digitel", "pos"],
+                        help="1種類だけ動かす（cashier / digitel / pos=Air/EZ等の接続）")
     parser.add_argument("--force", action="store_true",
                         help="取り込み済みの日でも、もう一度取り込む")
     parser.add_argument("--headed", action="store_true",
@@ -287,11 +287,15 @@ def main() -> int:
         return 1
 
     results: list[StepResult] = []
-    if args.only != "digitel":
+    if args.only in (None, "cashier"):
         results.append(run_cashier(sb, business_date, run_id, args.force,
                                    headless, store_cache))
-    if args.only != "cashier":
+    if args.only in (None, "digitel"):
         results.extend(run_digitel(sb, business_date, run_id, args.force, headless))
+    if args.only in (None, "pos"):
+        # Air/EZ等の「レジ接続」（store_pos）を巡回して取り込む。未登録なら何もしない。
+        from .pos_live import run_live_pos
+        results.extend(run_live_pos(sb, business_date, run_id, args.force, headless))
 
     # ---- まとめ ----
     icons = {"success": "✅", "no_data": "ℹ️",
