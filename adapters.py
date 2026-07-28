@@ -41,7 +41,11 @@ COMMON_COLUMNS = [
 
 
 def _num(s):
-    return pd.to_numeric(s, errors="coerce").fillna(0)
+    # ¥ や カンマ付き（"¥7,980" / "7,980"）でも数値化できるようにする。
+    return pd.to_numeric(
+        s.astype(str).str.replace(r"[¥￥,\s]", "", regex=True).replace({"": None, "nan": None}),
+        errors="coerce",
+    ).fillna(0)
 
 
 def _normalize_store_name(s: pd.Series) -> pd.Series:
@@ -187,38 +191,48 @@ def adapt_airregi(df: pd.DataFrame, pos_name: str, store: str) -> pd.DataFrame:
 EZREGI_TAX_RATE = 1.10
 
 
-def adapt_ezregi(df: pd.DataFrame, pos_name: str, store: str) -> pd.DataFrame:
+def adapt_ezregi(df: pd.DataFrame, pos_name: str, store: str | None = None) -> pd.DataFrame:
     """
-    EZレジ TranList CSV → 共通スキーマ。
+    EZレジ/Si 明細CSV（【Si】DB形式）→ 共通スキーマ。
 
-    ⚠️ 商品明細が無いため line_category は "不明" になる。
-       カテゴリ分析からは自動的に除外される（集計時に "不明" を弾く）。
+    【実データで確定した仕様（Googleスプレッドの【Si】DBシート）】
+     - 1行 = 1明細。複数店舗が1ファイルに混在 → 店舗名で振り分ける（引数storeは使わない）。
+     - 列: 店舗コード, 店舗名, レジNo, レシートNo, 行No, 購入日時, 商品分類名, 商品名,
+           売上数, 税率(%), 本体価格, 本体合計, 税抜売価, 税込単価, 価格(税込), 税込売価,
+           値引額1, セール名1, 値引額2, セール名2, 支払方法
+     - 税抜売価 / 税込売価 は「値引後」の金額 → SALE値引きが反映済み。
+     - 商品分類名がNOTIMEカテゴリとほぼ一致（"レジ袋" は物販から自動除外）。
+     - 伝票(レシート)合計の列は無いので、レシート単位で明細を合算して作る（cashierと同形）。
     """
     df = df.copy().fillna("")
-
-    # 返品・取消を除外（支払のみ）
-    if "取引区分" in df.columns:
-        df = df[df["取引区分"] == "支払"]
+    # 店舗名が空の行（集計行・空行）は捨てる
+    df = df[df["店舗名"].astype(str).str.strip() != ""]
 
     out = pd.DataFrame()
-    out["date"] = pd.to_datetime(df["取引日付"]).dt.strftime("%Y-%m-%d")
-    out["ts"] = pd.to_datetime(df["取引日付"], errors="coerce").dt.strftime("%Y-%m-%d %H:%M:%S")
-    out["ts"] = out["ts"].fillna(out["date"] + " 00:00:00")
-    out["tx_id"] = pos_name + ":" + df["レジNo"].astype(str) + "-" + df["レシートNo"].astype(str)
+    dt = pd.to_datetime(df["購入日時"], errors="coerce")
+    out["date"] = dt.dt.strftime("%Y-%m-%d")
+    out["ts"] = dt.dt.strftime("%Y-%m-%d %H:%M:%S")
+    out["ts"] = out["ts"].fillna(out["date"].astype(str) + " 00:00:00")
+    out["store"] = _normalize_store_name(df["店舗名"])
+    # レシート = 店舗コード + レジNo + レシートNo。POS間衝突を避けるため pos_name を prefix。
+    out["tx_id"] = (pos_name + ":" + df["店舗コード"].astype(str) + "-"
+                    + df["レジNo"].astype(str) + "-" + df["レシートNo"].astype(str))
     out["pos_name"] = pos_name
-    out["store"] = store
 
-    # 合計金額は税込 → 税抜へ換算
-    total_in = _num(df["合計金額"])
-    out["sales_in_tax"] = total_in
-    out["sales_ex_tax"] = (total_in / EZREGI_TAX_RATE).round()
-    out["tx_qty"] = _num(df["合計点数"])
+    ex = _num(df["税抜売価"])       # 値引後・税抜（明細）
+    intax = _num(df["税込売価"])    # 値引後・税込（明細）
+    qty = _num(df["売上数"])
+    out["line_qty"] = qty
+    out["line_amount"] = ex
+    out["line_price"] = _num(df["本体価格"])
+    out["line_category"] = df["商品分類名"].astype(str).str.strip().replace("", "その他")
 
-    # 商品明細が無いので、取引を1明細として扱う
-    out["line_category"] = "不明"          # カテゴリ分析からは除外される
-    out["line_qty"] = out["tx_qty"]
-    out["line_amount"] = out["sales_ex_tax"]
-    out["line_price"] = (out["sales_ex_tax"] / out["tx_qty"].replace(0, pd.NA)).fillna(0).round()
+    # レシート単位の合計（税抜/税込/点数）を作り、明細行に同じ値を繰り返す。
+    tmp = pd.DataFrame({"tx_id": out["tx_id"], "_ex": ex, "_in": intax, "_q": qty})
+    tot = tmp.groupby("tx_id").agg(_ex=("_ex", "sum"), _in=("_in", "sum"), _q=("_q", "sum"))
+    out["sales_ex_tax"] = out["tx_id"].map(tot["_ex"])
+    out["sales_in_tax"] = out["tx_id"].map(tot["_in"])
+    out["tx_qty"] = out["tx_id"].map(tot["_q"])
 
     out["bundle_code"] = ""
     out["is_parent"] = False
