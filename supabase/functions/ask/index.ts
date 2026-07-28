@@ -61,6 +61,7 @@ Deno.serve(async (req) => {
       `# 今日の日付\n${digest.today || "(不明)"}\n` +
       `# 締日（取り込み済みの最新データ日）\n${digest.closing || "(不明)"}\n` +
       `# 店舗一覧\n${JSON.stringify(digest.stores || [])}\n` +
+      (digest.note ? `# 集計の注意\n${digest.note}\n` : "") +
       `# 各行の意味\n${digest.legend || "[日付, 税込in, 税抜ex, 取引tx, 点数it, 来店v]"}\n` +
       `# 日次データ（店舗名ごとの配列）\n${JSON.stringify(digest.series || {})}`;
 

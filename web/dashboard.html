@@ -133,10 +133,10 @@ const F2 =n=>(Math.round(n*100)/100).toLocaleString("ja-JP",{minimumFractionDigi
 const METRICS=[
   {key:"in", name:"税込売上",     fmt:v=>YEN(v)+"円", calc:p=>p.in},
   {key:"ex", name:"税抜売上",     fmt:v=>YEN(v)+"円", calc:p=>p.ex},
-  {key:"v",  name:"来店客数",     fmt:v=>NUM(v)+"人", calc:p=>p.v},
+  {key:"v",  name:"来店客数",     fmt:v=>NUM(v)+"人", calc:p=>p.hasV?p.v:null},
   {key:"tx", name:"取引数",       fmt:v=>NUM(v)+"件", calc:p=>p.tx},
   {key:"qty",name:"販売数",       fmt:v=>NUM(v)+"点", calc:p=>p.it},
-  {key:"pr", name:"購入率",       fmt:v=>F1(v)+"%",   calc:p=>p.v>0?p.tx/p.v*100:null},
+  {key:"pr", name:"購入率",       fmt:v=>F1(v)+"%",   calc:p=>(p.hasV&&p.v>0)?(p.txv!=null?p.txv:p.tx)/p.v*100:null},
   {key:"aov",name:"客単価（税込）",   fmt:v=>YEN(v)+"円", calc:p=>p.tx>0?p.in/p.tx:null},
   {key:"upt",name:"平均購入数",   fmt:v=>F2(v)+"点",  calc:p=>p.tx>0?p.it/p.tx:null},
   {key:"aup",name:"平均商品単価（税抜）", fmt:v=>YEN(v)+"円", calc:p=>p.it>0?p.ex/p.it:null},
@@ -261,13 +261,17 @@ function daysBetween(a,b){return Math.round((Date.parse(b)-Date.parse(a))/864000
 function clampLo(d){return d<DATA._min?DATA._min:d;} function clampHi(d){return d>DATA._max?DATA._max:d;}
 
 function sumRows(rows){
-  const p={in:0,ex:0,tx:0,it:0,v:0,hasV:false};
-  for(const r of rows){p.in+=r.in||0;p.ex+=r.ex||0;p.tx+=r.tx||0;p.it+=r.it||0;if(r.v!=null){p.v+=r.v;p.hasV=true;}}
+  // in/ex/tx/it=売上系（全店）。txv=来店をKPIに使う店だけの取引（購入率の分子）、v=同店の来店（分母）。
+  const p={in:0,ex:0,tx:0,txv:0,it:0,v:0,hasV:false};
+  for(const r of rows){p.in+=r.in||0;p.ex+=r.ex||0;p.tx+=r.tx||0;p.it+=r.it||0;
+    if(kvOf(r.s)){p.txv+=r.tx||0; if(r.v!=null){p.v+=r.v;p.hasV=true;}}}
   if(!p.hasV)p.v=0; return p;
 }
+// 店舗スコープ判定：'all'=全店 / 'own'=直営のみ / それ以外=その店舗id
+function storeMatch(sid,scope){ if(scope==="all")return true; if(scope==="own")return ownOf(sid)==="直営"; return sid===scope; }
 // 指定範囲・指定店舗の日次行
 function rowsIn(from,to,storeId){
-  return DATA.daily.filter(r=>(storeId==="all"||r.s===storeId)&&r.d>=from&&r.d<=to);
+  return DATA.daily.filter(r=>storeMatch(r.s,storeId)&&r.d>=from&&r.d<=to);
 }
 // 表示期間を grain で刻んだ推移用
 function periods(from,to,g,storeId){
@@ -277,7 +281,7 @@ function periods(from,to,g,storeId){
 }
 function catIn(from,to,storeId){
   const map=new Map();
-  for(const r of DATA.cat){if(storeId!=="all"&&r.s!==storeId)continue;if(r.d<from||r.d>to)continue;
+  for(const r of DATA.cat){if(!storeMatch(r.s,storeId))continue;if(r.d<from||r.d>to)continue;
     let c=map.get(r.c);if(!c){c={c:r.c,a:0,q:0};map.set(r.c,c);}c.a+=r.a||0;c.q+=r.q||0;}
   return [...map.values()];
 }
@@ -285,11 +289,15 @@ function catIn(from,to,storeId){
 function catPriceIn(from,to,storeId,category){
   if(!DATA.catp)return null;
   const map=new Map();
-  for(const r of DATA.catp){if(r.c!==category)continue;if(storeId!=="all"&&r.s!==storeId)continue;if(r.d<from||r.d>to)continue;
+  for(const r of DATA.catp){if(r.c!==category)continue;if(!storeMatch(r.s,storeId))continue;if(r.d<from||r.d>to)continue;
     let e=map.get(r.p);if(!e){e={p:r.p,a:0,q:0};map.set(r.p,e);}e.a+=r.a||0;e.q+=r.q||0;}
   return [...map.values()].sort((a,b)=>b.a-a.a);
 }
 function usableStores(){const w=new Set(DATA.daily.map(r=>r.s));return DATA.stores.filter(s=>w.has(s.id));}
+function storeMeta(sid){return (DATA.stores||[]).find(x=>String(x.id)===String(sid))||null;}
+function ownOf(sid){const s=storeMeta(sid);return (s&&s.own)?s.own:"直営";}          // 直営 / FC
+function kvOf(sid){const s=storeMeta(sid);return s?(s.kv!==false):true;}             // 来店数をKPIに使うか
+function hasFCStores(){return usableStores().some(s=>ownOf(s.id)!=="直営");}
 function periodSpan(key,g){
   if(g==="day")return[key,key];
   if(g==="week")return[key,addDays(key,6)];
@@ -317,7 +325,7 @@ function presetRange(kind){
 
 function render(){
   const us=usableStores();
-  const stores=[{id:"all",name:"総合（全店）"},...us.map(s=>({id:s.id,name:s.name}))];
+  const stores=[{id:"all",name:"総合（全店）"},...(hasFCStores()?[{id:"own",name:"直営（合計）"}]:[]),...us.map(s=>({id:s.id,name:s.name}))];
   document.getElementById("app").innerHTML=`
     <header>
       <h1>売上KPI管理</h1>
@@ -379,7 +387,7 @@ function render(){
       税込/税抜売上・取引数・販売数は伝票単位、カテゴリは明細単位。来店客数はデジテール、売上はcashier。週別は月曜〜日曜。いわきは2店舗ぶんを合算。
     </div>`;
 
-  document.getElementById("store").onchange=e=>{state.store=e.target.value==="all"?"all":+e.target.value;draw();};
+  document.getElementById("store").onchange=e=>{const v=e.target.value;state.store=(v==="all"||v==="own")?v:+v;draw();};
   document.getElementById("metric").onchange=e=>{state.metric=e.target.value;draw();};
   document.querySelectorAll("#grain button").forEach(b=>b.onclick=()=>{state.grain=b.dataset.g;render();});
   document.getElementById("from").onchange=e=>{state.from=clampLo(e.target.value||DATA._min);if(state.from>state.to)state.to=state.from;draw();};
@@ -393,7 +401,7 @@ function render(){
 
 function draw(){
   const us=usableStores();
-  const storeName=state.store==="all"?"総合（全店）":(us.find(s=>s.id===state.store)?.name||"");
+  const storeName=state.store==="all"?"総合（全店）":state.store==="own"?"直営（合計）":(us.find(s=>s.id===state.store)?.name||"");
   const ndays=daysBetween(state.from,state.to);
   document.getElementById("rangebar").innerHTML=
     `この数字の対象期間：<b>${state.from}</b> 〜 <b>${state.to}</b>（${ndays}日間）　店舗：<span class="store">${esc(storeName)}</span>`;
@@ -415,8 +423,11 @@ function draw(){
   // ---- 店舗比較（対象期間の合計）----
   const fym=state.to.slice(0,7);
   const cmp=us.map(s=>{const p=sumRows(rowsIn(state.from,state.to,s.id));p._name=s.name;p._land=computeAutoLandingIn(s.id,fym);return p;});
+  const rowsC=[...cmp];
+  if(hasFCStores()){const own=sumRows(rowsIn(state.from,state.to,"own"));own._name="直営 合計";own._land=computeAutoLandingIn("own",fym);rowsC.push(own);}
   const tot=sumRows(rowsIn(state.from,state.to,"all"));tot._name="総合";tot._land=computeAutoLandingIn("all",fym);
-  drawCompare([...cmp,tot],fym);
+  rowsC.push(tot);
+  drawCompare(rowsC,fym);
   document.getElementById("cmp-note").textContent=`${state.from} 〜 ${state.to}`;
 
   // ---- 推移（grainで刻む）----
@@ -439,7 +450,7 @@ function draw(){
 function fIsWeekend(d){const g=new Date(d+"T00:00:00Z").getUTCDay();return g===0||g===6;}
 function fMonthEnd(ym){const[y,m]=ym.split("-").map(Number);const last=new Date(Date.UTC(y,m,0)).getUTCDate();return `${ym}-${String(last).padStart(2,"0")}`;}
 function computeAutoLandingIn(store,ym){
-  const ids=store==="all"?new Set(usableStores().map(s=>s.id)):new Set([store]);
+  const ids=new Set(usableStores().filter(s=>storeMatch(s.id,store)).map(s=>s.id));
   const mS=ym+"-01",mE=fMonthEnd(ym),today=todayStr(),winStart=addDays(mS,-56);
   const byDate={};
   for(const r of DATA.daily){ if(!ids.has(r.s))continue; if(r.d<winStart||r.d>mE)continue;
@@ -462,7 +473,7 @@ function drawCompare(rows,fym){
   const mn=fym?(+fym.split("-")[1]):null;
   const landHead=`着地見込み<br><span class="sub" style="font-weight:500">${mn?mn+"月":""}・税込</span>`;
   const head=`<thead><tr><th>店舗</th><th>${landHead}</th>${cols.map(c=>`<th>${c.name}</th>`).join("")}</tr></thead>`;
-  const body=rows.map(p=>`<tr${p._name==="総合"?' style="font-weight:750"':''}><td>${esc(p._name)}</td><td>${p._land!=null?YEN(p._land)+"円":"—"}</td>${cols.map(c=>{const v=c.calc(p);return `<td>${v==null?"—":c.fmt(v)}</td>`;}).join("")}</tr>`).join("");
+  const body=rows.map(p=>`<tr${(p._name==="総合"||p._name==="直営 合計")?' style="font-weight:750"':''}><td>${esc(p._name)}</td><td>${p._land!=null?YEN(p._land)+"円":"—"}</td>${cols.map(c=>{const v=c.calc(p);return `<td>${v==null?"—":c.fmt(v)}</td>`;}).join("")}</tr>`).join("");
   document.getElementById("cmp").innerHTML=head+"<tbody>"+body+"</tbody>";
 }
 function drawCatTable(cats){
