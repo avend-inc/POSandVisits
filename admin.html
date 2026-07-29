@@ -53,10 +53,24 @@
   .gbtn .g{width:18px;height:18px;border-radius:50%;background:conic-gradient(#ea4335 0 25%,#fbbc05 0 50%,#34a853 0 75%,#4285f4 0);}
   .err{padding:20px;color:var(--bad);font-weight:600;}
   .notice{background:var(--accent-weak);border:1px solid transparent;border-radius:12px;padding:16px 18px;color:var(--ink);font-size:14px;line-height:1.8;}
+  body{padding-bottom:72px;}
+  .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:60;background:var(--surface);border-top:1px solid var(--border);box-shadow:0 -2px 12px rgba(0,0,0,.07);padding-bottom:env(safe-area-inset-bottom);}
+  .tabbar-in{max-width:600px;margin:0 auto;display:flex;}
+  .tabbar a{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 2px 9px;text-decoration:none;color:var(--ink2);font-size:11px;font-weight:700;letter-spacing:.02em;-webkit-tap-highlight-color:transparent;}
+  .tabbar a .ic{font-size:19px;line-height:1;filter:grayscale(.25) opacity(.85);}
+  .tabbar a.on{color:var(--accent);} .tabbar a.on .ic{filter:none;} .tabbar a:active{opacity:.55;}
 </style>
 </head>
 <body>
 <div class="wrap" id="app"><div class="sub" style="padding:40px 0">読み込み中…</div></div>
+<nav class="tabbar"><div class="tabbar-in">
+  <a href="index.html"><span class="ic">📊</span>サマリー</a>
+  <a href="pl.html"><span class="ic">📋</span>予実</a>
+  <a href="trends.html"><span class="ic">📈</span>推移</a>
+  <a href="promo.html"><span class="ic">🏷️</span>販促</a>
+  <a href="ask.html"><span class="ic">🔍</span>分析AI</a>
+  <a href="admin.html" class="on"><span class="ic">⚙️</span>管理</a>
+</div></nav>
 <script>
 "use strict";
 const CONFIG_URL="https://rwfcsanmqvkxiuwdeddv.supabase.co/storage/v1/object/public/dashboard/config.json";
@@ -131,7 +145,9 @@ async function render(){
     <div class="panel">
       <h2>店舗管理</h2>
       <p class="note">直営/FC の区分・デジテール入店slug・オープン日などを設定できます。売上取り込みは<b>CSVの店舗名で自動的に店舗を追加</b>します（新しいFC店はここに自動で現れます）。<br>
-        「入店取得」＝夜間などデジテール来店を<b>集める</b>か／「KPIに来店」＝来店数・購入率の<b>KPIに使う</b>か（例：下北沢は取得ON・KPI OFF）。</p>
+        「<b>表示</b>」＝ダッシュボード（サマリー・予実・推移・販促）に<b>出す/隠す</b>（チェックを外すと一覧・店舗選択・合計から外れます。データ取り込みは続きます）。<br>
+        「入店取得」＝夜間などデジテール来店を<b>集める</b>か／「KPIに来店」＝来店数・購入率の<b>KPIに使う</b>か（例：下北沢は取得ON・KPI OFF）。<br>
+        保存後、ダッシュボードは次回の集計更新（毎日の取り込み時、または管理者の再集計）で反映されます。</p>
       <div class="tblwrap"><table id="stbl"><tbody><tr><td class="sub">読み込み中…</td></tr></tbody></table></div>
       <div class="addrow">
         <input id="s_name" placeholder="店舗名（例：下北沢）">
@@ -235,9 +251,10 @@ async function loadStores(){
   STORESCACHE=data||[];
   const psel=document.getElementById("p_store");
   if(psel)psel.innerHTML='<option value="">（アカウント全体・複数店）</option>'+STORESCACHE.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join("");
-  const head=`<thead><tr><th>店舗</th><th>区分</th><th>入店slug</th><th>入店取得</th><th>KPIに来店</th><th>オープン日</th><th></th></tr></thead>`;
+  const head=`<thead><tr><th>店舗</th><th>表示</th><th>区分</th><th>入店slug</th><th>入店取得</th><th>KPIに来店</th><th>オープン日</th><th></th></tr></thead>`;
   const rows=data.map(s=>`<tr>
     <td>${esc(s.name)} <span class="sub">${esc(s.code||"")}</span></td>
+    <td style="text-align:center"><input type="checkbox" data-id="${s.id}" class="svis" ${s.visible!==false?"checked":""} title="ダッシュボードに表示"></td>
     <td><select data-id="${s.id}" class="sown"><option value="直営" ${(s.ownership||"直営")==="直営"?"selected":""}>直営</option><option value="FC" ${s.ownership==="FC"?"selected":""}>FC</option></select></td>
     <td><input data-id="${s.id}" class="sslug" value="${esc(s.digitel_slug||"")}" placeholder="—" style="width:130px"></td>
     <td style="text-align:center"><input type="checkbox" data-id="${s.id}" class="sentry" ${s.has_entry_data?"checked":""}></td>
@@ -251,8 +268,9 @@ async function loadStores(){
     const slug=tb.querySelector(`.sslug[data-id="${id}"]`).value.trim()||null;
     const entry=tb.querySelector(`.sentry[data-id="${id}"]`).checked;
     const kv=tb.querySelector(`.skv[data-id="${id}"]`).checked;
+    const vis=tb.querySelector(`.svis[data-id="${id}"]`).checked;
     const open=tb.querySelector(`.sopen[data-id="${id}"]`).value||null;
-    const {error}=await SB.from("stores").update({ownership:own,digitel_slug:slug,has_entry_data:entry,kpi_visitors:kv,open_date:open}).eq("id",id);
+    const {error}=await SB.from("stores").update({ownership:own,digitel_slug:slug,has_entry_data:entry,kpi_visitors:kv,visible:vis,open_date:open}).eq("id",id);
     msg("s_msg", error?("保存失敗："+error.message):"店舗を保存しました", !error);
   });
 }

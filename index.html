@@ -122,6 +122,7 @@
   <a href="trends.html"><span class="ic">📈</span>推移</a>
   <a href="promo.html"><span class="ic">🏷️</span>販促</a>
   <a href="ask.html"><span class="ic">🔍</span>分析AI</a>
+  <a href="admin.html" id="tab-admin" style="display:none"><span class="ic">⚙️</span>管理</a>
 </div></nav>
 
 <script>
@@ -268,8 +269,36 @@ function sumRows(rows){
     if(kvOf(r.s)){p.txv+=r.tx||0; if(r.v!=null){p.v+=r.v;p.hasV=true;}}}
   if(!p.hasV)p.v=0; return p;
 }
-// 店舗スコープ判定：'all'=全店 / 'own'=直営のみ / それ以外=その店舗id
-function storeMatch(sid,scope){ if(scope==="all")return true; if(scope==="own")return ownOf(sid)==="直営"; return sid===scope; }
+// 店舗スコープ判定：'all'=全店 / 'own'=直営 / 'fc'=FC / 'sf'=SELFURUGI / 'nt'=NOTIME / それ以外=店舗id
+// 非表示(visible=false)の店はどの集計にも出さない。
+function storeMatch(sid,scope){
+  if(!visibleOf(sid))return false;
+  if(scope==="all")return true;
+  if(scope==="own")return ownOf(sid)==="直営";
+  if(scope==="fc") return ownOf(sid)==="FC";
+  if(scope==="sf") return brandOf(sid)==="SELFURUGI";
+  if(scope==="nt") return brandOf(sid)==="NOTIME";
+  return sid===scope;
+}
+const AGG_SCOPES={all:1,own:1,fc:1,sf:1,nt:1};
+const SCOPE_LABEL={all:"総合（全店）",own:"直営（合計）",fc:"合計（FC）",sf:"合計（SELFURUGI）",nt:"合計（NOTIME）"};
+// 店名の頭文字でブランドを判定（SELFURUGI…／NOTIME…／その他）
+function brandOf(sid){const s=storeMeta(sid);const n=(s&&s.name)||"";
+  if(n.indexOf("SELFURUGI")===0)return "SELFURUGI"; if(n.indexOf("NOTIME")===0)return "NOTIME"; return "その他";}
+function visibleOf(sid){const s=storeMeta(sid);return s?(s.visible!==false):true;}
+// いま表示できる合計スコープの一覧（該当店がある合計だけ出す）
+function aggScopeList(){
+  const us=usableStores();
+  const out=[{id:"all",name:SCOPE_LABEL.all}];
+  if(us.some(s=>ownOf(s.id)==="直営") && us.some(s=>ownOf(s.id)==="FC")){
+    out.push({id:"own",name:SCOPE_LABEL.own},{id:"fc",name:SCOPE_LABEL.fc});
+  }
+  if(us.some(s=>brandOf(s.id)==="SELFURUGI"))out.push({id:"sf",name:SCOPE_LABEL.sf});
+  if(us.some(s=>brandOf(s.id)==="NOTIME"))out.push({id:"nt",name:SCOPE_LABEL.nt});
+  return out;
+}
+// 管理タブは管理者のときだけ出す（認証モードでロール確定後に呼ぶ）
+function syncAdminTab(){const t=document.getElementById("tab-admin");if(t)t.style.display=(ME&&ME.role==="admin")?"":"none";}
 // 指定範囲・指定店舗の日次行
 function rowsIn(from,to,storeId){
   return DATA.daily.filter(r=>storeMatch(r.s,storeId)&&r.d>=from&&r.d<=to);
@@ -294,7 +323,7 @@ function catPriceIn(from,to,storeId,category){
     let e=map.get(r.p);if(!e){e={p:r.p,a:0,q:0};map.set(r.p,e);}e.a+=r.a||0;e.q+=r.q||0;}
   return [...map.values()].sort((a,b)=>b.a-a.a);
 }
-function usableStores(){const w=new Set(DATA.daily.map(r=>r.s));return DATA.stores.filter(s=>w.has(s.id));}
+function usableStores(){const w=new Set(DATA.daily.map(r=>r.s));return DATA.stores.filter(s=>w.has(s.id)&&s.visible!==false);}
 function storeMeta(sid){return (DATA.stores||[]).find(x=>String(x.id)===String(sid))||null;}
 function ownOf(sid){const s=storeMeta(sid);return (s&&s.own)?s.own:"直営";}          // 直営 / FC
 function kvOf(sid){const s=storeMeta(sid);return s?(s.kv!==false):true;}             // 来店数をKPIに使うか
@@ -325,13 +354,13 @@ function presetRange(kind){
 }
 
 function render(){
+  syncAdminTab();
   const us=usableStores();
-  const stores=[{id:"all",name:"総合（全店）"},...(hasFCStores()?[{id:"own",name:"直営（合計）"}]:[]),...us.map(s=>({id:s.id,name:s.name}))];
+  const stores=[...aggScopeList(),...us.map(s=>({id:s.id,name:s.name}))];
   document.getElementById("app").innerHTML=`
     <header>
       <h1>売上KPI管理</h1>
-      ${ME.role==="admin"?'<a class="navlink" href="admin.html" style="margin-left:auto">⚙ 管理</a>':''}
-      <button class="themebtn" id="themebtn" style="${ME.role==="admin"?"":"margin-left:auto"}">◐ 表示切替</button>
+      <button class="themebtn" id="themebtn" style="margin-left:auto">◐ 表示切替</button>
       ${SB?'<button class="themebtn" id="logoutbtn" style="margin-left:8px">ログアウト</button>':''}
     </header>
     <div class="sub" style="margin:2px 0 2px">
@@ -388,7 +417,7 @@ function render(){
       税込/税抜売上・取引数・販売数は伝票単位、カテゴリは明細単位。来店客数はデジテール、売上はcashier。週別は月曜〜日曜。いわきは2店舗ぶんを合算。
     </div>`;
 
-  document.getElementById("store").onchange=e=>{const v=e.target.value;state.store=(v==="all"||v==="own")?v:+v;draw();};
+  document.getElementById("store").onchange=e=>{const v=e.target.value;state.store=AGG_SCOPES[v]?v:+v;draw();};
   document.getElementById("metric").onchange=e=>{state.metric=e.target.value;draw();};
   document.querySelectorAll("#grain button").forEach(b=>b.onclick=()=>{state.grain=b.dataset.g;render();});
   document.getElementById("from").onchange=e=>{state.from=clampLo(e.target.value||DATA._min);if(state.from>state.to)state.to=state.from;draw();};
@@ -402,7 +431,7 @@ function render(){
 
 function draw(){
   const us=usableStores();
-  const storeName=state.store==="all"?"総合（全店）":state.store==="own"?"直営（合計）":(us.find(s=>s.id===state.store)?.name||"");
+  const storeName=AGG_SCOPES[state.store]?SCOPE_LABEL[state.store]:(us.find(s=>s.id===state.store)?.name||"");
   const ndays=daysBetween(state.from,state.to);
   document.getElementById("rangebar").innerHTML=
     `この数字の対象期間：<b>${state.from}</b> 〜 <b>${state.to}</b>（${ndays}日間）　店舗：<span class="store">${esc(storeName)}</span>`;
@@ -425,8 +454,13 @@ function draw(){
   const fym=state.to.slice(0,7);
   const cmp=us.map(s=>{const p=sumRows(rowsIn(state.from,state.to,s.id));p._name=s.name;p._land=computeAutoLandingIn(s.id,fym);return p;});
   const rowsC=[...cmp];
-  if(hasFCStores()){const own=sumRows(rowsIn(state.from,state.to,"own"));own._name="直営 合計";own._land=computeAutoLandingIn("own",fym);rowsC.push(own);}
-  const tot=sumRows(rowsIn(state.from,state.to,"all"));tot._name="総合";tot._land=computeAutoLandingIn("all",fym);
+  // 合計行（直営／FC／SELFURUGI／NOTIME）を、該当店があるものだけ足す
+  for(const a of aggScopeList()){
+    if(a.id==="all")continue;
+    const p=sumRows(rowsIn(state.from,state.to,a.id));p._name=SCOPE_LABEL[a.id].replace(/[（(]/,' ').replace(/[）)]/,'');p._agg=true;
+    p._land=computeAutoLandingIn(a.id,fym);rowsC.push(p);
+  }
+  const tot=sumRows(rowsIn(state.from,state.to,"all"));tot._name="総合";tot._agg=true;tot._land=computeAutoLandingIn("all",fym);
   rowsC.push(tot);
   drawCompare(rowsC,fym);
   document.getElementById("cmp-note").textContent=`${state.from} 〜 ${state.to}`;
@@ -474,7 +508,7 @@ function drawCompare(rows,fym){
   const mn=fym?(+fym.split("-")[1]):null;
   const landHead=`着地見込み<br><span class="sub" style="font-weight:500">${mn?mn+"月":""}・税込</span>`;
   const head=`<thead><tr><th>店舗</th><th>${landHead}</th>${cols.map(c=>`<th>${c.name}</th>`).join("")}</tr></thead>`;
-  const body=rows.map(p=>`<tr${(p._name==="総合"||p._name==="直営 合計")?' style="font-weight:750"':''}><td>${esc(p._name)}</td><td>${p._land!=null?YEN(p._land)+"円":"—"}</td>${cols.map(c=>{const v=c.calc(p);return `<td>${v==null?"—":c.fmt(v)}</td>`;}).join("")}</tr>`).join("");
+  const body=rows.map(p=>`<tr${p._agg?' style="font-weight:750"':''}><td>${esc(p._name)}</td><td>${p._land!=null?YEN(p._land)+"円":"—"}</td>${cols.map(c=>{const v=c.calc(p);return `<td>${v==null?"—":c.fmt(v)}</td>`;}).join("")}</tr>`).join("");
   document.getElementById("cmp").innerHTML=head+"<tbody>"+body+"</tbody>";
 }
 function drawCatTable(cats){

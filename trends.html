@@ -104,6 +104,7 @@
   <a href="trends.html" class="on"><span class="ic">📈</span>推移</a>
   <a href="promo.html"><span class="ic">🏷️</span>販促</a>
   <a href="ask.html"><span class="ic">🔍</span>分析AI</a>
+  <a href="admin.html" id="tab-admin" style="display:none"><span class="ic">⚙️</span>管理</a>
 </div></nav>
 
 <script>
@@ -209,7 +210,10 @@ function periods(from,to,g,storeId){
   for(const r of rowsIn(from,to,storeId)){const k=pKey(r.d,g);if(!map.has(k))map.set(k,[]);map.get(k).push(r);}
   return [...map.entries()].sort((a,b)=>a[0]<b[0]?-1:1).map(([k,rows])=>{const p=sumRows(rows);p.key=k;p.label=pLabel(k,g);return p;});
 }
-function usableStores(){const w=new Set(DATA.daily.map(r=>r.s));return DATA.stores.filter(s=>w.has(s.id));}
+function usableStores(){const w=new Set(DATA.daily.map(r=>r.s));return DATA.stores.filter(s=>w.has(s.id)&&s.visible!==false);}
+function brandOf(sid){const s=(DATA.stores||[]).find(x=>String(x.id)===String(sid));const n=(s&&s.name)||"";
+  if(n.indexOf("SELFURUGI")===0)return "SELFURUGI"; if(n.indexOf("NOTIME")===0)return "NOTIME"; return "その他";}
+function syncAdminTab(){const t=document.getElementById("tab-admin");if(t)t.style.display=(ME&&ME.role==="admin")?"":"none";}
 function monthSpan(ym){const[y,m]=ym.split("-").map(Number);const last=new Date(Date.UTC(y,m,0)).getUTCDate();return[`${ym}-01`,`${ym}-${String(last).padStart(2,"0")}`];}
 function clampRange(f,t){if(f<DATA._min)f=DATA._min;if(t>DATA._max)t=DATA._max;if(f>t)f=t;return[f,t];}
 function todayStr(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;}
@@ -228,8 +232,19 @@ function presetRange(kind){
 // 店舗比較の色（色覚多様性に配慮した Okabe–Ito 配色）。店舗ごとに固定色。
 const STORE_COLORS=["#0072B2","#E69F00","#009E73","#D55E00","#CC79A7","#56B4E9","#8E44AD","#555555"];
 function colorMap(){const m={};usableStores().forEach((s,i)=>m[s.id]=STORE_COLORS[i%STORE_COLORS.length]);return m;}
-function ownsInData(){const set=[];for(const s of usableStores()){const o=s.own||"直営";if(!set.includes(o))set.push(o);}return set;}
-function allowedStores(){const us=usableStores();return state.own==="all"?us:us.filter(s=>(s.own||"直営")===state.own);}
+// 区分（グループ）＝ 全店 / 直営 / FC（＝ownership）／ SELFURUGI / NOTIME（＝ブランド）
+function groupPred(g){
+  if(g==="all")return ()=>true;
+  if(g==="直営"||g==="FC")return s=>(s.own||"直営")===g;
+  return s=>brandOf(s.id)===g;   // SELFURUGI / NOTIME
+}
+function groupList(){
+  const us=usableStores();
+  const owns=[];for(const s of us){const o=s.own||"直営";if(!owns.includes(o))owns.push(o);}
+  const brands=[];for(const s of us){const b=brandOf(s.id);if((b==="SELFURUGI"||b==="NOTIME")&&!brands.includes(b))brands.push(b);}
+  return [["all","全店"],...owns.map(o=>[o,o]),...brands.map(b=>[b,b])];
+}
+function allowedStores(){return usableStores().filter(groupPred(state.own));}
 function rowsForIds(from,to,idset){return DATA.daily.filter(r=>idset.has(r.s)&&r.d>=from&&r.d<=to);}
 function pmap(rows,g){const map=new Map();
   for(const r of rows){const k=pKey(r.d,g);let a=map.get(k);if(!a){a=[];map.set(k,a);}a.push(r);}
@@ -240,13 +255,14 @@ function primaryIds(){
 }
 
 function render(){
-  const owns=ownsInData();
+  syncAdminTab();
+  const groups=groupList();
   const allowed=allowedStores();
   const totalLabel=state.own==="all"?"総合（全店）":`総合（${state.own}）`;
   const viewOpts=[["total",totalLabel],["compare","店舗別に比較"],...allowed.map(s=>[String(s.id),s.name])];
-  const ownSeg=owns.length>1?`
+  const ownSeg=groups.length>2?`
       <label class="lbl" style="margin-left:6px">区分</label>
-      <div class="seg" id="own">${[...owns.map(o=>[o,o]),["all","全店"]].map(([v,t])=>`<button data-own="${v}" class="${state.own===v?"on":""}">${t}</button>`).join("")}</div>`:"";
+      <div class="seg" id="own">${groups.map(([v,t])=>`<button data-own="${v}" class="${state.own===v?"on":""}">${t}</button>`).join("")}</div>`:"";
   document.getElementById("app").innerHTML=`
     <header>
       <h1>NOTIME KPI推移</h1>
