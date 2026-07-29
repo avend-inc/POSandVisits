@@ -563,8 +563,18 @@ BUNDLE_NAV_TEXTS = ["バンドル", "バンドル別", "バンドル売上", "�
 
 
 def _open_bundle(page) -> None:
-    """ログイン後の画面から「バンドル」レポートへ移動し、「集計オプション」を開く。"""
-    # 実画面で確認済みのバンドルURLへ直接移動（確実）。上書きは CASHIER_BUNDLE_URL。
+    """
+    ログイン後の画面から「バンドル」レポートへ移動する。
+
+    【2026-07-29 に実画面のDOMダンプで確定】
+      ・バンドル画面URL : https://cashier.jp/v2/client/trade/bundle
+      ・CSVダウンロードは「集計オプション」(#collapse-ask-1) の中に隠れた
+        <button>CSVダウンロード</button> で、その正体は
+          onclick="location.href='.../trade/bundle/download'"
+        ＝ ただのGET。→ ボタンを押す必要はなく、このURLへ直接取りに行けば確実。
+      ・期間指定は不要（/bundle/download は全期間のコード→名称を返す）。
+    ここでは download 用URLの土台としてバンドル画面を開いてセッションを整えるだけにする。
+    """
     url = _env_selector("CASHIER_BUNDLE_URL") or CASHIER_TRADE_URL.rstrip("/") + "/bundle"
     try:
         page.goto(url, wait_until="domcontentloaded")
@@ -577,20 +587,14 @@ def _open_bundle(page) -> None:
         page.wait_for_load_state("networkidle", timeout=30_000)
     except Exception:
         pass
-    # CSV出力・期間は「集計オプション」（Bootstrap collapse）の中に隠れているので確実に開く
-    _expand_collapsed(page)
-    time.sleep(1)
-    # 診断：開いた後の画面（入力欄・ボタン）をログに出す（CSVボタンの正体を確定するため）
-    try:
-        dump_page(page, "cashier_bundle_opened")
-    except Exception:
-        pass
-    # Artifactが落とせない環境向け：CSV/ダウンロード関連の要素を「隠れている物も含めて」
-    # stdout に出す。これで Actions のログだけを見てCSV出力の目印を確定できる。
-    try:
-        _dump_bundle_controls(page)
-    except Exception as e:
-        print(f"  （バンドル画面の詳細診断に失敗: {e}）")
+    # 調査したい時だけ詳細ダンプ（CASHIER_BUNDLE_DEBUG=1）。通常は不要。
+    if _env_selector("CASHIER_BUNDLE_DEBUG"):
+        try:
+            _expand_collapsed(page)
+            dump_page(page, "cashier_bundle_opened")
+            _dump_bundle_controls(page)
+        except Exception as e:
+            print(f"  （バンドル画面の詳細診断に失敗: {e}）")
 
 
 def _dump_bundle_controls(page) -> None:
@@ -693,28 +697,58 @@ def _expand_collapsed(page) -> None:
         pass
 
 
+# バンドルCSVの直リンク（ボタンの onclick が指すGET先）。上書きは CASHIER_BUNDLE_DOWNLOAD_URL。
+BUNDLE_DOWNLOAD_PATH = "/bundle/download"
+
+
+def _bundle_download_url() -> str:
+    return (_env_selector("CASHIER_BUNDLE_DOWNLOAD_URL")
+            or CASHIER_TRADE_URL.rstrip("/") + BUNDLE_DOWNLOAD_PATH)
+
+
 def fetch_bundle(headless: bool = True, days_back: int = 400) -> str:
     """
-    バンドル（コード→名称）CSVを取ってくる。名称は累積なので広めの期間で全件取る。
-    失敗時は数回試す。期間欄が無い（全件表示）画面でも動くよう、期間設定は best-effort。
+    バンドル（コード→名称）CSVを取ってくる。
+
+    バンドル画面の「CSVダウンロード」ボタンは
+      onclick="location.href='.../trade/bundle/download'"
+    ＝ ただのGET なので、ログイン済みセッションでそのURLへ直接取りに行く（確実）。
+    期間指定は不要（全期間のコード→名称が返る）。失敗時は数回試す。
     """
-    from datetime import date, timedelta
     email = require_env("CASHIER_ID", "cashier のログイン用メールアドレス")
     password = require_env("CASHIER_PW", "cashier のログイン用パスワード")
-    end = date.today()
-    start = end - timedelta(days=days_back)
+    dl_url = _bundle_download_url()
 
     last_error: Exception | None = None
     for attempt in range(1, RETRIES + 1):
         try:
             with browser_page(headless=headless) as (page, context):
                 login(page, email, password)
-                _open_bundle(page)
+                # バンドル画面を開いてセッション/店舗スコープを整える（best-effort）
                 try:
-                    set_date_range(page, start.isoformat(), end.isoformat())
+                    _open_bundle(page)
                 except Exception as e:
-                    print(f"  （バンドル画面の期間設定はスキップ: {e}）")
-                return decode_csv(download_csv(page, context))
+                    print(f"  （バンドル画面の表示はスキップ: {e}）")
+                # 認証済みのブラウザ文脈でCSVのURLを直接GET（Cookieは共有される）
+                resp = context.request.get(dl_url, timeout=120_000)
+                if not resp.ok:
+                    raise EtlError(
+                        f"バンドルCSVの取得に失敗しました（HTTP {resp.status}）。\n"
+                        f"  URL: {dl_url}\n"
+                        "  → ボタンのURLが変わった可能性があります。"
+                        "CASHIER_BUNDLE_DOWNLOAD_URL で上書きできます。"
+                    )
+                body = resp.body()
+                if not body:
+                    raise EtlError(f"バンドルCSVが空でした（URL: {dl_url}）。")
+                text = decode_csv(body)
+                # ログイン切れなどでHTML（ログイン画面）が返っていないか軽く確認
+                if "<html" in text[:200].lower() or "<!doctype" in text[:200].lower():
+                    raise EtlError(
+                        "バンドルCSVの代わりにHTML（ログイン画面など）が返りました。"
+                        "セッションが確立できていない可能性があります。"
+                    )
+                return text
         except Exception as e:
             last_error = e
             if attempt < RETRIES:
