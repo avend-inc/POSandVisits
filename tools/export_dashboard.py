@@ -82,14 +82,24 @@ def build_data(sb: Supabase) -> dict:
     sales = _select_all(
         sb, "sales",
         "business_date,store_id,pos_name,tx_id,sales_in_tax,sales_ex_tax,tx_qty,"
-        "line_category,line_amount,line_qty",
+        "line_category,line_amount,line_qty,bundle_code,is_parent",
         order="id",
     )
+
+    # バンドル名（コード→名称）。bundle_master が未作成でも動く。
+    bundle_names: dict[str, str] = {}
+    try:
+        for b in sb.select("bundle_master", {"select": "code,name"}):
+            if b.get("code"):
+                bundle_names[str(b["code"])] = b.get("name") or str(b["code"])
+    except Exception:
+        pass
 
     tx_seen: set[tuple] = set()
     daily: dict[tuple, dict] = {}     # (date, store_id) -> 伝票合計
     cat: dict[tuple, dict] = {}       # (date, store_id, category) -> 明細合計
     catprice: dict[tuple, dict] = {}  # (date, store_id, category, 単価) -> 明細合計（価格帯別）
+    bundles: dict[tuple, dict] = {}   # (date, store_id, bundle_code) -> {tx集合, 親行の売上}
 
     # 商品ではないので「売上・点数・カテゴリ」すべてから除外する。
     #  ・レジ袋 / クーポン … 物ではない（config.py の NON_MERCH と同じ考え方）
@@ -101,7 +111,8 @@ def build_data(sb: Supabase) -> dict:
         # bag_in/bag_ex=レジ袋等の税込/税抜ぶん（KPIからは除外し、別枠で表示する）、
         # bag_q=レジ袋・クーポンの点数
         return {"in": 0.0, "ex": 0.0, "tx": 0, "it": 0.0, "v": None,
-                "bag_in": 0.0, "bag_ex": 0.0, "bag_q": 0.0, "reji_in": 0.0}
+                "bag_in": 0.0, "bag_ex": 0.0, "bag_q": 0.0, "reji_in": 0.0,
+                "coup_in": 0.0, "coup_q": 0.0}   # クーポン割引額・点数（レジ袋と分離）
 
     def _num(v):
         try:
@@ -133,6 +144,15 @@ def build_data(sb: Supabase) -> dict:
         amt = _num(r["line_amount"])
         qty = _num(r["line_qty"])
 
+        # バンドル（セット割＝SALE）の集計：利用数=そのバンドルを使った伝票数、
+        # 売上=親行(セール商品)の金額合計。名称は bundle_master から後で付ける。
+        bcode = (r.get("bundle_code") or "").strip()
+        if bcode:
+            b = bundles.setdefault((d, sid, bcode), {"tx": set(), "a": 0.0})
+            b["tx"].add(r["tx_id"])
+            if r.get("is_parent"):
+                b["a"] += amt
+
         if c in EXCLUDE:
             # レジ袋・クーポンぶんを控えておき、売上から差し引く。
             # 点数にもカテゴリにも入れない。
@@ -142,6 +162,9 @@ def build_data(sb: Supabase) -> dict:
             rec["bag_q"] += qty
             if c == "レジ袋":                 # レジ袋売上は単体で（クーポン割引と混ぜない）
                 rec["reji_in"] += amt * ratio
+            if c == "クーポン":               # クーポン割引額・利用数を分離して記録
+                rec["coup_in"] += amt * ratio
+                rec["coup_q"] += qty
             continue
 
         rec["it"] += qty                       # 販売点数（レジ袋・クーポンを除く）
@@ -176,8 +199,15 @@ def build_data(sb: Supabase) -> dict:
          "ex": round(max(v["ex"] - v["bag_ex"], 0)),
          "tx": v["tx"], "it": round(v["it"]),
          "v": v["v"],
-         "bag": round(v["reji_in"]), "bagq": round(v["bag_q"])}
+         "bag": round(v["reji_in"]), "bagq": round(v["bag_q"]),
+         # クーポン：利用数(点数)と割引額（値引はマイナス金額で入ることが多い）
+         "coup": round(v["coup_q"]), "coupAmt": round(v["coup_in"])}
         for (d, sid), v in sorted(daily.items())
+    ]
+    # バンドル(SALE)別・日次：利用数(n=伝票数) と 売上(a=親行合計)
+    bundle_rows = [
+        {"d": d, "s": sid, "code": code, "n": len(v["tx"]), "a": round(v["a"])}
+        for (d, sid, code), v in sorted(bundles.items())
     ]
     cat_rows = [
         {"d": d, "s": sid, "c": c, "a": round(v["a"]), "q": round(v["q"])}
@@ -197,6 +227,8 @@ def build_data(sb: Supabase) -> dict:
         "daily": daily_rows,
         "cat": cat_rows,
         "catp": catprice_rows,
+        "bundles": bundle_rows,
+        "bundleNames": bundle_names,
     }
 
 
