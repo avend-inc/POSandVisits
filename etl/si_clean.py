@@ -52,6 +52,23 @@ def normalize_si_datetime(df: pd.DataFrame, col: str = "購入日時") -> pd.Dat
     return df
 
 
+def direct_lookalikes(final_names) -> list[str]:
+    """
+    “直営店の地名を含むのに、直営店として畳まれていない店名”を返す（取りこぼし検知）。
+
+    例: 直営「下北沢」を SIPOS の別名で畳み忘れると、"○○下北沢店" が新規FC店として
+    作られてしまう。そういう危険な名前を洗い出して、取り込み時に警告するためのもの。
+    SIPOS＝FCとは限らない（直営もSIPOSを使う）ので、この検知で人が気づけるようにする。
+    """
+    out = []
+    for name in sorted(set(str(n) for n in final_names)):
+        if name in DIRECT_STORE_NAMES:
+            continue
+        if any(kw in name for kw in DIRECT_STORE_NAMES):
+            out.append(name)
+    return out
+
+
 def si_store_names(name_series: pd.Series) -> pd.Series:
     """
     生の店舗名（ブランド名は残す）を最終的な店名にそろえる。

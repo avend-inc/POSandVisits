@@ -117,6 +117,17 @@ def main() -> int:
     print(f"明細 {len(common)}件 / 店舗 {len(stores)}店: {', '.join(stores[:20])}"
           + (" …" if len(stores) > 20 else ""))
 
+    # 安全装置：直営店の地名を含むのに直営として畳まれていない店名を警告する。
+    # （SIPOS＝FCとは限らない。直営がSIPOSを使う場合、畳み忘れると新規FC店化してしまう）
+    if args.adapter == "ezregi":
+        from etl import si_clean
+        suspicious = si_clean.direct_lookalikes(stores)
+        if suspicious:
+            print("  ⚠️ 直営店かもしれない店名が混じっています（このままだと新規FC店として登録されます）:")
+            for nm in suspicious:
+                print(f"       - {nm}")
+            print("     直営店なら etl/si_clean.py の SI_STORE_ALIAS に『この名前→直営店名』を追記してください。")
+
     cache = sb.store_map()
     touched: set[int] = set()
 
