@@ -577,9 +577,33 @@ def _open_bundle(page) -> None:
         page.wait_for_load_state("networkidle", timeout=30_000)
     except Exception:
         pass
-    # CSV出力・期間は「集計オプション」の中に隠れているので開く
-    open_search_options(page)
+    # CSV出力・期間は「集計オプション」（Bootstrap collapse）の中に隠れているので確実に開く
+    _expand_collapsed(page)
     time.sleep(1)
+    # 診断：開いた後の画面（入力欄・ボタン）をログに出す（CSVボタンの正体を確定するため）
+    try:
+        dump_page(page, "cashier_bundle_opened")
+    except Exception:
+        pass
+
+
+def _expand_collapsed(page) -> None:
+    """「集計オプション」等の折りたたみを、文字→collapseアンカー直クリックの順で開く。"""
+    open_search_options(page)   # まず文字（集計オプション等）で
+    # まだ閉じているものがあれば、Bootstrapのcollapseアンカーを直接クリックして開く
+    for sel in ['a[data-toggle="collapse"].collapsed',
+                'a.collapsed[href^="#collapse"]',
+                '[data-toggle="collapse"][aria-expanded="false"]',
+                'a.collapsed']:
+        try:
+            loc = page.locator(sel)
+            for i in range(min(loc.count(), 4)):
+                el = loc.nth(i)
+                if el.is_visible():
+                    el.click()
+                    page.wait_for_timeout(600)
+        except Exception:
+            continue
 
 
 def fetch_bundle(headless: bool = True, days_back: int = 400) -> str:
