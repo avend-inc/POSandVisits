@@ -163,14 +163,10 @@ async function render(){
     </div>
     <div class="panel">
       <h2>バンドル名（SALE）</h2>
-      <p class="note">レジのバンドル（セット割＝SALE）の<b>コード→名称</b>の対応です。新しいSALEを作ったら、ここに<b>コードと名前を1行足す</b>だけで「🏷️販促」に名称が出ます（SQLは不要）。<br>
-        コードは cashier の「バンドル」画面や、🏷️販促タブで名称が「BUNDLE0xx」のまま出ている行で分かります。</p>
+      <p class="note">レジのバンドル（セット割＝SALE）の<b>コード→名称</b>の一覧です。<br>
+        <b>この一覧は自動で更新されます</b>。毎日の取り込みで cashier の「バンドル」画面から名称を取得し、
+        新しいSALEができれば自動で登録します。<b>手入力は不要</b>です（「🏷️販促」タブに名称がそのまま出ます）。</p>
       <div class="tblwrap"><table id="btbl"><tbody><tr><td class="sub">読み込み中…</td></tr></tbody></table></div>
-      <div class="addrow">
-        <input id="b_code" placeholder="コード（例：BUNDLE016）" style="width:180px">
-        <input id="b_name" class="wide" placeholder="名前（例：山形店_3点20%OFF）">
-        <button class="btn" id="b_add">バンドル名を追加</button>
-      </div>
       <p class="msg" id="b_msg"></p>
     </div>`);
   document.getElementById("themebtn").onclick=()=>{const r=document.documentElement;const c=r.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");r.setAttribute("data-theme",c==="dark"?"light":"dark");};
@@ -178,40 +174,23 @@ async function render(){
   document.getElementById("u_add").onclick=addUser;
   document.getElementById("s_add").onclick=addStore;
   document.getElementById("p_add").onclick=addPos;
-  document.getElementById("b_add").onclick=addBundle;
   await loadUsers(); await loadStores(); await loadPos(); await loadBundles();
 }
 
+// バンドル名は日次ETLが自動で取得・登録するので、ここは「確認用の一覧」（読み取り専用）。
 async function loadBundles(){
-  const {data,error}=await SB.from("bundle_master").select("code,name,category").order("code");
+  const {data,error}=await SB.from("bundle_master").select("code,name,category,updated_at").order("code");
   const tb=document.querySelector("#btbl");
   if(error){tb.innerHTML=`<tbody><tr><td class="err">読み込み失敗：${esc(error.message)}</td></tr></tbody>`;return;}
-  const head=`<thead><tr><th>コード</th><th>名前</th><th></th></tr></thead>`;
+  const fmt=t=>{try{return t?new Date(t).toLocaleDateString("ja-JP"):"";}catch(e){return"";}};
+  const head=`<thead><tr><th>コード</th><th>名前（SALE）</th><th>カテゴリ</th><th>更新日</th></tr></thead>`;
   const rows=(data||[]).map(b=>`<tr>
     <td>${esc(b.code)}</td>
-    <td><input data-code="${esc(b.code)}" class="bname" value="${esc(b.name||"")}" style="min-width:220px"></td>
-    <td><button class="btn ghost" data-bsave="${esc(b.code)}">保存</button> <button class="btn danger" data-bdel="${esc(b.code)}">削除</button></td></tr>`).join("");
-  tb.innerHTML=head+"<tbody>"+(rows||'<tr><td class="sub" colspan="3">まだ登録がありません。下の行から追加してください。</td></tr>')+"</tbody>";
-  tb.querySelectorAll("[data-bsave]").forEach(bt=>bt.onclick=async()=>{
-    const code=bt.dataset.bsave;
-    const name=(tb.querySelector(`.bname[data-code="${CSS.escape(code)}"]`).value||"").trim();
-    const {error}=await SB.from("bundle_master").update({name,updated_at:new Date().toISOString()}).eq("code",code);
-    msg("b_msg", error?("保存失敗："+error.message):`${code} を保存しました`, !error);
-  });
-  tb.querySelectorAll("[data-bdel]").forEach(bt=>bt.onclick=async()=>{
-    const code=bt.dataset.bdel; if(!confirm(`${code} を削除しますか？`))return;
-    const {error}=await SB.from("bundle_master").delete().eq("code",code);
-    msg("b_msg", error?("削除失敗："+error.message):`${code} を削除しました`, !error);
-    if(!error)loadBundles();
-  });
-}
-async function addBundle(){
-  const code=(document.getElementById("b_code").value||"").trim();
-  const name=(document.getElementById("b_name").value||"").trim();
-  if(!code){msg("b_msg","コードは必須です",false);return;}
-  const {error}=await SB.from("bundle_master").upsert({code,name,updated_at:new Date().toISOString()},{onConflict:"code"});
-  msg("b_msg", error?("追加失敗："+error.message):`${code} を追加しました`, !error);
-  if(!error){document.getElementById("b_code").value="";document.getElementById("b_name").value="";loadBundles();}
+    <td>${esc(b.name||"")}</td>
+    <td class="sub">${esc(b.category||"")}</td>
+    <td class="sub">${esc(fmt(b.updated_at))}</td></tr>`).join("");
+  tb.innerHTML=head+"<tbody>"+(rows||'<tr><td class="sub" colspan="4">まだ登録がありません（次回の取り込みで自動登録されます）。</td></tr>')+"</tbody>";
+  msg("b_msg", `${(data||[]).length}件（自動取得）`, true);
 }
 
 function msg(id,text,ok){const el=document.getElementById(id);if(el){el.textContent=text;el.className="msg "+(ok?"ok":"err");}}
