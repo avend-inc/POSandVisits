@@ -91,6 +91,7 @@
   <a href="trends.html"><span class="ic">📈</span>推移</a>
   <a href="promo.html"><span class="ic">🏷️</span>販促</a>
   <a href="ask.html" class="on"><span class="ic">🔍</span>分析AI</a>
+  <a href="admin.html" id="tab-admin" style="display:none"><span class="ic">⚙️</span>管理</a>
 </div></nav>
 <script>
 "use strict";
@@ -135,8 +136,9 @@ async function authBoot(url,anon){ screen('<div class="sub" style="padding:40px 
   if(!ME.role){showDenied(ME.email);return;}
   const {data,error}=await SB.storage.from("dashboard-data").download("data.json");
   if(error)throw new Error("データを取得できませんでした（"+error.message+"）");
-  DATA=JSON.parse(await data.text()); prep();
+  DATA=JSON.parse(await data.text()); prep(); syncAdminTab();
   await loadThreads(); renderList(); subscribeRealtime(); }
+function syncAdminTab(){const t=document.getElementById("tab-admin");if(t)t.style.display=(ME&&ME.role==="admin")?"":"none";}
 function prep(){ if(!DATA||!DATA.daily)throw new Error("データが空です");
   const sd=DATA.daily.filter(r=>(r.tx||0)>0||(r.in||0)>0).map(r=>r.d).sort();
   DATA._salesMax=sd.length?sd[sd.length-1]:null; }

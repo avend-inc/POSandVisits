@@ -74,6 +74,8 @@ def build_data(sb: Supabase) -> dict:
     own_by_id = {s["id"]: (s.get("ownership") or "直営") for s in stores}
     # KPIに来店数を使うか（列が未追加でも既定 True）。False の店は来店・購入率をKPIから外す。
     kv_by_id = {s["id"]: bool(s.get("kpi_visitors", True)) for s in stores}
+    # ダッシュボードに表示するか（列が未追加でも既定 True）。False の店は各画面の一覧・合計から外す。
+    vis_by_id = {s["id"]: bool(s.get("visible", True)) for s in stores}
 
     # --- sales: 伝票(税込/税抜/点数)は明細行に繰り返し入っているので、
     #     伝票単位では tx_id ごとに1回だけ数える。明細(金額/点数)は行ごとに合計。
@@ -222,7 +224,8 @@ def build_data(sb: Supabase) -> dict:
         "generated_at": datetime.now(JST).isoformat(timespec="seconds"),
         "stores": [{"id": s["id"], "name": name_by_id.get(s["id"], str(s["id"])),
                     "own": own_by_id.get(s["id"], "直営"),
-                    "kv": kv_by_id.get(s["id"], True)}
+                    "kv": kv_by_id.get(s["id"], True),
+                    "visible": vis_by_id.get(s["id"], True)}
                    for s in stores],
         "daily": daily_rows,
         "cat": cat_rows,
