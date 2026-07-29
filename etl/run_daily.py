@@ -346,10 +346,12 @@ def main() -> int:
     if args.only in (None, "cashier"):
         results.append(run_cashier(sb, business_date, run_id, args.force,
                                    headless, store_cache))
-    if args.only == "bundle":
-        # バンドル名（SALEの名称マスタ）の自動取得。cashierの「バンドル」画面はCSV出力の
-        # 目印が未確定のため、既定の日次では回さず、明示指定(--only bundle)のときだけ試す。
-        # 名称は通常 sql seed / 手動「バンドル名 取り込み」で入れる（名称は滅多に変わらない）。
+    if args.only in (None, "bundle"):
+        # バンドル名（SALEの名称マスタ）を毎日自動で取得する。
+        #   cashierの「バンドル」画面 → 集計(POST /bundle/search) → CSV(GET /bundle/download)
+        #   の順で取得し、新しいSALEがあれば bundle_master に自動登録する。
+        #   best-effort（失敗しても売上・来店の取り込みは止めない。BEST_EFFORT参照）。
+        #   同じ営業日は二度取りに行かない（already_succeeded ガード）。
         results.append(run_bundle_master(sb, business_date, run_id, args.force, headless))
     if args.only in (None, "digitel"):
         results.extend(run_digitel(sb, business_date, run_id, args.force, headless))
