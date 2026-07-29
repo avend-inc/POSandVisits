@@ -54,8 +54,9 @@ from .settings import (
 #   ・CSV出力は2つのボタン: 「CSV出力(明細)」「CSV出力(伝票)」
 #     （button.btn.btn-info.btn-sm）。欲しいのは 1明細=1行 の「明細」。
 # ------------------------------------------------------------
-# 「検索オプション」を開くためのラベル（閉じていることがある）
-SEARCH_OPTION_TEXTS = ["検索オプション", "詳細検索", "検索条件", "条件を開く"]
+# 「検索オプション」を開くためのラベル（閉じていることがある）。
+# バンドル画面は「集計オプション」の中にCSV出力・期間が隠れているので、これも対象にする。
+SEARCH_OPTION_TEXTS = ["検索オプション", "集計オプション", "詳細検索", "検索条件", "条件を開く"]
 
 # cashier の期間欄は name="since"（開始）/ name="until"（終了）だと実画面で確認済み。
 DATE_FROM_CANDIDATES = [
@@ -562,24 +563,22 @@ BUNDLE_NAV_TEXTS = ["バンドル", "バンドル別", "バンドル売上", "�
 
 
 def _open_bundle(page) -> None:
-    """ログイン後の画面から「バンドル」レポートへ移動する。"""
-    url = _env_selector("CASHIER_BUNDLE_URL")
-    if url:
+    """ログイン後の画面から「バンドル」レポートへ移動し、「集計オプション」を開く。"""
+    # 実画面で確認済みのバンドルURLへ直接移動（確実）。上書きは CASHIER_BUNDLE_URL。
+    url = _env_selector("CASHIER_BUNDLE_URL") or CASHIER_TRADE_URL.rstrip("/") + "/bundle"
+    try:
         page.goto(url, wait_until="domcontentloaded")
-    else:
+    except Exception:
         nav = _env_selector("CASHIER_BUNDLE_NAV_TEXT")
-        texts = [nav] if nav else BUNDLE_NAV_TEXTS
-        if not _click_by_text(page, texts):
+        if not _click_by_text(page, [nav] if nav else BUNDLE_NAV_TEXTS):
             dump_page(page, "cashier_bundle_nav_notfound")
-            raise EtlError(
-                "cashier の「バンドル」画面へ移動できませんでした。\n"
-                "  → debug/cashier_bundle_nav_notfound_report.txt を見て、\n"
-                "     リンク文字を CASHIER_BUNDLE_NAV_TEXT、またはURLを CASHIER_BUNDLE_URL で指定してください。"
-            )
+            raise EtlError("cashier の「バンドル」画面へ移動できませんでした。debug/ を確認してください。")
     try:
         page.wait_for_load_state("networkidle", timeout=30_000)
     except Exception:
         pass
+    # CSV出力・期間は「集計オプション」の中に隠れているので開く
+    open_search_options(page)
     time.sleep(1)
 
 

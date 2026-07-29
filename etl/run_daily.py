@@ -370,9 +370,15 @@ def main() -> int:
         if r.message and r.status in ("failed", "rejected_duplicate"):
             print(f"      {r.message.splitlines()[0]}")
 
-    failed = [r for r in results if r.status == "failed"]
+    # バンドル名(SALEの名称マスタ)は best-effort。失敗しても全体は止めない
+    #  （売上・来店の取り込みが成功していれば正常終了扱いにする）。
+    BEST_EFFORT = {"bundle_master"}
+    failed = [r for r in results if r.status == "failed" and r.name not in BEST_EFFORT]
+    warn = [r for r in results if r.status == "failed" and r.name in BEST_EFFORT]
     rejected = [r for r in results if r.status == "rejected_duplicate"]
 
+    if warn:
+        print("\n⚠️ バンドル名の取得はスキップ/失敗しました（best-effort。他の取り込みには影響しません）。")
     if failed:
         print(f"\n❌ {len(failed)}件が失敗しました。ingest_log に記録済みです。")
         return 1
