@@ -1,0 +1,51 @@
+# ============================================================
+#  バンドル名 取り込み（コード→名称）
+#
+#  使い方:
+#   1. Cashier → バンドル → 期間設定 → CSVダウンロード でCSVを作る
+#   2. Supabase → Storage の非公開バケット（例: imports）へアップロード
+#   3. Actions →「バンドル名 取り込み」→ Run workflow でパス等を指定して実行
+#
+#  ※ 認証情報は既存の SUPABASE_URL / SUPABASE_SERVICE_KEY を流用します。
+# ============================================================
+name: バンドル名 取り込み
+
+on:
+  workflow_dispatch:
+    inputs:
+      bucket:
+        description: "非公開バケット名"
+        required: true
+        default: "imports"
+      path:
+        description: "CSVのパス（バケット内のファイル名）"
+        required: true
+        default: "ClientBundle.csv"
+      export:
+        description: "取り込み後にダッシュボードを再集計・配信する"
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Tokyo
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: バンドル名を取り込む
+        run: python -m tools.import_bundle_master --bucket "${{ inputs.bucket }}" --path "${{ inputs.path }}"
+      - name: ダッシュボードを更新
+        if: ${{ inputs.export }}
+        run: python -m tools.export_dashboard
