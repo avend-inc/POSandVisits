@@ -639,10 +639,17 @@ def _dump_bundle_controls(page) -> None:
                       [...(el.attributes||[])].map(a=>a.name+'='+a.value).join(' ');
           return hasKw(bag);
         }).map(pick).slice(0,60);
-      // 3) form
+      // 3) form（中の入力欄も含める：検索POSTの目印を確定するため）
       const forms = [...document.querySelectorAll('form')]
         .map(f => ({action:f.getAttribute('action'), method:f.getAttribute('method'),
-                    id:f.id||null, cls:(f.className||'').toString().slice(0,60)})).slice(0,20);
+                    id:f.id||null, cls:(f.className||'').toString().slice(0,60),
+                    fields: [...f.querySelectorAll('input,select,textarea')].map(e => ({
+                      tag:e.tagName, type:e.type||null, name:e.name||null,
+                      value:(e.value||'').slice(0,40),
+                      options:(e.tagName==='SELECT'
+                        ? [...e.options].slice(0,8).map(o=>({v:o.value,t:(o.text||'').slice(0,20)}))
+                        : null),
+                    })).slice(0,40)})).slice(0,20);
       // 4) download属性つきリンク
       const dlattr = [...document.querySelectorAll('a[download],a[href*="csv" i],a[href*="export" i],a[href*="download" i]')]
         .map(a => ({text:(a.innerText||'').trim().slice(0,30), href:a.getAttribute('href'),
@@ -742,6 +749,8 @@ def fetch_bundle(headless: bool = True, days_back: int = 400) -> str:
                 if not body:
                     raise EtlError(f"バンドルCSVが空でした（URL: {dl_url}）。")
                 text = decode_csv(body)
+                # 取れたCSVの中身を軽く確認できるよう先頭だけログに出す（名称は機密でない）
+                print(f"  バンドルCSV: {len(text)}文字 / 先頭: {text[:400]!r}")
                 # ログイン切れなどでHTML（ログイン画面）が返っていないか軽く確認
                 if "<html" in text[:200].lower() or "<!doctype" in text[:200].lower():
                     raise EtlError(
