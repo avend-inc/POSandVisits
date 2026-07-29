@@ -706,6 +706,10 @@ def _expand_collapsed(page) -> None:
 
 # バンドルCSVの直リンク（ボタンの onclick が指すGET先）。上書きは CASHIER_BUNDLE_DOWNLOAD_URL。
 BUNDLE_DOWNLOAD_PATH = "/bundle/download"
+BUNDLE_SEARCH_PATH = "/bundle/search"
+# バンドル画面の検索フォーム（POST /bundle/search）で選べる販売チャネル。全部入れて漏れなく集計する。
+BUNDLE_CHANNELS = ["POS_NORMAL", "APP_RETAIL", "APP_TAKEOUT", "APP_TABLEORDER",
+                   "VENDING_MACHINE", "EC", "IMPORT"]
 
 
 def _bundle_download_url() -> str:
@@ -713,29 +717,80 @@ def _bundle_download_url() -> str:
             or CASHIER_TRADE_URL.rstrip("/") + BUNDLE_DOWNLOAD_PATH)
 
 
+def _bundle_search_url() -> str:
+    return (_env_selector("CASHIER_BUNDLE_SEARCH_URL")
+            or CASHIER_TRADE_URL.rstrip("/") + BUNDLE_SEARCH_PATH)
+
+
+def _prime_bundle_search(page, context, start: str, end: str) -> None:
+    """
+    バンドルCSVは「まず集計（検索）してから」でないと中身が空になる。
+
+    【2026-07-29 に実画面のフォームダンプで確定】
+      POST /bundle/search（Laravelフォーム, id=form-validation）に
+        _token       … CSRFトークン（画面から都度読む）
+        since / until … 期間（YYYY-MM-DD）
+        targetDevice  … レジ（""＝すべて）
+        channels[]    … 販売チャネル（複数）
+        search        … "集計"（送信ボタンの値）
+      を投げると、そのセッションの集計条件が確定する。
+      → 直後に GET /bundle/download すると、その条件のCSV（コード→名称入り）が落ちる。
+    期間は名称を漏れなく拾うため広め（既定400日）にする。
+    """
+    # CSRFトークンを画面から読む（セッションと一致していないと 419 になる）
+    token = ""
+    try:
+        token = page.locator('input[name="_token"]').first.get_attribute("value") or ""
+    except Exception:
+        pass
+
+    # channels[] を複数回入れたいので、順序付きペアで body を組み立てる
+    from urllib.parse import urlencode
+    pairs = [("_token", token), ("since", start), ("until", end), ("targetDevice", "")]
+    pairs += [("channels[]", c) for c in BUNDLE_CHANNELS]
+    pairs += [("goods_bundle_name", ""), ("goods_bundle_code", ""), ("search", "集計")]
+    body = urlencode(pairs)
+
+    resp = context.request.post(
+        _bundle_search_url(),
+        data=body,
+        headers={"content-type": "application/x-www-form-urlencoded"},
+        timeout=120_000,
+    )
+    print(f"  バンドル集計(検索)を実行: {start}〜{end} / HTTP {resp.status}")
+
+
 def fetch_bundle(headless: bool = True, days_back: int = 400) -> str:
     """
     バンドル（コード→名称）CSVを取ってくる。
 
-    バンドル画面の「CSVダウンロード」ボタンは
-      onclick="location.href='.../trade/bundle/download'"
-    ＝ ただのGET なので、ログイン済みセッションでそのURLへ直接取りに行く（確実）。
-    期間指定は不要（全期間のコード→名称が返る）。失敗時は数回試す。
+    実画面の作り（2026-07-29 確定）:
+      1. バンドル画面を開く（/bundle）。CSVダウンロードは
+         onclick="location.href='.../bundle/download'" ＝ ただのGET。
+      2. ただし先に「集計」(POST /bundle/search) をしないと download は
+         見出し行だけの空CSVになる。→ 広い期間で集計してから download する。
+      3. GET /bundle/download でコード→名称入りCSVを取得。
+    期間は名称を漏れなく拾うため広め（既定400日）。失敗時は数回試す。
     """
+    from datetime import date, timedelta
     email = require_env("CASHIER_ID", "cashier のログイン用メールアドレス")
     password = require_env("CASHIER_PW", "cashier のログイン用パスワード")
     dl_url = _bundle_download_url()
+    end = date.today()
+    start = end - timedelta(days=days_back)
 
     last_error: Exception | None = None
     for attempt in range(1, RETRIES + 1):
         try:
             with browser_page(headless=headless) as (page, context):
                 login(page, email, password)
-                # バンドル画面を開いてセッション/店舗スコープを整える（best-effort）
+                # バンドル画面を開く（_token を読む／セッションを整える）
+                _open_bundle(page)
+                # まず集計（検索）してからでないと download が空になる
                 try:
-                    _open_bundle(page)
+                    _prime_bundle_search(page, context, start.isoformat(), end.isoformat())
                 except Exception as e:
-                    print(f"  （バンドル画面の表示はスキップ: {e}）")
+                    print(f"  （バンドル集計の事前実行に失敗: {e}）")
                 # 認証済みのブラウザ文脈でCSVのURLを直接GET（Cookieは共有される）
                 resp = context.request.get(dl_url, timeout=120_000)
                 if not resp.ok:
@@ -750,7 +805,7 @@ def fetch_bundle(headless: bool = True, days_back: int = 400) -> str:
                     raise EtlError(f"バンドルCSVが空でした（URL: {dl_url}）。")
                 text = decode_csv(body)
                 # 取れたCSVの中身を軽く確認できるよう先頭だけログに出す（名称は機密でない）
-                print(f"  バンドルCSV: {len(text)}文字 / 先頭: {text[:400]!r}")
+                print(f"  バンドルCSV: {len(text)}文字 / 先頭: {text[:200]!r}")
                 # ログイン切れなどでHTML（ログイン画面）が返っていないか軽く確認
                 if "<html" in text[:200].lower() or "<!doctype" in text[:200].lower():
                     raise EtlError(

@@ -65,8 +65,6 @@ jobs:
       # live: Cashierから自動取得（新SALEもここで自動登録される）
       - name: バンドル名を自動取得（Cashierから）
         if: ${{ inputs.mode == 'live' }}
-        env:
-          CASHIER_BUNDLE_DEBUG: "1"
         run: python -m etl.run_daily --only bundle --force
 
       # storage: アップロード済みCSVから取り込み（保険）
