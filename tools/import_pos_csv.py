@@ -168,7 +168,15 @@ def main() -> int:
     if args.export:
         print("ダッシュボードを更新します…")
         from tools import export_dashboard
-        export_dashboard.main()  # 集計・配信
+        # export_dashboard.main() は sys.argv を解析するので、取り込み用の引数
+        # (--bucket 等) を渡さないよう一時的にクリアしてから呼ぶ（そうしないと argparse が
+        # 「unrecognized arguments」で終了コード2になる）。
+        saved_argv = sys.argv
+        sys.argv = [saved_argv[0]]
+        try:
+            export_dashboard.main()  # 集計・配信
+        finally:
+            sys.argv = saved_argv
 
     print("✅ 取り込み完了")
     return 0
