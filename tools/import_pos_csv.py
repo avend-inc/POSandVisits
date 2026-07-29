@@ -94,8 +94,13 @@ def main() -> int:
     text = _decode(_download(sb, args.bucket, args.path))
 
     if args.adapter == "ezregi":
+        from etl import si_clean
         df_in = _read_si_table(text)
+        # 日付の書式ゆれ（秒なし等）を吸収して落ちる行を減らす
+        df_in = si_clean.normalize_si_datetime(df_in)
         common = adapters.adapt_ezregi(df_in, args.pos_name)
+        # 店の識別は生の店舗名ベース（ブランド名は残す）。単純な改名だけ最新名へ寄せる。
+        common["store"] = si_clean.si_store_names(df_in["店舗名"]).reindex(common.index)
     elif args.adapter == "cashier":
         df_in = pd.read_csv(StringIO(text), dtype=str)
         common = adapters.adapt_cashier(df_in, args.pos_name)
