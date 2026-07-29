@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="icon-32.png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#2f6fd0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="売上KPI管理">
+<meta name="robots" content="noindex, nofollow">
+<title>販促効果｜売上KPI管理</title>
+<style>
+  :root{ --bg:#f6f7f9;--surface:#fff;--surface2:#f0f2f5;--border:#e2e6ea;--ink:#1a1d21;--ink2:#5b636c;--muted:#8a929b;
+    --accent:#2f6fd0;--accent-weak:#dbe6f7;--good:#1a8a5a;--bad:#c0392b;--shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.04);--radius:14px;}
+  @media (prefers-color-scheme: dark){:root{ --bg:#0e1116;--surface:#161b22;--surface2:#1c232c;--border:#2a323c;--ink:#e7ebef;--ink2:#a3adb8;--muted:#727d89;--accent:#5b9bff;--accent-weak:#1e2f4a;--good:#3fce8c;--bad:#ff6b5e;--shadow:0 1px 2px rgba(0,0,0,.4);}}
+  :root[data-theme="dark"]{ --bg:#0e1116;--surface:#161b22;--surface2:#1c232c;--border:#2a323c;--ink:#e7ebef;--ink2:#a3adb8;--muted:#727d89;--accent:#5b9bff;--accent-weak:#1e2f4a;--good:#3fce8c;--bad:#ff6b5e;--shadow:0 1px 2px rgba(0,0,0,.4);}
+  :root[data-theme="light"]{ --bg:#f6f7f9;--surface:#fff;--surface2:#f0f2f5;--border:#e2e6ea;--ink:#1a1d21;--ink2:#5b636c;--muted:#8a929b;--accent:#2f6fd0;--accent-weak:#dbe6f7;--good:#1a8a5a;--bad:#c0392b;--shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.04);}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,sans-serif;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;}
+  .wrap{max-width:900px;margin:0 auto;padding:18px 16px 92px;}
+  header{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;}
+  h1{font-size:20px;margin:0;font-weight:700;letter-spacing:.02em;}
+  .sub{color:var(--muted);font-size:12px;}
+  .closebadge{margin-left:auto;display:inline-flex;align-items:center;gap:5px;background:var(--surface2);border:1px solid var(--border);border-radius:999px;padding:5px 12px;font-size:12px;font-weight:700;color:var(--ink2);}
+  .closebadge b{color:var(--ink);}
+  .themebtn{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:9px;padding:7px 10px;font-size:12px;cursor:pointer;}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:12px 0 2px;}
+  select,input[type=date]{appearance:none;background:var(--surface);color:var(--ink);border:1px solid var(--border);border-radius:10px;padding:8px 12px;font-size:13px;font-weight:600;font-family:inherit;}
+  label.lbl{font-size:12px;color:var(--muted);}
+  .chip{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:8px;padding:6px 10px;font-size:12px;font-weight:600;cursor:pointer;}
+  .chip:hover{border-color:var(--accent);color:var(--ink);}
+  .panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px 16px 14px;margin:14px 0;}
+  .panel h2{font-size:14px;margin:0 0 8px;font-weight:800;}
+  .hero{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;}
+  .hcard{background:var(--surface2);border:1px solid var(--border);border-radius:11px;padding:11px 12px;}
+  .hcard .k{font-size:12px;color:var(--ink2);font-weight:600;}
+  .hcard .v{font-size:21px;font-weight:800;margin-top:3px;line-height:1.1;}
+  .hcard .s{font-size:11px;color:var(--muted);margin-top:3px;font-weight:600;}
+  .tblwrap{overflow-x:auto;}
+  table{width:100%;border-collapse:collapse;font-size:13px;min-width:560px;}
+  th,td{padding:8px 8px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--border);}
+  th:first-child,td:first-child{text-align:left;position:sticky;left:0;background:var(--surface);}
+  th{color:var(--ink2);font-weight:700;font-size:11px;cursor:pointer;user-select:none;}
+  th.sorted{color:var(--accent);}
+  tr.total td{font-weight:800;border-top:2px solid var(--border);background:var(--surface2);}
+  .bar{height:6px;border-radius:4px;background:var(--accent);opacity:.85;}
+  .note{font-size:11.5px;color:var(--muted);margin:8px 0 0;line-height:1.7;}
+  .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:60;background:var(--surface);border-top:1px solid var(--border);box-shadow:0 -2px 12px rgba(0,0,0,.07);padding-bottom:env(safe-area-inset-bottom);}
+  .tabbar-in{max-width:640px;margin:0 auto;display:flex;}
+  .tabbar a{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 1px 9px;text-decoration:none;color:var(--ink2);font-size:10.5px;font-weight:700;letter-spacing:.01em;-webkit-tap-highlight-color:transparent;}
+  .tabbar a .ic{font-size:18px;line-height:1;filter:grayscale(.25) opacity(.85);}
+  .tabbar a.on{color:var(--accent);} .tabbar a.on .ic{filter:none;} .tabbar a:active{opacity:.55;}
+  .gate{max-width:440px;margin:14vh auto;text-align:center;padding:0 22px;}
+  .gate .logo{font-size:22px;font-weight:750;} .gate .t{font-size:16px;font-weight:700;margin:18px 0 6px;} .gate .m{color:var(--ink2);font-size:14px;line-height:1.8;}
+  .gbtn{display:inline-flex;align-items:center;gap:10px;background:var(--surface);color:var(--ink);border:1px solid var(--border);border-radius:11px;padding:12px 20px;font-size:15px;font-weight:700;cursor:pointer;box-shadow:var(--shadow);margin-top:18px;}
+  .gbtn .g{width:18px;height:18px;border-radius:50%;background:conic-gradient(#ea4335 0 25%,#fbbc05 0 50%,#34a853 0 75%,#4285f4 0);}
+  .err{padding:20px;color:var(--bad);font-weight:600;}
+  .empty{color:var(--muted);font-size:13px;text-align:center;padding:22px 10px;line-height:1.9;}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"><div class="sub" style="padding:40px 0">読み込み中…</div></div>
+<nav class="tabbar"><div class="tabbar-in">
+  <a href="index.html"><span class="ic">📊</span>サマリー</a>
+  <a href="pl.html"><span class="ic">📋</span>予実</a>
+  <a href="trends.html"><span class="ic">📈</span>推移</a>
+  <a href="promo.html" class="on"><span class="ic">🏷️</span>販促</a>
+  <a href="ask.html"><span class="ic">🔍</span>分析AI</a>
+</div></nav>
+<script>
+"use strict";
+const YEN=n=>Math.round(n).toLocaleString("ja-JP");
+const NUM=n=>Math.round(n).toLocaleString("ja-JP");
+const F1=n=>(Math.round(n*10)/10).toLocaleString("ja-JP",{minimumFractionDigits:1,maximumFractionDigits:1});
+const CONFIG_URL="https://rwfcsanmqvkxiuwdeddv.supabase.co/storage/v1/object/public/dashboard/config.json";
+let SB=null, DATA=null, ME={email:"",role:null};
+const state={store:"all",from:null,to:null,sort:"a"};
+
+function screen(h){document.getElementById("app").innerHTML=h;}
+function esc(s){return String(s==null?"":s).replace(/[&<>]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[m]));}
+function showError(e){screen('<div class="err">読み込めませんでした：'+esc(String(e&&e.message||e))+'</div>');}
+function fmtMD(d){if(!d)return "—";const[,m,dd]=d.split("-");return `${+m}/${+dd}`;}
+function addDays(d,n){const t=new Date(d+"T00:00:00Z");t.setUTCDate(t.getUTCDate()+n);return t.toISOString().slice(0,10);}
+function todayStr(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;}
+
+async function boot(){ try{
+  let cfg=null; try{cfg=await (await fetch(CONFIG_URL,{cache:"no-store"})).json();}catch(e){}
+  if(cfg&&cfg.mode==="auth"){ await authBoot(cfg.url,cfg.anon); return; }
+  const url=(cfg&&cfg.dataUrl)||"data.json";
+  DATA=await (await fetch(url,{cache:"no-store"})).json(); prep(); render();
+}catch(e){showError(e);} }
+async function ensureSupabase(){ if(window.supabase)return; await new Promise((res,rej)=>{const s=document.createElement("script");
+  s.src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2";s.onload=res;s.onerror=()=>rej(new Error("ログイン部品を読み込めませんでした"));document.head.appendChild(s);}); }
+async function authBoot(url,anon){ await ensureSupabase();
+  SB=window.supabase.createClient(url,anon,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,flowType:"pkce",storageKey:"notime-auth"}});
+  const {data:{session}}=await SB.auth.getSession();
+  if(!session){showLogin();return;}
+  ME.email=(session.user&&session.user.email||"").toLowerCase();
+  let role=null; try{const {data:u}=await SB.from("app_users").select("role").eq("email",ME.email).maybeSingle();role=u&&u.role||null;}catch(e){}
+  ME.role=role; if(!ME.role){showDenied(ME.email);return;}
+  const {data,error}=await SB.storage.from("dashboard-data").download("data.json");
+  if(error)throw new Error("データを取得できませんでした（"+error.message+"）");
+  DATA=JSON.parse(await data.text()); prep(); render(); }
+function prep(){ if(!DATA||!DATA.daily)throw new Error("データが空です");
+  const ds=DATA.daily.map(r=>r.d).sort(); DATA._min=ds[0]; DATA._max=ds[ds.length-1];
+  const sd=DATA.daily.filter(r=>(r.tx||0)>0||(r.in||0)>0).map(r=>r.d).sort();
+  DATA._salesMax=sd.length?sd[sd.length-1]:DATA._max;
+  const t=todayStr(), ym=(DATA._salesMax||DATA._max).slice(0,7);
+  state.to=DATA._max; state.from=ym+"-01"; if(state.from<DATA._min)state.from=DATA._min; }
+function showLogin(){ screen(`<div class="gate"><div class="logo">🏷️ 販促効果</div>
+  <div class="t">ログイン</div><div class="m">許可されたメンバー専用です。</div>
+  <button class="gbtn" id="gl"><span class="g"></span>Google でログイン</button></div>`);
+  document.getElementById("gl").onclick=async()=>{const redirectTo=location.origin+location.pathname;await SB.auth.signInWithOAuth({provider:"google",options:{redirectTo,queryParams:{prompt:"select_account"}}});}; }
+function showDenied(email){ screen(`<div class="gate"><div class="logo">🏷️ 販促効果</div>
+  <div class="t">アクセス権がありません</div><div class="m"><b>${esc(email)}</b> は未登録です。管理者に依頼してください。</div>
+  <button class="gbtn" id="lo"><span class="g"></span>別のアカウントでログイン</button></div>`);
+  document.getElementById("lo").onclick=async()=>{try{await SB.auth.signOut();}catch(e){}location.reload();}; }
+
+function usableStores(){const w=new Set(DATA.daily.map(r=>r.s));return (DATA.stores||[]).filter(s=>w.has(s.id));}
+function ownOf(sid){const s=(DATA.stores||[]).find(x=>String(x.id)===String(sid));return (s&&s.own)?s.own:"直営";}
+function hasFC(){return usableStores().some(s=>ownOf(s.id)!=="直営");}
+function inScope(sid){ if(state.store==="all")return true; if(state.store==="own")return ownOf(sid)==="直営"; return sid===state.store; }
+function inRange(d){ return d>=state.from&&d<=state.to; }
+function storeName(){return state.store==="all"?"総合（全店）":state.store==="own"?"直営（合計）":(usableStores().find(s=>s.id===state.store)||{}).name||"";}
+
+// バンドル(SALE)別集計：コードごとに 利用数・売上・期間・店舗
+function bundleAgg(){
+  const bn=DATA.bundleNames||{}, m={};
+  for(const b of (DATA.bundles||[])){ if(!inScope(b.s)||!inRange(b.d))continue;
+    const e=m[b.code]||(m[b.code]={code:b.code,name:bn[b.code]||b.code,n:0,a:0,first:null,last:null,stores:new Set()});
+    e.n+=b.n||0; e.a+=b.a||0; e.stores.add(b.s);
+    if(!e.first||b.d<e.first)e.first=b.d; if(!e.last||b.d>e.last)e.last=b.d; }
+  return Object.values(m);
+}
+function couponAgg(){ let n=0,amt=0; for(const r of DATA.daily){ if(!inScope(r.s)||!inRange(r.d))continue; n+=r.coup||0; amt+=r.coupAmt||0; } return {n,amt}; }
+function totalSalesIn(){ let s=0; for(const r of DATA.daily){ if(!inScope(r.s)||!inRange(r.d))continue; s+=r.in||0; } return s; }
+
+function render(){
+  const us=usableStores();
+  const stores=[{id:"all",name:"総合（全店）"},...(hasFC()?[{id:"own",name:"直営（合計）"}]:[]),...us.map(s=>({id:s.id,name:s.name}))];
+  const hasBundleData=(DATA.bundles||[]).length>0;
+  const namedCount=Object.keys(DATA.bundleNames||{}).length;
+  screen(`
+    <header>
+      <h1>🏷️ 販促効果</h1>
+      <span class="closebadge" title="取り込み済みの最新データ日（締日）">📅 締日 <b>${fmtMD(DATA._salesMax)}</b></span>
+      <button class="themebtn" id="themebtn" style="margin-left:8px">◐ 表示切替</button>
+    </header>
+    <div class="controls">
+      <label class="lbl">店舗</label>
+      <select id="store">${stores.map(s=>`<option value="${s.id}" ${String(s.id)===String(state.store)?"selected":""}>${s.name}</option>`).join("")}</select>
+      <label class="lbl" style="margin-left:4px">期間</label>
+      <input type="date" id="from" min="${DATA._min}" max="${DATA._max}" value="${state.from}">
+      <span class="sub">〜</span>
+      <input type="date" id="to" min="${DATA._min}" max="${DATA._max}" value="${state.to}">
+      <button class="chip" data-preset="thismonth">今月</button>
+      <button class="chip" data-preset="d90">直近90日</button>
+      <button class="chip" data-preset="all">全期間</button>
+    </div>
+    <div id="body"></div>
+    <p class="note">SALE＝レジのバンドル（セット割）。利用数＝そのバンドルを使った伝票数、売上＝バンドル（セール商品）の金額。名称は「バンドル名 取り込み」で反映されます${namedCount?`（登録済み ${namedCount}件）`:"（未登録＝コード表示）"}。クーポンは「クーポン」明細の利用数・割引額。データは締日まで。</p>`);
+  document.getElementById("themebtn").onclick=()=>{const r=document.documentElement;const c=r.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");r.setAttribute("data-theme",c==="dark"?"light":"dark");};
+  document.getElementById("store").onchange=e=>{const v=e.target.value;state.store=(v==="all"||v==="own")?v:+v;render();};
+  document.getElementById("from").onchange=e=>{state.from=e.target.value||DATA._min;if(state.from>state.to)state.to=state.from;render();};
+  document.getElementById("to").onchange=e=>{state.to=e.target.value||DATA._max;if(state.to<state.from)state.from=state.to;render();};
+  document.querySelectorAll(".chip[data-preset]").forEach(b=>b.onclick=()=>{setPreset(b.dataset.preset);render();});
+  drawBody(hasBundleData);
+}
+function setPreset(k){ const t=todayStr();
+  if(k==="all"){state.from=DATA._min;state.to=DATA._max;}
+  else if(k==="d90"){state.to=DATA._max;state.from=addDays(DATA._max,-89);if(state.from<DATA._min)state.from=DATA._min;}
+  else{const ym=(DATA._salesMax||DATA._max).slice(0,7);state.from=ym+"-01";if(state.from<DATA._min)state.from=DATA._min;state.to=DATA._max;} }
+
+function drawBody(hasBundleData){
+  const coup=couponAgg(), total=totalSalesIn();
+  let rows=bundleAgg();
+  const saleTotal=rows.reduce((s,r)=>s+r.a,0), saleUses=rows.reduce((s,r)=>s+r.n,0);
+  rows.sort((a,b)=> state.sort==="n"? b.n-a.n : state.sort==="name"? (a.name<b.name?-1:1) : b.a-a.a);
+  const maxA=Math.max(1,...rows.map(r=>r.a));
+  const showStore=(state.store==="all"||state.store==="own");
+  const nm=id=>(usableStores().find(s=>s.id===id)||{}).name||id;
+
+  const hero=`<div class="panel"><h2>${esc(storeName())}｜${state.from} 〜 ${state.to}</h2>
+    <div class="hero">
+      <div class="hcard"><div class="k">SALE売上（バンドル）</div><div class="v">${YEN(saleTotal)}円</div><div class="s">総売上の ${total>0?F1(saleTotal/total*100):"0.0"}%</div></div>
+      <div class="hcard"><div class="k">SALE利用数</div><div class="v">${NUM(saleUses)}件</div><div class="s">${rows.length}種類のバンドル</div></div>
+      <div class="hcard"><div class="k">クーポン利用数</div><div class="v">${NUM(coup.n)}件</div><div class="s">割引額 ${YEN(Math.abs(coup.amt))}円</div></div>
+      <div class="hcard"><div class="k">期間の総売上（税込）</div><div class="v">${YEN(total)}円</div><div class="s">レジ袋除く</div></div>
+    </div></div>`;
+
+  let tbl;
+  if(!hasBundleData){
+    tbl=`<div class="panel"><h2>SALE（バンドル）別</h2><div class="empty">この期間・店舗にバンドル（セット割）の記録がありません。<br>cashierでバンドルセールが使われると、ここに自動で表示されます。</div></div>`;
+  }else if(!rows.length){
+    tbl=`<div class="panel"><h2>SALE（バンドル）別</h2><div class="empty">この条件に該当するバンドルがありません。期間・店舗を変えてみてください。</div></div>`;
+  }else{
+    const sortMark=k=>state.sort===k?' class="sorted"':'';
+    const head=`<thead><tr><th${sortMark("name")} data-s="name">バンドル名</th>${showStore?"<th>店舗</th>":""}<th${sortMark("n")} data-s="n">利用数</th><th${sortMark("a")} data-s="a">売上(税込)</th><th>売上シェア</th><th>期間</th></tr></thead>`;
+    const body=rows.map(r=>`<tr>
+      <td>${esc(r.name)}</td>
+      ${showStore?`<td>${esc([...r.stores].map(nm).join("・"))}</td>`:""}
+      <td>${NUM(r.n)}件</td>
+      <td>${YEN(r.a)}円</td>
+      <td><div style="display:flex;align-items:center;gap:6px;justify-content:flex-end"><div class="bar" style="width:${Math.round(r.a/maxA*60)}px"></div>${F1(saleTotal>0?r.a/saleTotal*100:0)}%</div></td>
+      <td>${fmtMD(r.first)}〜${fmtMD(r.last)}</td></tr>`).join("");
+    const tot=`<tr class="total"><td>合計</td>${showStore?"<td></td>":""}<td>${NUM(saleUses)}件</td><td>${YEN(saleTotal)}円</td><td>100%</td><td></td></tr>`;
+    tbl=`<div class="panel"><h2>SALE（バンドル）別 — 利用数・売上・期間</h2>
+      <div class="tblwrap"><table>${head}<tbody>${body}${tot}</tbody></table></div></div>`;
+  }
+  document.getElementById("body").innerHTML=hero+tbl;
+  document.querySelectorAll("th[data-s]").forEach(th=>th.onclick=()=>{state.sort=th.dataset.s;drawBody(hasBundleData);});
+}
+if(location.hash){} boot();
+</script>
+</body>
+</html>
