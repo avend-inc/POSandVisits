@@ -252,6 +252,57 @@ def format_scan_report(info: dict, requests_log: list[str] | None = None,
     return "\n".join(lines)
 
 
+def dump_controls(page, label: str = "controls") -> None:
+    """
+    ログイン欄・日付欄・CSV/ダウンロード系の要素を、**可視・不可視を問わず**洗い出して
+    stdout に出す診断（Artifact を落とせない環境でも、Actionsログだけで目印を確定するため）。
+
+    バンドルCSVの目印確定で有効だった手法の汎用版。SIPOS(EZレジ)等、初見のサイトでも
+    「隠れたCSVボタン」「検索フォームのPOST先」「日付欄の name」をログから特定できる。
+    """
+    js = r"""
+    () => {
+      const KW = ['csv','download','ダウンロード','エクスポート','export','出力','ダウンロード','ｃｓｖ'];
+      const hasKw = s => { s=(s||'').toLowerCase(); return KW.some(k => s.includes(k.toLowerCase())); };
+      const vis = el => { const r = el.getBoundingClientRect(); return !!(r.width||r.height); };
+      const attrs = el => { const o={}; for (const a of (el.attributes||[])) {
+        if (['class','style'].includes(a.name)) continue; o[a.name]=(a.value||'').slice(0,90);} return o; };
+      const pick = el => ({tag:el.tagName, text:(el.innerText||el.value||'').trim().slice(0,50),
+        cls:(el.className||'').toString().slice(0,100), visible:vis(el), attrs:attrs(el)});
+      // 日付らしき入力欄（name/placeholder/type/クラスに日付要素）
+      const dateSel = 'input[type=date],[name*="date" i],[name*="since" i],[name*="until" i],'
+        + '[name*="from" i],[name*="to" i],[placeholder*="日"],[class*="date" i],[class*="picker" i]';
+      const dates = [...document.querySelectorAll(dateSel)].map(pick).slice(0,30);
+      // CSV/ダウンロード系（隠れも含む）
+      const dl = [...document.querySelectorAll('a,button,input,[role=button],[data-toggle]')]
+        .filter(el => { const bag=(el.innerText||'')+' '+(el.className||'')+' '+
+          [...(el.attributes||[])].map(a=>a.name+'='+a.value).join(' '); return hasKw(bag); })
+        .map(pick).slice(0,50);
+      // form（中の入力欄名も：検索/CSVのPOST先を確定するため）
+      const forms = [...document.querySelectorAll('form')].map(f=>({action:f.getAttribute('action'),
+        method:f.getAttribute('method'), id:f.id||null,
+        fields:[...f.querySelectorAll('input,select,textarea')].map(e=>({tag:e.tagName,type:e.type||null,
+          name:e.name||null, value:(e.value||'').slice(0,30)})).slice(0,40)})).slice(0,15);
+      return {url:location.href, title:document.title, dateFields:dates, downloadish:dl, forms};
+    }
+    """
+    try:
+        info = page.evaluate(js)
+    except Exception as e:
+        print(f"  （{label}: 画面の詳細診断に失敗: {e}）")
+        return
+    print(f"  ========8<======== 画面診断（隠れ要素も含む）[{label}] ========8<========")
+    print(f"  | URL  : {info.get('url')}")
+    print(f"  | 件名 : {info.get('title')}")
+    for key, lab in (("downloadish", "CSV/ダウンロード系の要素（本命・隠れていても表示）"),
+                     ("dateFields", "日付らしき入力欄（期間指定の目印）"),
+                     ("forms", "<form>（action/method/入力欄名）")):
+        print(f"  | ----- {lab} -----")
+        for line in json.dumps(info.get(key, []), ensure_ascii=False, indent=2).splitlines():
+            print(f"  | {line}")
+    print(f"  ========8<======== ここまで [{label}] ========8<========")
+
+
 def dump_page(page, label: str) -> Path | None:
     """
     今の画面をスクリーンショット＋HTML＋「入力欄・ボタンの一覧(.txt)」で保存する。
