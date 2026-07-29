@@ -585,6 +585,80 @@ def _open_bundle(page) -> None:
         dump_page(page, "cashier_bundle_opened")
     except Exception:
         pass
+    # Artifactが落とせない環境向け：CSV/ダウンロード関連の要素を「隠れている物も含めて」
+    # stdout に出す。これで Actions のログだけを見てCSV出力の目印を確定できる。
+    try:
+        _dump_bundle_controls(page)
+    except Exception as e:
+        print(f"  （バンドル画面の詳細診断に失敗: {e}）")
+
+
+def _dump_bundle_controls(page) -> None:
+    """
+    バンドル画面の「CSV出力/ダウンロード」に関わる要素を、可視・不可視を問わず洗い出して
+    stdout に出す診断。Artifact をダウンロードできない環境でも、Actions のログだけで
+    CSV出力ボタン（またはCSVのURL）の目印を確定できるようにするためのもの。
+
+    出すもの:
+      1) サイドメニュー/ナビのリンク（href+文字）… 本物の「バンドル」URLの確認用
+      2) CSV/ダウンロード/出力/エクスポート系の要素（隠れていても）… 目印の本命
+      3) <form> の action / method … CSVが form 送信で落ちる場合の入口
+      4) download 属性つき <a> … 直リンクでCSVが取れる場合
+    """
+    import json as _json
+    js = r"""
+    () => {
+      const KW = ['csv','download','ダウンロード','エクスポート','export','出力','ダウンロード'];
+      const hasKw = s => { s=(s||'').toLowerCase(); return KW.some(k => s.includes(k.toLowerCase())); };
+      const vis = el => { const r = el.getBoundingClientRect(); return !!(r.width||r.height); };
+      const attrs = el => {
+        const o = {}; for (const a of (el.attributes||[])) {
+          if (['class','style'].includes(a.name)) continue;
+          o[a.name] = (a.value||'').slice(0,80);
+        } return o;
+      };
+      const pick = el => ({
+        tag: el.tagName,
+        text: (el.innerText||el.value||'').trim().slice(0,50),
+        cls: (el.className||'').toString().slice(0,100),
+        visible: vis(el),
+        attrs: attrs(el),
+      });
+      // 1) ナビ／メニューのリンク
+      const nav = [...document.querySelectorAll('nav a, .sidebar a, .nav a, aside a, .menu a')]
+        .map(a => ({text:(a.innerText||'').trim().slice(0,30), href:a.getAttribute('href')}))
+        .filter(x => x.text || x.href).slice(0,60);
+      // 2) CSV/ダウンロード系（隠れている物も含む）— text/class/属性のどれかにKWを含む
+      const dl = [...document.querySelectorAll('a,button,input,[role=button],[data-toggle]')]
+        .filter(el => {
+          const bag = (el.innerText||'') + ' ' + (el.className||'') + ' ' +
+                      [...(el.attributes||[])].map(a=>a.name+'='+a.value).join(' ');
+          return hasKw(bag);
+        }).map(pick).slice(0,60);
+      // 3) form
+      const forms = [...document.querySelectorAll('form')]
+        .map(f => ({action:f.getAttribute('action'), method:f.getAttribute('method'),
+                    id:f.id||null, cls:(f.className||'').toString().slice(0,60)})).slice(0,20);
+      // 4) download属性つきリンク
+      const dlattr = [...document.querySelectorAll('a[download],a[href*="csv" i],a[href*="export" i],a[href*="download" i]')]
+        .map(a => ({text:(a.innerText||'').trim().slice(0,30), href:a.getAttribute('href'),
+                    download:a.getAttribute('download')})).slice(0,40);
+      return {url: location.href, title: document.title,
+              nav, downloadish: dl, forms, downloadLinks: dlattr};
+    }
+    """
+    info = page.evaluate(js)
+    print("  ========8<======== バンドル画面 CSV診断（隠れ要素も含む） ========8<========")
+    print(f"  | URL  : {info.get('url')}")
+    print(f"  | 件名 : {info.get('title')}")
+    for key, label in (("downloadish", "CSV/ダウンロード系の要素（本命・隠れていても表示）"),
+                       ("downloadLinks", "download属性/CSVらしきリンク"),
+                       ("forms", "<form>（action/method）"),
+                       ("nav", "ナビ/メニューのリンク（本物のバンドルURL確認用）")):
+        print(f"  | ----- {label} -----")
+        for line in _json.dumps(info.get(key, []), ensure_ascii=False, indent=2).splitlines():
+            print(f"  | {line}")
+    print("  ========8<======== ここまで ========8<========")
 
 
 def _expand_collapsed(page) -> None:
