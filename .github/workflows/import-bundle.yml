@@ -1,25 +1,35 @@
 # ============================================================
 #  バンドル名 取り込み（コード→名称）
 #
-#  使い方:
-#   1. Cashier → バンドル → 期間設定 → CSVダウンロード でCSVを作る
-#   2. Supabase → Storage の非公開バケット（例: imports）へアップロード
-#   3. Actions →「バンドル名 取り込み」→ Run workflow でパス等を指定して実行
+#  mode = live （おすすめ・全自動）:
+#    Cashier に自動ログイン →「バンドル」画面 → CSVを自動取得 → bundle_master 更新。
+#    新しいSALE（バンドル）があれば、その名称も自動で登録されます。CSVの手渡し不要。
 #
-#  ※ 認証情報は既存の SUPABASE_URL / SUPABASE_SERVICE_KEY を流用します。
+#  mode = storage （保険・手動）:
+#    1. Cashier → バンドル → 期間設定 → CSVダウンロード でCSVを作る
+#    2. Supabase → Storage の非公開バケット（例: imports）へアップロード
+#    3. path にファイル名を入れて実行
+#
+#  ※ 認証情報は既存の Secrets（CASHIER_ID/PW, SUPABASE_URL/SERVICE_KEY）を流用します。
 # ============================================================
 name: バンドル名 取り込み
 
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: "取得方法（live=Cashierから自動取得 / storage=アップロード済みCSV）"
+        required: false
+        default: "live"
+        type: choice
+        options: [live, storage]
       bucket:
-        description: "非公開バケット名"
-        required: true
+        description: "【storageのみ】非公開バケット名"
+        required: false
         default: "imports"
       path:
-        description: "CSVのパス（バケット内のファイル名）"
-        required: true
+        description: "【storageのみ】CSVのパス（バケット内のファイル名）"
+        required: false
         default: "ClientBundle.csv"
       export:
         description: "取り込み後にダッシュボードを再集計・配信する"
@@ -30,8 +40,11 @@ on:
 jobs:
   import:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       TZ: Asia/Tokyo
+      CASHIER_ID: ${{ secrets.CASHIER_ID }}
+      CASHIER_PW: ${{ secrets.CASHIER_PW }}
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
       SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
@@ -44,8 +57,31 @@ jobs:
       - run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      - name: バンドル名を取り込む
+
+      - name: ブラウザ(Chromium)を用意
+        if: ${{ inputs.mode == 'live' }}
+        run: python -m playwright install --with-deps chromium
+
+      # live: Cashierから自動取得（新SALEもここで自動登録される）
+      - name: バンドル名を自動取得（Cashierから）
+        if: ${{ inputs.mode == 'live' }}
+        run: python -m etl.run_daily --only bundle --force
+
+      # storage: アップロード済みCSVから取り込み（保険）
+      - name: バンドル名を取り込む（アップロード済みCSV）
+        if: ${{ inputs.mode == 'storage' }}
         run: python -m tools.import_bundle_master --bucket "${{ inputs.bucket }}" --path "${{ inputs.path }}"
+
       - name: ダッシュボードを更新
         if: ${{ inputs.export }}
         run: python -m tools.export_dashboard
+
+      # 調査用（バンドル画面の目印が未確定のうちは、画面ダンプを成果物に残す）
+      - name: 調査用ファイルを保存
+        if: ${{ always() && inputs.mode == 'live' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundle-debug-${{ github.run_id }}
+          path: debug/
+          if-no-files-found: ignore
+          retention-days: 7
