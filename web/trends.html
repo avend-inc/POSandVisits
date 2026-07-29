@@ -295,11 +295,11 @@ function render(){
       各グラフは「${state.grain==="day"?"日別":state.grain==="week"?"週別":"月別"}」の推移。「店舗別に比較」を選ぶと店舗ごとの折れ線が色分けで重なります。
       右上の数字は対象期間ぜんぶの合計／平均（比較時は総合）。前日比・前週比・前月比は直前の同じ長さの期間との増減（対象期間の選び方で自動表示。比べた期間は数字にマウスを合わせると出ます）。
       指標：購入率＝取引数÷来店客数／客単価＝税込売上÷取引数／平均購入数＝総点数÷取引数／平均商品単価＝税抜売上÷総点数。
-      週別は月曜〜日曜。レジ袋・クーポンは売上・点数・カテゴリから除外。いわきは2店舗ぶんを合算。${owns.length>1?"「区分」で直営／FCを切替。":"（FC店を追加すると直営／FCの切替が出ます）"}
+      週別は月曜〜日曜。レジ袋・クーポンは売上・点数・カテゴリから除外。いわきは2店舗ぶんを合算。${groups.length>2?"「区分」で直営／FC／ブランド別を切替。":"（FC店を追加すると区分の切替が出ます）"}
     </div>`;
 
   document.getElementById("view").onchange=e=>{state.view=e.target.value;draw();};
-  if(owns.length>1)document.querySelectorAll("#own button").forEach(b=>b.onclick=()=>{
+  if(groups.length>2)document.querySelectorAll("#own button").forEach(b=>b.onclick=()=>{
     state.own=b.dataset.own;
     if(!["total","compare"].includes(state.view)&&!allowedStores().some(s=>String(s.id)===String(state.view)))state.view="total";
     render();});
