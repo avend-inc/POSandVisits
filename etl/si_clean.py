@@ -27,15 +27,18 @@ SI_REBRAND = {
     "NOTIME倉敷店": "SELFURUGI倉敷店",
 }
 
-# SIPOSファイル上の名前を、既存の“直営店”の店名に付け替える対応表。
-# 下北沢は直営店（Airレジ＋SIPOSの2レジ）。SIPOS分は直営「下北沢」の売上として合算する
-# （FCとしては登録しない）。→ import 側で下北沢は直営のまま保護する。
+# SIPOSファイル上の名前を、既存の“直営店”の名前に付け替える対応表。
+# 下北沢は直営店（Airレジ＋SIPOSの2レジ）。SIPOS分は直営「下北沢」の売上として合算する。
+# ここでは旧名「下北沢」に寄せる（この後 get_or_create_store の STORE_NAME_ALIAS が
+# 正式名「NOTIME下北沢店」へそろえる／既存店をリネームする）。
 SI_STORE_ALIAS = {
     "古着屋NOTIME下北沢店": "下北沢",
 }
 
-# 直営店（このSIPOS取り込みでFCに書き換えてはいけない店）。
-DIRECT_STORE_NAMES = {"下北沢", "山形", "いわき", "福井"}
+# 直営店の“正式名”（DB上の店名。FCへ書き換えない保護に使う）。
+DIRECT_STORE_NAMES = {"NOTIME山形店", "NOTIMEいわき店", "NOTIME福井店", "NOTIME下北沢店"}
+# 直営店の“地名キーワード”（直営っぽい店名の取りこぼし検知に使う）。
+DIRECT_LOCATION_KEYWORDS = {"山形", "いわき", "福井", "下北沢"}
 
 
 def normalize_si_datetime(df: pd.DataFrame, col: str = "購入日時") -> pd.DataFrame:
@@ -60,11 +63,12 @@ def direct_lookalikes(final_names) -> list[str]:
     作られてしまう。そういう危険な名前を洗い出して、取り込み時に警告するためのもの。
     SIPOS＝FCとは限らない（直営もSIPOSを使う）ので、この検知で人が気づけるようにする。
     """
+    safe = DIRECT_LOCATION_KEYWORDS | set(SI_STORE_ALIAS) | DIRECT_STORE_NAMES
     out = []
     for name in sorted(set(str(n) for n in final_names)):
-        if name in DIRECT_STORE_NAMES:
+        if name in safe:
             continue
-        if any(kw in name for kw in DIRECT_STORE_NAMES):
+        if any(kw in name for kw in DIRECT_LOCATION_KEYWORDS):
             out.append(name)
     return out
 

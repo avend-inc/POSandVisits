@@ -203,16 +203,38 @@ class Supabase:
         ⚠️ わざと「エラーで止める」ではなく「自動追加」にしている。
            新店舗が増えたときにデータを取りこぼす方が損失が大きいため。
            追加された場合は画面に注意書きを出す。
-        """
-        if name in cache:
-            return cache[name]
 
-        print(f"  ⚠️ 知らない店舗名『{name}』が出てきたので stores に自動追加します。"
+        直営店の正式名そろえ（STORE_NAME_ALIAS）:
+          ・入ってくる名前（例: cashierの「山形」）を正式名（「NOTIME山形店」）へ変換。
+          ・まだ旧名のまま既存する店は、正式名へ自動リネームして使う（＝店の分裂を防ぐ）。
+        """
+        from .settings import STORE_NAME_ALIAS
+        alias = STORE_NAME_ALIAS.get(name, name)
+
+        if alias in cache:
+            return cache[alias]
+
+        # 旧名（山形 等）のまま既存 → 正式名にリネームして、その既存店を使う
+        if alias != name and name in cache:
+            store_id = cache[name]
+            try:
+                self._send(
+                    "PATCH", self._endpoint("stores") + f"?id=eq.{store_id}",
+                    headers={"Prefer": "return=minimal"}, json={"name": alias},
+                )
+                print(f"  店舗名を正式名にそろえました：『{name}』→『{alias}』")
+            except Exception as e:
+                print(f"  （店舗名のリネームは後回しにします：{e}）")
+            cache[alias] = store_id
+            cache[name] = store_id
+            return store_id
+
+        print(f"  ⚠️ 知らない店舗名『{alias}』が出てきたので stores に自動追加します。"
               "（あとで sql/002_seed_stores.sql に追記しておくと綺麗です）")
-        code = f"auto_{abs(hash(name)) % 10**8}"
-        created = self.insert("stores", [{"code": code, "name": name}])
+        code = f"auto_{abs(hash(alias)) % 10**8}"
+        created = self.insert("stores", [{"code": code, "name": alias}])
         store_id = created[0]["id"]
-        cache[name] = store_id
+        cache[alias] = store_id
         return store_id
 
     # --------------------------------------------------------
