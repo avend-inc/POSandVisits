@@ -27,6 +27,16 @@ SI_REBRAND = {
     "NOTIME倉敷店": "SELFURUGI倉敷店",
 }
 
+# SIPOSファイル上の名前を、既存の“直営店”の店名に付け替える対応表。
+# 下北沢は直営店（Airレジ＋SIPOSの2レジ）。SIPOS分は直営「下北沢」の売上として合算する
+# （FCとしては登録しない）。→ import 側で下北沢は直営のまま保護する。
+SI_STORE_ALIAS = {
+    "古着屋NOTIME下北沢店": "下北沢",
+}
+
+# 直営店（このSIPOS取り込みでFCに書き換えてはいけない店）。
+DIRECT_STORE_NAMES = {"下北沢", "山形", "いわき", "福井"}
+
 
 def normalize_si_datetime(df: pd.DataFrame, col: str = "購入日時") -> pd.DataFrame:
     """
@@ -49,4 +59,4 @@ def si_store_names(name_series: pd.Series) -> pd.Series:
     ・SI_REBRAND に載っている“単純な改名”だけ最新名へ置き換える。
     """
     s = name_series.astype(str).str.strip()
-    return s.replace(SI_REBRAND)
+    return s.replace(SI_REBRAND).replace(SI_STORE_ALIAS)

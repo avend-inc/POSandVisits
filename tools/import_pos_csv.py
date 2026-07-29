@@ -132,13 +132,27 @@ def main() -> int:
     print(f"sales へ保存: 新規 {inserted}行 / 既存で無視 {duplicate}行")
 
     if args.ownership and touched:
+        from etl import si_clean
         ids = ",".join(str(i) for i in sorted(touched))
-        url = f"{sb.url}/rest/v1/stores?id=in.({ids})"
-        r = requests.patch(url, headers={
-            "apikey": sb.key, "Authorization": f"Bearer {sb.key}",
-            "Content-Type": "application/json", "Prefer": "return=minimal"},
-            json={"ownership": args.ownership}, timeout=120)
-        print(f"店舗区分を {args.ownership} に設定: HTTP {r.status_code}（対象 {len(touched)}店）")
+        # いま触った店の現在の区分を見て、①直営店（保護）②既にその区分の店 は除外する。
+        #   → 下北沢（直営・SIPOSは合算）を誤ってFCに書き換えない。
+        current = sb.select("stores", {"select": "id,name,ownership", "id": f"in.({ids})"})
+        protect = {r["id"] for r in current if r["name"] in si_clean.DIRECT_STORE_NAMES}
+        target = [r["id"] for r in current
+                  if r["id"] not in protect and r.get("ownership") != args.ownership]
+        skipped = [r["name"] for r in current if r["id"] in protect]
+        if target:
+            tids = ",".join(str(i) for i in sorted(target))
+            url = f"{sb.url}/rest/v1/stores?id=in.({tids})"
+            r = requests.patch(url, headers={
+                "apikey": sb.key, "Authorization": f"Bearer {sb.key}",
+                "Content-Type": "application/json", "Prefer": "return=minimal"},
+                json={"ownership": args.ownership}, timeout=120)
+            print(f"店舗区分を {args.ownership} に設定: HTTP {r.status_code}（対象 {len(target)}店）")
+        else:
+            print(f"店舗区分の変更対象はありませんでした（既に{args.ownership} 等）。")
+        if skipped:
+            print(f"  直営店は区分を保護（変更せず）: {', '.join(skipped)}")
 
     if args.export:
         print("ダッシュボードを更新します…")
