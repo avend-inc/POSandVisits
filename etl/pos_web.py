@@ -18,7 +18,7 @@ from __future__ import annotations
 import os
 import time
 
-from .browser import browser_page, dump_page
+from .browser import browser_page, dump_page, dump_controls
 from .settings import EtlError, RETRIES, RETRY_WAIT_SEC
 # cashier_fetch の汎用ヘルパを再利用（重複を避ける）
 from .cashier_fetch import (
@@ -62,6 +62,7 @@ def _login(page, url: str, login_id: str, login_pw: str, prefix: str, label: str
             print("  （パスワード欄が無い＝既にログイン済みとみなして進みます）")
             return
         dump_page(page, f"{label}_login_notfound")
+        dump_controls(page, f"{label}_login_notfound")  # ログイン欄の name もログに出す
         raise EtlError(f"{label}: ログイン画面（パスワード欄）が見つかりませんでした。URL/画面をご確認ください。")
 
     id_sel = _sel(prefix, "ID_SELECTOR")
@@ -113,6 +114,7 @@ def _set_date_range(page, d0: str, d1: str, prefix: str, label: str) -> None:
     if start is None:
         # 期間欄が見つからなくても、全件表示のサイトもあるので致命にはしない（診断だけ残す）
         dump_page(page, f"{label}_daterange_notfound")
+        dump_controls(page, f"{label}_daterange_notfound")  # 日付欄の name をログに出す
         print("  （期間欄が見つかりませんでした。全件のまま進みます。必要なら <PREFIX>_DATE_FROM_SELECTOR で指定）")
         return
     for field, pair in ((start, (d0, slash0)), (end, (d1, slash1))):
@@ -155,6 +157,7 @@ def _download(page, context, prefix: str, label: str) -> bytes:
     clicked = _click_first_text(page, texts)
     if clicked is None:
         dump_page(page, f"{label}_csv_button_notfound")
+        dump_controls(page, f"{label}_csv_button_notfound")  # 隠れたCSVボタン/検索フォームもログに出す
         raise EtlError(f"{label}: 「CSV出力」ボタンが見つかりませんでした。debug/{label}_csv_button_notfound_report.txt を確認してください。")
     _confirm_download_modal(page)   # 形式選択モーダルが出たら中のダウンロードを押す
 
@@ -178,6 +181,7 @@ def _download(page, context, prefix: str, label: str) -> bytes:
                 return resp.body()
 
     dump_page(page, f"{label}_csv_download_failed")
+    dump_controls(page, f"{label}_csv_download_failed")
     raise EtlError(f"{label}: CSVダウンロードが完了しませんでした。debug/{label}_csv_download_failed_report.txt の通信記録をご確認ください。")
 
 

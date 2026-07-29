@@ -1,0 +1,72 @@
+# ============================================================
+#  レジ接続テスト（自動取得の確認）
+#
+#  「管理 → レジ接続」に登録した Air／EZ（SIPOS）等の接続で、実際にログイン →
+#  CSV取得ができるかを1回だけ試すためのもの（日次を待たずに確認できる）。
+#
+#  使い方:
+#   1. 管理画面「レジ接続」で SIPOS の 種類=EZレジ・URL・ID・PW を登録
+#   2. Actions →「レジ接続テスト」→ Run workflow（日付は任意）
+#   3. 失敗しても、ログインや期間・CSVボタンの「目印」がログと debug/ に出るので、
+#      それを見て自動取得を仕上げられる（cashierのバンドルと同じやり方）。
+# ============================================================
+name: レジ接続テスト（自動取得の確認）
+
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "試す営業日 (YYYY-MM-DD)。空なら前日。"
+        required: false
+        default: ""
+      export:
+        description: "取得できたらダッシュボードも更新する"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: notime-daily-etl   # 日次ETLと同じ枠（同時実行の二重取り込みを防ぐ）
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TZ: Asia/Tokyo
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: ブラウザ(Chromium)を用意
+        run: python -m playwright install --with-deps chromium
+
+      - name: レジ接続を試す（--only pos）
+        run: |
+          ARGS="--only pos --force"
+          if [ -n "${{ inputs.date }}" ]; then ARGS="$ARGS --date ${{ inputs.date }}"; fi
+          echo "python -m etl.run_daily $ARGS"
+          python -m etl.run_daily $ARGS
+
+      - name: ダッシュボードを更新
+        if: ${{ inputs.export }}
+        run: python -m tools.export_dashboard
+
+      # 目印確定用：ログイン/期間/CSVの画面ダンプを成果物に残す（失敗時も必ず）
+      - name: 調査用ファイルを保存
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pos-debug-${{ github.run_id }}
+          path: debug/
+          if-no-files-found: ignore
+          retention-days: 7
