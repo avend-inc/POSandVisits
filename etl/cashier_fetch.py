@@ -550,3 +550,66 @@ def fetch_range(start_date: str, end_date: str, headless: bool = True) -> str:
 def fetch(business_date: str, headless: bool = True) -> str:
     """対象日1日ぶんの売上明細CSVを取ってきて、文字列で返す（日次用）。"""
     return fetch_range(business_date, business_date, headless=headless)
+
+
+# ------------------------------------------------------------
+# バンドル（セット割＝SALE）の「コード→名称」CSVを取ってくる
+#   Cashierログイン → 「バンドル」画面 → 期間指定 → CSV出力（取引明細と同じ操作系）。
+#   画面が違う分は候補＋文字探索で当て、見つからなければ debug/ に残して次回確定できる。
+#   目印は環境変数で上書き可: CASHIER_BUNDLE_URL / CASHIER_BUNDLE_NAV_TEXT
+# ------------------------------------------------------------
+BUNDLE_NAV_TEXTS = ["バンドル", "バンドル別", "バンドル売上", "セット割", "セット", "販促"]
+
+
+def _open_bundle(page) -> None:
+    """ログイン後の画面から「バンドル」レポートへ移動する。"""
+    url = _env_selector("CASHIER_BUNDLE_URL")
+    if url:
+        page.goto(url, wait_until="domcontentloaded")
+    else:
+        nav = _env_selector("CASHIER_BUNDLE_NAV_TEXT")
+        texts = [nav] if nav else BUNDLE_NAV_TEXTS
+        if not _click_by_text(page, texts):
+            dump_page(page, "cashier_bundle_nav_notfound")
+            raise EtlError(
+                "cashier の「バンドル」画面へ移動できませんでした。\n"
+                "  → debug/cashier_bundle_nav_notfound_report.txt を見て、\n"
+                "     リンク文字を CASHIER_BUNDLE_NAV_TEXT、またはURLを CASHIER_BUNDLE_URL で指定してください。"
+            )
+    try:
+        page.wait_for_load_state("networkidle", timeout=30_000)
+    except Exception:
+        pass
+    time.sleep(1)
+
+
+def fetch_bundle(headless: bool = True, days_back: int = 400) -> str:
+    """
+    バンドル（コード→名称）CSVを取ってくる。名称は累積なので広めの期間で全件取る。
+    失敗時は数回試す。期間欄が無い（全件表示）画面でも動くよう、期間設定は best-effort。
+    """
+    from datetime import date, timedelta
+    email = require_env("CASHIER_ID", "cashier のログイン用メールアドレス")
+    password = require_env("CASHIER_PW", "cashier のログイン用パスワード")
+    end = date.today()
+    start = end - timedelta(days=days_back)
+
+    last_error: Exception | None = None
+    for attempt in range(1, RETRIES + 1):
+        try:
+            with browser_page(headless=headless) as (page, context):
+                login(page, email, password)
+                _open_bundle(page)
+                try:
+                    set_date_range(page, start.isoformat(), end.isoformat())
+                except Exception as e:
+                    print(f"  （バンドル画面の期間設定はスキップ: {e}）")
+                return decode_csv(download_csv(page, context))
+        except Exception as e:
+            last_error = e
+            if attempt < RETRIES:
+                wait = RETRY_WAIT_SEC * attempt
+                print(f"  バンドル: {attempt}回目失敗（{e}）。{wait}秒待って再試行します...")
+                time.sleep(wait)
+
+    raise EtlError(f"cashier のバンドルCSVを{RETRIES}回試しても取得できませんでした。\n{last_error}")

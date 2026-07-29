@@ -249,6 +249,62 @@ def run_digitel(sb: Supabase, business_date: str, run_id: str,
 
 
 # ============================================================
+# バンドル（SALE）の名称マスタ — cashierの「バンドル」画面から自動取得
+# ============================================================
+def run_bundle_master(sb: Supabase, business_date: str, run_id: str,
+                      force: bool, headless: bool) -> StepResult:
+    from . import cashier_fetch
+    import io
+    import pandas as pd
+
+    print("\n" + "=" * 60)
+    print("【1b】バンドル名（コード→名称）を更新")
+    print("=" * 60)
+    started = now_iso()
+
+    if not force and sb.already_succeeded("bundle", business_date, None):
+        msg = f"{business_date} のバンドル名は取得済み（--force で再取得）。"
+        print(f"  ⛔ {msg}")
+        return StepResult("bundle_master", "rejected_duplicate", msg)
+
+    try:
+        text = cashier_fetch.fetch_bundle(headless=headless)
+        df = pd.read_csv(io.StringIO(text), dtype=str).fillna("")
+        df.columns = [str(c).strip() for c in df.columns]
+
+        def col(*names):
+            return next((n for n in names if n in df.columns), None)
+        c_code = col("バンドルコード", "コード", "bundle_code")
+        c_name = col("バンドル名", "名称", "bundle_name")
+        c_cat = col("商品カテゴリ名", "カテゴリ", "category")
+        if not c_code or not c_name:
+            raise EtlError(f"バンドルCSVに必要な列がありません。実際の列: {list(df.columns)[:15]}")
+
+        rows, seen = [], set()
+        for _, r in df.iterrows():
+            code = str(r[c_code]).strip()
+            if not code or code in seen:
+                continue
+            seen.add(code)
+            rows.append({"code": code, "name": str(r[c_name]).strip(),
+                         "category": (str(r[c_cat]).strip() if c_cat else None)})
+        n = sb.upsert("bundle_master", rows, on_conflict="code") if rows else 0
+        print(f"  bundle_master へ upsert: {len(rows)}件")
+        sb.log(run_id=run_id, source="bundle", business_date=business_date,
+               store_id=None, status="success", rows_fetched=len(rows),
+               rows_inserted=n, message=f"{len(rows)}件", started_at=started)
+        return StepResult("bundle_master", "success", f"{len(rows)}件", n, 0)
+    except Exception as e:
+        detail = f"{type(e).__name__}: {e}"
+        print(f"  ❌ バンドル名の取得に失敗: {detail}")
+        if not isinstance(e, EtlError):
+            traceback.print_exc()
+        sb.log(run_id=run_id, source="bundle", business_date=business_date,
+               store_id=None, status="failed", message=detail[:2000], started_at=started)
+        return StepResult("bundle_master", "failed", detail)
+
+
+# ============================================================
 # メイン
 # ============================================================
 def main() -> int:
@@ -256,8 +312,8 @@ def main() -> int:
         description="NOTIME 日次ETL（cashier売上 / デジテール来店数 → Supabase）"
     )
     parser.add_argument("--date", help="対象の営業日 YYYY-MM-DD（省略時は前日）")
-    parser.add_argument("--only", choices=["cashier", "digitel", "pos"],
-                        help="1種類だけ動かす（cashier / digitel / pos=Air/EZ等の接続）")
+    parser.add_argument("--only", choices=["cashier", "digitel", "pos", "bundle"],
+                        help="1種類だけ動かす（cashier / digitel / pos=Air/EZ接続 / bundle=バンドル名）")
     parser.add_argument("--force", action="store_true",
                         help="取り込み済みの日でも、もう一度取り込む")
     parser.add_argument("--headed", action="store_true",
@@ -290,6 +346,9 @@ def main() -> int:
     if args.only in (None, "cashier"):
         results.append(run_cashier(sb, business_date, run_id, args.force,
                                    headless, store_cache))
+    if args.only in (None, "cashier", "bundle"):
+        # バンドル名（SALEの名称マスタ）を同じcashierログインで自動更新（best-effort）
+        results.append(run_bundle_master(sb, business_date, run_id, args.force, headless))
     if args.only in (None, "digitel"):
         results.extend(run_digitel(sb, business_date, run_id, args.force, headless))
     if args.only in (None, "pos"):
