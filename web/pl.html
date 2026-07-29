@@ -124,6 +124,7 @@
   <a href="trends.html"><span class="ic">📈</span>推移</a>
   <a href="promo.html"><span class="ic">🏷️</span>販促</a>
   <a href="ask.html"><span class="ic">🔍</span>分析AI</a>
+  <a href="admin.html" id="tab-admin" style="display:none"><span class="ic">⚙️</span>管理</a>
 </div></nav>
 <script>
 "use strict";
@@ -177,18 +178,39 @@ async function doLogout(){try{await SB.auth.signOut();}catch(e){}location.reload
 
 function esc(s){return String(s).replace(/[&<>]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[m]));}
 function monthsInData(){return [...new Set(DATA.daily.map(r=>r.d.slice(0,7)))].sort();}
-function usableStores(){const w=new Set(DATA.daily.map(r=>r.s));return DATA.stores.filter(s=>w.has(s.id));}
+function usableStores(){const w=new Set(DATA.daily.map(r=>r.s));return DATA.stores.filter(s=>w.has(s.id)&&s.visible!==false);}
 function storeMeta(sid){return (DATA.stores||[]).find(x=>String(x.id)===String(sid))||null;}
 function ownOf(sid){const s=storeMeta(sid);return (s&&s.own)?s.own:"直営";}          // 直営 / FC
 function kvOf(sid){const s=storeMeta(sid);return s?(s.kv!==false):true;}             // 来店数をKPIに使うか
+function brandOf(sid){const s=storeMeta(sid);const n=(s&&s.name)||"";
+  if(n.indexOf("SELFURUGI")===0)return "SELFURUGI"; if(n.indexOf("NOTIME")===0)return "NOTIME"; return "その他";}
 function hasFCStores(){return usableStores().some(s=>ownOf(s.id)!=="直営");}
-function isAgg(){return state.store==="all"||state.store==="own";}                    // 集計スコープ（全店/直営）
+const AGG_SCOPES={all:1,own:1,fc:1,sf:1,nt:1};
+const SCOPE_LABEL={all:"総合（全店）",own:"直営（合計）",fc:"合計（FC）",sf:"合計（SELFURUGI）",nt:"合計（NOTIME）"};
+function scopePred(store){
+  if(store==="all")return ()=>true;
+  if(store==="own")return s=>ownOf(s.id)==="直営";
+  if(store==="fc") return s=>ownOf(s.id)==="FC";
+  if(store==="sf") return s=>brandOf(s.id)==="SELFURUGI";
+  if(store==="nt") return s=>brandOf(s.id)==="NOTIME";
+  return s=>String(s.id)===String(store);
+}
+function isAgg(){return !!AGG_SCOPES[state.store];}                                   // 集計スコープ（全店/直営/FC/ブランド）
 function idsForScope(store){
-  if(store==="all")return new Set(usableStores().map(s=>s.id));
-  if(store==="own")return new Set(usableStores().filter(s=>ownOf(s.id)==="直営").map(s=>s.id));
+  if(AGG_SCOPES[store])return new Set(usableStores().filter(scopePred(store)).map(s=>s.id));
   return new Set([store]);
 }
-function aggStores(){const us=usableStores();return state.store==="own"?us.filter(s=>ownOf(s.id)==="直営"):us;}
+function aggStores(){return usableStores().filter(scopePred(state.store));}
+function aggScopeList(){
+  const us=usableStores();
+  const out=[{id:"all",name:SCOPE_LABEL.all}];
+  if(us.some(s=>ownOf(s.id)==="直営") && us.some(s=>ownOf(s.id)==="FC"))
+    out.push({id:"own",name:SCOPE_LABEL.own},{id:"fc",name:SCOPE_LABEL.fc});
+  if(us.some(s=>brandOf(s.id)==="SELFURUGI"))out.push({id:"sf",name:SCOPE_LABEL.sf});
+  if(us.some(s=>brandOf(s.id)==="NOTIME"))out.push({id:"nt",name:SCOPE_LABEL.nt});
+  return out;
+}
+function syncAdminTab(){const t=document.getElementById("tab-admin");if(t)t.style.display=(ME&&ME.role==="admin")?"":"none";}
 function computeActual(store,ym){
   const ids=idsForScope(store);
   // in/ex/tx/it=売上系（全店）。txv=来店をKPIに使う店だけの取引（購入率の分子）、v=同店の来店（分母）。
@@ -398,10 +420,11 @@ function subscribeRealtime(){
   }).subscribe();
 }
 function render(){
+  syncAdminTab();
   const us=usableStores(), months=monthsInData();
   if(!state.ym||!months.includes(state.ym)) state.ym=(DATA._salesMax||months[months.length-1]).slice(0,7);
-  const stores=[{id:"all",name:"総合（全店）"},...(hasFCStores()?[{id:"own",name:"直営（合計）"}]:[]),...us.map(s=>({id:s.id,name:s.name}))];
-  const storeName=state.store==="all"?"総合（全店）":state.store==="own"?"直営（合計）":(us.find(s=>s.id===state.store)||{}).name||"";
+  const stores=[...aggScopeList(),...us.map(s=>({id:s.id,name:s.name}))];
+  const storeName=AGG_SCOPES[state.store]?SCOPE_LABEL[state.store]:(us.find(s=>s.id===state.store)||{}).name||"";
   const[y,mm]=state.ym.split("-"); const monthLabel=`${y}年${+mm}月`;
 
   const top=`
@@ -452,7 +475,7 @@ function render(){
 }
 
 function bindCommon(){
-  document.getElementById("store").onchange=e=>{if(DIRTY&&!confirm("未保存の変更があります。切り替えると破棄されます。よろしいですか？")){e.target.value=String(state.store);return;}const v=e.target.value;state.store=(v==="all"||v==="own")?v:+v;reload();};
+  document.getElementById("store").onchange=e=>{if(DIRTY&&!confirm("未保存の変更があります。切り替えると破棄されます。よろしいですか？")){e.target.value=String(state.store);return;}const v=e.target.value;state.store=AGG_SCOPES[v]?v:+v;reload();};
   document.getElementById("ym").onchange=e=>{if(DIRTY&&!confirm("未保存の変更があります。切り替えると破棄されます。よろしいですか？")){e.target.value=state.ym;return;}state.ym=e.target.value;reload();};
   document.getElementById("themebtn").onclick=toggleTheme;
   document.querySelectorAll(".subtoggle button").forEach(b=>b.onclick=()=>{if(DIRTY&&!confirm("未保存の変更があります。切り替えると破棄されます。よろしいですか？"))return;state.view=b.dataset.view;reload();});
@@ -493,7 +516,7 @@ function plBody(monthLabel,storeName){
   const costRows=COSTS.map((c,i)=>`<tr><td>${esc(c)}</td><td>${amtCell("cb_"+i)}</td><td>${amtCell("ca_"+i)}</td><td id="cd_${i}" class="mut"></td></tr>`).join("");
   const payRows=PAYS.map((p,i)=>`<tr><td>${p}</td><td>${amtCell("pay_"+i)}</td></tr>`).join("");
   return `
-    ${isAll()?`<p class="note" style="margin:2px 0 0">${state.store==="own"?"直営（合計）":"総合（全店）"}の予算・コストは<b>各店に入力した値の合計</b>です（自動）。編集は店舗を選んでください。</p>`:(CANEDIT?'<div style="margin:4px 0 0"><button class="chip" id="reset">この月の入力を消す</button></div>':'<p class="note" style="margin:2px 0 0">閲覧のみ（入力・編集は「編集」または「管理」権限の方）。</p>')}
+    ${isAll()?`<p class="note" style="margin:2px 0 0">${SCOPE_LABEL[state.store]||"総合（全店）"}の予算・コストは<b>各店に入力した値の合計</b>です（自動）。編集は店舗を選んでください。</p>`:(CANEDIT?'<div style="margin:4px 0 0"><button class="chip" id="reset">この月の入力を消す</button></div>':'<p class="note" style="margin:2px 0 0">閲覧のみ（入力・編集は「編集」または「管理」権限の方）。</p>')}
     <div class="panel">
       <h2>${monthLabel}・${esc(storeName)} サマリー</h2>
       <div class="hero">
