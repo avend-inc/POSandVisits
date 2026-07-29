@@ -588,22 +588,35 @@ def _open_bundle(page) -> None:
 
 
 def _expand_collapsed(page) -> None:
-    """「集計オプション」等の折りたたみを、文字→collapseアンカー直クリックの順で開く。"""
+    """「集計オプション」等の折りたたみを、文字→アンカー→JS強制の順で確実に開く。"""
     open_search_options(page)   # まず文字（集計オプション等）で
-    # まだ閉じているものがあれば、Bootstrapのcollapseアンカーを直接クリックして開く
     for sel in ['a[data-toggle="collapse"].collapsed',
                 'a.collapsed[href^="#collapse"]',
                 '[data-toggle="collapse"][aria-expanded="false"]',
                 'a.collapsed']:
         try:
             loc = page.locator(sel)
-            for i in range(min(loc.count(), 4)):
+            for i in range(min(loc.count(), 6)):
                 el = loc.nth(i)
                 if el.is_visible():
                     el.click()
-                    page.wait_for_timeout(600)
+                    page.wait_for_timeout(500)
         except Exception:
             continue
+    # 最後の保険：Bootstrapのcollapseを JS で強制展開（クリックで開かない環境向け）
+    try:
+        page.evaluate("""() => {
+          document.querySelectorAll('.collapse').forEach(e => {
+            e.classList.add('show'); e.classList.remove('collapsing');
+            e.style.height = 'auto'; e.style.display = 'block';
+          });
+          document.querySelectorAll('.collapsed,[aria-expanded="false"]').forEach(e => {
+            e.classList.remove('collapsed'); e.setAttribute('aria-expanded','true');
+          });
+        }""")
+        page.wait_for_timeout(600)
+    except Exception:
+        pass
 
 
 def fetch_bundle(headless: bool = True, days_back: int = 400) -> str:
