@@ -346,8 +346,10 @@ def main() -> int:
     if args.only in (None, "cashier"):
         results.append(run_cashier(sb, business_date, run_id, args.force,
                                    headless, store_cache))
-    if args.only in (None, "cashier", "bundle"):
-        # バンドル名（SALEの名称マスタ）を同じcashierログインで自動更新（best-effort）
+    if args.only == "bundle":
+        # バンドル名（SALEの名称マスタ）の自動取得。cashierの「バンドル」画面はCSV出力の
+        # 目印が未確定のため、既定の日次では回さず、明示指定(--only bundle)のときだけ試す。
+        # 名称は通常 sql seed / 手動「バンドル名 取り込み」で入れる（名称は滅多に変わらない）。
         results.append(run_bundle_master(sb, business_date, run_id, args.force, headless))
     if args.only in (None, "digitel"):
         results.extend(run_digitel(sb, business_date, run_id, args.force, headless))
