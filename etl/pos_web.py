@@ -202,6 +202,18 @@ def _origin(url: str) -> str:
     return f"{p.scheme}://{p.netloc}"
 
 
+def _sipos_normalize_url(url: str) -> str:
+    """SIPOSのURL表記ゆれを正す。正解は https://<テナント>.sipos.services/management/login/。
+    実データに http:// や 素のドメイン（例: http://ez-mjs.sipos.services/）が混じっており、
+    そのままだと goto がタイムアウトする。https固定＋ログインパスを付ける。"""
+    raw = (url or "").strip()
+    if "://" not in raw:
+        raw = "https://" + raw
+    p = urlparse(raw)
+    host = p.netloc or p.path.split("/")[0]
+    return f"https://{host}/management/login/"
+
+
 def _sipos_wait(page) -> None:
     try:
         page.wait_for_load_state("networkidle", timeout=30_000)
@@ -440,6 +452,9 @@ def fetch(url: str, login_id: str, login_pw: str, business_date: str,
     """接続情報でログイン→期間指定→CSV出力し、CSV文字列を返す。失敗時は数回試す。"""
     if not url:
         raise EtlError(f"{label}: URLが未登録です（管理画面のレジ接続でURLを設定してください）。")
+    # SIPOSは http:// や素のドメイン表記を正す（https＋/management/login/）。
+    if _is_sipos(url):
+        url = _sipos_normalize_url(url)
     d1 = end_date or business_date
     prefix = (pos_type or "pos").upper()
     last: Exception | None = None
