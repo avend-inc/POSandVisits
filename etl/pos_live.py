@@ -87,8 +87,14 @@ def run_live_pos(sb, business_date: str, run_id: str,
                  or str(c.get("store_id")) == only_store]
     limit = (_os.environ.get("POS_LIMIT") or "").strip()
     if limit.isdigit() and int(limit) > 0:
-        conns = conns[:int(limit)]
+        # テストでは「実際にログインできる接続（URL・ID・PWが揃っている）」を優先。
+        # id順の先頭に PW未設定の古い接続があると流れ確認にならないため。
+        usable = [c for c in conns if c.get("url") and c.get("login_id") and c.get("login_pw")]
+        conns = (usable or conns)[:int(limit)]
         print(f"  （テスト用に対象を {len(conns)} 件へ絞りました：POS_LIMIT={limit}）")
+        for c in conns:
+            print(f"    → 対象: {c['pos_type']}#{c['id']} pos_name={c.get('pos_name')!r} "
+                  f"store_id={c.get('store_id')} url={(c.get('url') or '')[:60]}")
 
     cache = sb.store_map()
     results: list[Result] = []
