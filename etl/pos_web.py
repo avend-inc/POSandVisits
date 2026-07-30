@@ -202,6 +202,63 @@ def _origin(url: str) -> str:
     return f"{p.scheme}://{p.netloc}"
 
 
+def _sipos_wait(page) -> None:
+    try:
+        page.wait_for_load_state("networkidle", timeout=30_000)
+    except Exception:
+        pass
+
+
+def _sipos_select_all_stores(page, label: str) -> None:
+    """店舗選択画面で全店舗を選ぶ。onclickのAJAXでサーバ側セッションに反映されるため、
+    見た目がチェック済みでも click で必ずハンドラを発火させ、最終状態をONにする。"""
+    # まず現状を診断出力（チェック状況・ボタン・選択中バナー）。
+    try:
+        info = page.evaluate(r"""() => {
+          const q = s => [...document.querySelectorAll(s)];
+          const cbs = q('input[type=checkbox]').map(c => ({id:c.id||null,
+            cls:(c.className||'').toString().slice(0,50), checked:c.checked}));
+          const btns = q('button,a,[role=button],input[type=submit],input[type=button]')
+            .map(e => ({tag:e.tagName, text:(e.innerText||e.value||'').trim().slice(0,36),
+              href:e.getAttribute&&e.getAttribute('href'),
+              onclick:(e.getAttribute&&e.getAttribute('onclick'))?true:null}))
+            .filter(b => b.text);
+          const m = (document.body.innerText||'').match(/選択中の店舗[^\n]*/);
+          return {url:location.href, banner:m?m[0]:'', cbs, btns};
+        }""")
+        print(f"  [SIPOS店舗選択] url={info.get('url')} / {info.get('banner')}")
+        print(f"    checkbox={info.get('cbs')}")
+        btns = [b for b in info.get("btns", []) if not str(b.get("href", "")).startswith("#news")]
+        print(f"    button/link={btns[:20]}")
+    except Exception as e:
+        print(f"  （店舗選択の診断に失敗: {e}）")
+
+    # 「全店舗選択」を OFF→ON でトグルして onclick を確実に発火させる。
+    try:
+        cb = page.locator("#check_all_stores").first
+        if cb.count():
+            if cb.is_checked():
+                cb.click(); page.wait_for_timeout(400)
+            cb.click(); page.wait_for_timeout(1500)
+    except Exception:
+        pass
+    # 保険：個別の店舗チェックも未選択があれば ON にする。
+    try:
+        boxes = page.locator("input.store[type=checkbox]")
+        for i in range(min(boxes.count(), 60)):
+            b = boxes.nth(i)
+            try:
+                if not b.is_checked():
+                    b.click(); page.wait_for_timeout(200)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    # 「決定/表示/選択」等の確定ボタンがあれば押す（無い画面もある）。
+    _click_by_text(page, ["決定", "この店舗", "選択して表示", "表示する", "適用", "OK"])
+    _sipos_wait(page)
+
+
 def _sipos_set_datetime(page, label_text: str, value: str) -> bool:
     """『検索開始日時』等のラベル直後の入力欄に YYYY/MM/DD HH:MM を入れる。"""
     try:
@@ -240,28 +297,27 @@ def _sipos_set_datetime(page, label_text: str, value: str) -> bool:
 
 def _fetch_sipos(page, context, url: str, d0: str, d1: str, label: str) -> bytes:
     """SIPOS：ログイン済みページから 取引照会→期間→検索→CSVダウンロード。"""
-    search_url = _origin(url) + SIPOS_SEARCH_PATH
-    print(f"  {label}: 取引照会へ移動します {search_url}")
-    page.goto(search_url, wait_until="domcontentloaded")
-    try:
-        page.wait_for_load_state("networkidle", timeout=30_000)
-    except Exception:
-        pass
+    base = _origin(url)
+    search_url = base + SIPOS_SEARCH_PATH
 
-    # まれに店舗未選択で storeSelect に戻される→「全店舗選択」して再度移動
-    if "storeselect" in page.url.lower():
-        print("  店舗選択に戻されました。全店舗を選択して取引照会へ進みます。")
-        for sel in ("#check_all_stores", "input[id*='check_all']"):
-            try:
-                page.locator(sel).first.check(timeout=3_000)
-                break
-            except Exception:
-                continue
-        page.goto(search_url, wait_until="domcontentloaded")
+    # 1) 店舗選択（サーバ側セッションに反映させる）。ログイン直後は storeSelect にいる想定。
+    if "storeselect" not in page.url.lower():
         try:
-            page.wait_for_load_state("networkidle", timeout=30_000)
+            page.goto(base + "/management/storeSelect", wait_until="domcontentloaded")
+            _sipos_wait(page)
         except Exception:
             pass
+    _sipos_select_all_stores(page, label)
+
+    # 2) 取引照会へ。店舗未選択だと storeSelect に戻されるので、その時はもう一度選ぶ。
+    print(f"  {label}: 取引照会へ移動します {search_url}")
+    page.goto(search_url, wait_until="domcontentloaded")
+    _sipos_wait(page)
+    if "storeselect" in page.url.lower():
+        print("  店舗選択に戻されました。もう一度全店舗を選択して進みます。")
+        _sipos_select_all_stores(page, label)
+        page.goto(search_url, wait_until="domcontentloaded")
+        _sipos_wait(page)
 
     # 期間（YYYY/MM/DD HH:MM）：開始 00:00 / 終了 23:59
     start_v = f"{d0.replace('-', '/')} 00:00"
