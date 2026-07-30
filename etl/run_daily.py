@@ -374,15 +374,22 @@ def main() -> int:
         if r.message and r.status in ("failed", "rejected_duplicate"):
             print(f"      {r.message.splitlines()[0]}")
 
-    # バンドル名(SALEの名称マスタ)は best-effort。失敗しても全体は止めない
-    #  （売上・来店の取り込みが成功していれば正常終了扱いにする）。
+    # best-effort（失敗しても全体は止めない）:
+    #  ・bundle_master（SALEの名称マスタ）
+    #  ・レジ接続の各店（ezregi#N / airregi#N）… 1店のログイン不調で全店の
+    #    ダッシュボード更新まで止めない。失敗は ingest_log と下の一覧に残る。
     BEST_EFFORT = {"bundle_master"}
-    failed = [r for r in results if r.status == "failed" and r.name not in BEST_EFFORT]
-    warn = [r for r in results if r.status == "failed" and r.name in BEST_EFFORT]
+
+    def _is_best_effort(r) -> bool:
+        return r.name in BEST_EFFORT or "#" in r.name
+
+    failed = [r for r in results if r.status == "failed" and not _is_best_effort(r)]
+    warn = [r for r in results if r.status == "failed" and _is_best_effort(r)]
     rejected = [r for r in results if r.status == "rejected_duplicate"]
 
     if warn:
-        print("\n⚠️ バンドル名の取得はスキップ/失敗しました（best-effort。他の取り込みには影響しません）。")
+        names = ", ".join(r.name for r in warn)
+        print(f"\n⚠️ 一部はスキップ/失敗しました（best-effort。他の取り込み・ダッシュボードには影響しません）: {names}")
     if failed:
         print(f"\n❌ {len(failed)}件が失敗しました。ingest_log に記録済みです。")
         return 1

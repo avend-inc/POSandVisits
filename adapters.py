@@ -270,7 +270,9 @@ def adapt_ezregi_tran(df: pd.DataFrame, pos_name: str, store: str | None = None)
     out["date"] = dt.dt.strftime("%Y-%m-%d")
     out["ts"] = dt.dt.strftime("%Y-%m-%d %H:%M:%S")
     out["ts"] = out["ts"].fillna(out["date"].astype(str) + " 00:00:00")
-    out["store"] = _normalize_store_name(df["店舗名"])
+    # 店舗名は**ブランド名を残す**（SIPOS歴史データと同じ方針）。全角/半角空白だけ除去。
+    # 例: "NOTIME 大須店" → "NOTIME大須店"。1アカウント複数店の振り分けに使う。
+    out["store"] = df["店舗名"].astype(str).str.strip().str.replace(r"[\s　]+", "", regex=True)
     # レシート = レジNo + レシートNo（レシートNoは時系列で連番＝店内で一意）。
     out["tx_id"] = (pos_name + ":" + df["レジNo"].astype(str) + "-"
                     + df["レシートNo"].astype(str))
