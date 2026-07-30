@@ -170,10 +170,23 @@ def run_live_pos(sb, business_date: str, run_id: str,
                 continue
             common["line_no"] = common.groupby("tx_id").cumcount()
 
+            # 店舗の対応付け：
+            #  ・接続に store_id あり（1アカウント=1店）→ その店に固定。
+            #    ただしCSVに複数店舗が混在していたら“共通アカウント”なので警告する
+            #    （店舗分けが必要。store_pos.store_id を空にすると下の名前振り分けになる）。
+            #  ・store_id 無し（1アカウントで複数店＝Si等）→ 店舗名で振り分け。
+            #    その際は歴史データと同じ命名（ブランド名を残し、改名だけ最新へ）にそろえる。
+            csv_stores = [s for s in common["store"].astype(str).str.strip().unique() if s]
             if c.get("store_id"):
+                if len(csv_stores) > 1:
+                    print(f"  ⚠️ {label}: 1アカウントに複数店舗（{', '.join(csv_stores[:10])}）。"
+                          "今は接続の店舗にまとめて記録します（正しく分けるには接続のstore_idを空にしてください）。")
                 fixed = int(c["store_id"])
                 store_id_of = lambda name, _sid=fixed: _sid       # 接続=1店に固定
             else:
+                if c["pos_type"] == "ezregi":
+                    from .si_clean import si_store_names
+                    common["store"] = si_store_names(common["store"])
                 store_id_of = lambda name: sb.get_or_create_store(name, cache)  # CSV店舗名で振り分け
 
             payload = rows_mod.cashier_rows(common, store_id_of)
