@@ -299,6 +299,20 @@ function aggScopeList(){
 }
 // 管理タブは管理者のときだけ出す（認証モードでロール確定後に呼ぶ）
 function syncAdminTab(){const t=document.getElementById("tab-admin");if(t)t.style.display=(ME&&ME.role==="admin")?"":"none";}
+// ---- 分類（店舗の所属）：直営 / SELFURUGI FC / NOTIME FC ----
+function classOf(sid){ return ownOf(sid)==="直営" ? "直営" : (brandOf(sid)+" FC"); }
+function classesInData(){
+  const order=["直営","SELFURUGI FC","NOTIME FC","その他 FC"];
+  const present=new Set(usableStores().map(s=>classOf(s.id)));
+  return [...order.filter(c=>present.has(c)), ...[...present].filter(c=>!order.includes(c))];
+}
+function classMembers(cls){ return usableStores().filter(s=>classOf(s.id)===cls); }
+function sumRowsForIds(from,to,idset){ return sumRows(DATA.daily.filter(r=>idset.has(r.s)&&r.d>=from&&r.d<=to)); }
+// 対象期間が「その月の1日始まり＆同じ月内」なら着地見込みを出す（今月・前月など）。
+// 今月は末日がデータ最新日にクランプされる（例 7/31→7/29）ので、末日一致は要求しない。
+function isMonthPeriod(){ const ym=state.from.slice(0,7); return state.from===ym+"-01" && state.to.slice(0,7)===ym; }
+// KPIカード＆店舗比較で使う指標（税抜売上・取引数・販売数はカードに出さない）
+const KPI_CARDS=["in","v","pr","aov","upt","aup"];
 // 指定範囲・指定店舗の日次行
 function rowsIn(from,to,storeId){
   return DATA.daily.filter(r=>storeMatch(r.s,storeId)&&r.d>=from&&r.d<=to);
@@ -386,44 +400,24 @@ function render(){
     </div>
     <div id="kpis" class="grid"></div>
     <div class="panel">
-      <h2>店舗比較 <span class="sub" style="font-weight:500">（対象期間の合計）</span></h2><p class="note" id="cmp-note"></p>
+      <h2>店舗比較 <span class="sub" style="font-weight:500">（同じ分類の店舗どうし）</span></h2><p class="note" id="cmp-note"></p>
       <div class="tblwrap"><table id="cmp"></table></div>
     </div>
-    <div class="panel">
-      <h2>推移</h2>
-      <div class="controls" style="margin:2px 0 6px">
-        <label class="lbl">指標</label>
-        <select id="metric">${METRICS.map(m=>`<option value="${m.key}" ${state.metric===m.key?"selected":""}>${m.name}</option>`).join("")}</select>
-        <div class="seg" id="grain">${[["day","日別"],["week","週別"],["month","月別"]].map(([g,t])=>`<button data-g="${g}" class="${state.grain===g?"on":""}">${t}</button>`).join("")}</div>
-      </div>
-      <div class="chart" id="trend"></div>
-    </div>
     <div class="row2">
-      <div class="panel"><h2>カテゴリ別売上</h2><p class="note" id="cat-a-note"></p><div class="chart" id="cat-a"></div></div>
-      <div class="panel"><h2>カテゴリ別販売数</h2><p class="note" id="cat-q-note"></p><div class="chart" id="cat-q"></div></div>
-    </div>
-    <div class="panel">
-      <h2>カテゴリ別 一覧 <span class="sub" style="font-weight:500">（対象期間の合計）</span></h2>
-      <div class="tblwrap"><table id="cat-t"></table></div>
-    </div>
-    <div class="panel">
-      <h2>${state.grain==="day"?"日別":state.grain==="week"?"週別":"月別"} 一覧</h2>
-      <p class="note">行をタップすると、その期間だけに絞り込みます（対象期間がその1つになります）。</p>
-      <div class="tblwrap"><table id="tbl"></table></div>
+      <div class="panel"><h2>カテゴリ別 売上ランキング</h2><p class="note" id="cat-sales-note"></p><div class="tblwrap"><table id="cat-sales"></table></div></div>
+      <div class="panel"><h2>カテゴリ別 販売数ランキング</h2><p class="note" id="cat-qty-note"></p><div class="tblwrap"><table id="cat-qty"></table></div></div>
     </div>
     <div class="foot">
-      上の大きな数字は「対象期間ぜんぶの合計／平均」です（日別・週別・月別の切替は下の推移グラフと一覧の刻みだけを変えます）。
-      前日比・前週比・前月比は、直前の同じ長さの期間との増減です（対象期間の選び方に合わせて自動で表示。実際に比べた期間は数字にマウスを合わせると出ます）。指標：購入率＝取引数÷来店客数／客単価（税込）＝税込売上÷取引数／平均購入数＝総点数÷取引数／平均商品単価（税抜）＝税抜売上÷総点数。
-      税込/税抜売上・取引数・販売数は伝票単位、カテゴリは明細単位。来店客数はデジテール、売上はcashier。週別は月曜〜日曜。いわきは2店舗ぶんを合算。
+      「着地見込み」は<b>今月</b>を選んだときだけ表示します（月末までの予測・税込。日別・週別などでは非表示）。
+      店舗比較は「選んだ店舗と<b>同じ分類</b>（直営／SELFURUGI FC／NOTIME FC）」の店舗どうしで並べます。総合・合計を選ぶと<b>分類ごとの合計</b>を比較します。
+      指標：購入率＝取引数÷来店客数／客単価（税込）＝税込売上÷取引数／平均購入数＝総点数÷取引数／商品単価（税抜）＝税抜売上÷総点数。来店客数はデジテール、売上はcashier。カテゴリの割合は「全カテゴリ合計」に対する比率です。
     </div>`;
 
   document.getElementById("store").onchange=e=>{const v=e.target.value;state.store=AGG_SCOPES[v]?v:+v;draw();};
-  document.getElementById("metric").onchange=e=>{state.metric=e.target.value;draw();};
-  document.querySelectorAll("#grain button").forEach(b=>b.onclick=()=>{state.grain=b.dataset.g;render();});
   document.getElementById("from").onchange=e=>{state.from=clampLo(e.target.value||DATA._min);if(state.from>state.to)state.to=state.from;draw();};
   document.getElementById("to").onchange=e=>{state.to=clampHi(e.target.value||DATA._max);if(state.to<state.from)state.from=state.to;draw();};
   document.querySelectorAll(".chip[data-preset]").forEach(b=>b.onclick=()=>{
-    const[f,t]=presetRange(b.dataset.preset);state.from=f;state.to=t;render();});
+    const[f,t]=presetRange(b.dataset.preset);state.from=f;state.to=t;draw();});
   document.getElementById("themebtn").onclick=toggleTheme;
   if(SB){const lb=document.getElementById("logoutbtn");if(lb)lb.onclick=doLogout;}
   draw();
@@ -436,12 +430,18 @@ function draw(){
   document.getElementById("rangebar").innerHTML=
     `この数字の対象期間：<b>${state.from}</b> 〜 <b>${state.to}</b>（${ndays}日間）　店舗：<span class="store">${esc(storeName)}</span>`;
 
-  // ---- KPI: 対象期間ぜんぶの合計。前期比は同じ長さの直前期間 ----
+  const showLand=isMonthPeriod();
+  const fym=state.to.slice(0,7);
+
+  // ---- ① KPI: 対象期間ぜんぶの合計。前期比は同じ長さの直前期間 ----
   const total=sumRows(rowsIn(state.from,state.to,state.store));
   const pTo=addDays(state.from,-1), pFrom=addDays(pTo,-(ndays-1));
   const hasPrev=pTo>=DATA._min;
   const ptotal=hasPrev?sumRows(rowsIn(pFrom<DATA._min?DATA._min:pFrom,pTo,state.store)):null;
-  document.getElementById("kpis").innerHTML=KPI_ORDER.map(k=>{
+  let cards="";
+  if(showLand){ const lv=computeAutoLandingIn(state.store,fym);
+    cards+=`<div class="card"><div class="k">着地見込み <span class="sub" style="font-weight:500">${+fym.split("-")[1]}月・税込</span></div><div class="val">${lv==null?"—":YEN(lv)+"円"}</div></div>`; }
+  cards+=KPI_CARDS.map(k=>{
     const m=M(k),v=m.calc(total),pv=ptotal?m.calc(ptotal):null;let d="";
     if(v!=null&&pv!=null&&pv!==0){const pct=(v-pv)/Math.abs(pv)*100;
       const cls=pct>0.05?"up":pct<-0.05?"down":"flat",ar=pct>0.05?"▲":pct<-0.05?"▼":"—";
@@ -449,35 +449,42 @@ function draw(){
       d=`<div class="delta ${cls}" title="${pf}〜${pTo} と比較">${ar} ${F1(Math.abs(pct))}% <span class="sub" style="color:inherit;font-weight:500">${deltaLabel(ndays)}</span></div>`;}
     return `<div class="card"><div class="k">${m.name}</div><div class="val">${v==null?"—":m.fmt(v)}</div>${d}</div>`;
   }).join("");
+  document.getElementById("kpis").innerHTML=cards;
 
-  // ---- 店舗比較（対象期間の合計）----
-  const fym=state.to.slice(0,7);
-  const cmp=us.map(s=>{const p=sumRows(rowsIn(state.from,state.to,s.id));p._name=s.name;p._land=computeAutoLandingIn(s.id,fym);return p;});
-  const rowsC=[...cmp];
-  // 合計行（直営／FC／SELFURUGI／NOTIME）を、該当店があるものだけ足す
-  for(const a of aggScopeList()){
-    if(a.id==="all")continue;
-    const p=sumRows(rowsIn(state.from,state.to,a.id));p._name=SCOPE_LABEL[a.id].replace(/[（(]/,' ').replace(/[）)]/,'');p._agg=true;
-    p._land=computeAutoLandingIn(a.id,fym);rowsC.push(p);
+  // ---- ① 店舗比較（選んだ店舗と同じ分類の店舗どうし）----
+  let rowsC=[];
+  if(!AGG_SCOPES[state.store]){
+    const cls=classOf(state.store), members=classMembers(cls);
+    rowsC=members.map(s=>{const p=sumRows(rowsIn(state.from,state.to,s.id));p._name=s.name;p._sel=(s.id===state.store);p._land=showLand?computeAutoLandingIn(s.id,fym):null;return p;});
+    const ids=new Set(members.map(s=>s.id));
+    const t=sumRowsForIds(state.from,state.to,ids);t._name=cls+" 合計";t._agg=true;t._land=showLand?computeAutoLandingForIds(ids,fym):null;rowsC.push(t);
+    document.getElementById("cmp-note").textContent=`分類「${cls}」の店舗（${state.from} 〜 ${state.to}）`;
+  }else{
+    for(const cls of classesInData()){
+      const ids=new Set(classMembers(cls).map(s=>s.id));
+      const t=sumRowsForIds(state.from,state.to,ids);t._name=cls;t._agg=true;t._land=showLand?computeAutoLandingForIds(ids,fym):null;rowsC.push(t);
+    }
+    const tot=sumRows(rowsIn(state.from,state.to,"all"));tot._name="総合";tot._agg=true;tot._sel=true;tot._land=showLand?computeAutoLandingIn("all",fym):null;rowsC.push(tot);
+    document.getElementById("cmp-note").textContent=`分類ごとの合計（${state.from} 〜 ${state.to}）`;
   }
-  const tot=sumRows(rowsIn(state.from,state.to,"all"));tot._name="総合";tot._agg=true;tot._land=computeAutoLandingIn("all",fym);
-  rowsC.push(tot);
-  drawCompare(rowsC,fym);
-  document.getElementById("cmp-note").textContent=`${state.from} 〜 ${state.to}`;
+  drawCompare(rowsC,showLand);
 
-  // ---- 推移（grainで刻む）----
-  drawTrend(periods(state.from,state.to,state.grain,state.store));
-
-  // ---- カテゴリ（対象期間の合計）----
+  // ---- ② カテゴリ別 ランキング（上位5・実数＋割合）----
   const cats=catIn(state.from,state.to,state.store);
-  document.getElementById("cat-a-note").textContent=`${storeName}・対象期間の上位`;
-  document.getElementById("cat-q-note").textContent=`${storeName}・対象期間の上位`;
-  drawBars("cat-a",cats.slice().sort((a,b)=>b.a-a.a),c=>c.a,c=>YEN(c.a)+"円");
-  drawBars("cat-q",cats.slice().sort((a,b)=>b.q-a.q),c=>c.q,c=>NUM(c.q)+"点");
-  drawCatTable(cats.slice().sort((a,b)=>b.a-a.a));
-
-  // ---- 期間別 一覧（クリックで絞り込み）----
-  drawTable(periods(state.from,state.to,state.grain,state.store));
+  drawCatRank(cats);
+  document.getElementById("cat-sales-note").textContent=`上位5（${storeName}・対象期間）／割合＝全カテゴリ合計に対する比率`;
+  document.getElementById("cat-qty-note").textContent=`上位5（${storeName}・対象期間）`;
+}
+function drawCatRank(cats){
+  const byA=cats.slice().sort((a,b)=>b.a-a.a), byQ=cats.slice().sort((a,b)=>b.q-a.q);
+  const totA=cats.reduce((s,c)=>s+(c.a||0),0), totQ=cats.reduce((s,c)=>s+(c.q||0),0);
+  const rows=(arr,val,tot,fmt)=>arr.slice(0,5).map((c,i)=>
+    `<tr><td>${i+1}</td><td>${esc(c.c)}</td><td>${fmt(val(c))}</td><td>${tot>0?F1(val(c)/tot*100)+"%":"—"}</td></tr>`).join("")
+    ||`<tr><td colspan="4" class="sub">データがありません</td></tr>`;
+  document.getElementById("cat-sales").innerHTML=
+    `<thead><tr><th>#</th><th>カテゴリ</th><th>売上</th><th>割合</th></tr></thead><tbody>${rows(byA,c=>c.a,totA,v=>YEN(v)+"円")}</tbody>`;
+  document.getElementById("cat-qty").innerHTML=
+    `<thead><tr><th>#</th><th>カテゴリ</th><th>販売数</th><th>割合</th></tr></thead><tbody>${rows(byQ,c=>c.q,totQ,v=>NUM(v)+"点")}</tbody>`;
 }
 
 // 着地見込み（自動・税込）：対象月の残日数×平日/土日祝の平均で月末を予測（店舗比較用）。
@@ -485,7 +492,9 @@ function draw(){
 function fIsWeekend(d){const g=new Date(d+"T00:00:00Z").getUTCDay();return g===0||g===6;}
 function fMonthEnd(ym){const[y,m]=ym.split("-").map(Number);const last=new Date(Date.UTC(y,m,0)).getUTCDate();return `${ym}-${String(last).padStart(2,"0")}`;}
 function computeAutoLandingIn(store,ym){
-  const ids=new Set(usableStores().filter(s=>storeMatch(s.id,store)).map(s=>s.id));
+  return computeAutoLandingForIds(new Set(usableStores().filter(s=>storeMatch(s.id,store)).map(s=>s.id)),ym);
+}
+function computeAutoLandingForIds(ids,ym){
   const mS=ym+"-01",mE=fMonthEnd(ym),today=todayStr(),winStart=addDays(mS,-56);
   const byDate={};
   for(const r of DATA.daily){ if(!ids.has(r.s))continue; if(r.d<winStart||r.d>mE)continue;
@@ -503,12 +512,15 @@ function computeAutoLandingIn(store,ym){
   for(let d=start; d<=mE; d=addDays(d,1)){ if(fIsWeekend(d))remWe++; else remWk++; }
   return tdIn + remWk*wkAvg + remWe*weAvg;
 }
-function drawCompare(rows,fym){
-  const cols=KPI_ORDER.map(M);
-  const mn=fym?(+fym.split("-")[1]):null;
-  const landHead=`着地見込み<br><span class="sub" style="font-weight:500">${mn?mn+"月":""}・税込</span>`;
-  const head=`<thead><tr><th>店舗</th><th>${landHead}</th>${cols.map(c=>`<th>${c.name}</th>`).join("")}</tr></thead>`;
-  const body=rows.map(p=>`<tr${p._agg?' style="font-weight:750"':''}><td>${esc(p._name)}</td><td>${p._land!=null?YEN(p._land)+"円":"—"}</td>${cols.map(c=>{const v=c.calc(p);return `<td>${v==null?"—":c.fmt(v)}</td>`;}).join("")}</tr>`).join("");
+function drawCompare(rows,showLand){
+  const cols=KPI_CARDS.map(M);
+  const landHead=showLand?`<th>着地見込み<br><span class="sub" style="font-weight:500">税込</span></th>`:"";
+  const head=`<thead><tr><th>店舗</th>${landHead}${cols.map(c=>`<th>${c.name}</th>`).join("")}</tr></thead>`;
+  const body=rows.map(p=>{
+    const st=p._agg?' style="font-weight:750"':(p._sel?' style="font-weight:700;background:var(--surface2)"':'');
+    const land=showLand?`<td>${p._land!=null?YEN(p._land)+"円":"—"}</td>`:"";
+    return `<tr${st}><td>${esc(p._name)}</td>${land}${cols.map(c=>{const v=c.calc(p);return `<td>${v==null?"—":c.fmt(v)}</td>`;}).join("")}</tr>`;
+  }).join("");
   document.getElementById("cmp").innerHTML=head+"<tbody>"+body+"</tbody>";
 }
 function drawCatTable(cats){
