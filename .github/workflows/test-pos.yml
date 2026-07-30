@@ -19,6 +19,10 @@ on:
         description: "試す営業日 (YYYY-MM-DD)。空なら前日。"
         required: false
         default: ""
+      limit:
+        description: "試す接続数（まず1で流れ確認）。0なら全部"
+        required: false
+        default: "1"
       export:
         description: "取得できたらダッシュボードも更新する"
         required: false
@@ -51,6 +55,8 @@ jobs:
         run: python -m playwright install --with-deps chromium
 
       - name: レジ接続を試す（--only pos）
+        env:
+          POS_LIMIT: ${{ inputs.limit }}
         run: |
           ARGS="--only pos --force"
           if [ -n "${{ inputs.date }}" ]; then ARGS="$ARGS --date ${{ inputs.date }}"; fi
