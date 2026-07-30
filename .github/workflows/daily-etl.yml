@@ -69,7 +69,8 @@ jobs:
   etl:
     name: 前日ぶんを取り込む
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # SIPOS(EZレジ)接続を1店ずつ巡回するため、店舗数が増えると時間がかかる。
+    timeout-minutes: 60
 
     env:
       TZ: Asia/Tokyo

@@ -340,8 +340,8 @@ def _sipos_open_transaction(page, base: str, label: str) -> bool:
 def _fetch_sipos(page, context, url: str, d0: str, d1: str, label: str) -> bytes:
     """SIPOS：ログイン済みページから 取引照会→期間→検索→CSVダウンロード。"""
     base = _origin(url)
-    debug = bool(os.environ.get("POS_DEBUG") or os.environ.get("POS_ONLY_STORE")
-                 or os.environ.get("POS_LIMIT"))
+    # 詳細ダンプ（メニュー候補・到達ページ）は1店デバッグ時のみ（全店実行では出さない）。
+    debug = bool(os.environ.get("POS_DEBUG") or os.environ.get("POS_ONLY_STORE"))
 
     # 1) 店舗選択（サーバ側セッションに反映させる）。ログイン直後は storeSelect にいる想定。
     if "storeselect" not in page.url.lower():
@@ -405,6 +405,15 @@ def _fetch_sipos(page, context, url: str, d0: str, d1: str, label: str) -> bytes
     context.on("page", lambda pg: pg.on("download", lambda d: downloads.append(d)))
 
     if _click_first_text(page, ["CSVダウンロード", "CSV出力", "CSVエクスポート", "CSV"]) is None:
+        # 検索結果0件（休業日・売上なし）ならCSVボタンは出ない。これは異常ではないので
+        # 空を返して「明細0件（正常）」として扱う。
+        try:
+            body = page.inner_text("body")
+        except Exception:
+            body = ""
+        if any(k in body for k in ("0件", "該当するデータ", "ございません", "ありません", "見つかりません")):
+            print(f"  {label}: 検索結果0件（休業日・売上なしとみなします）。")
+            return b""
         dump_page(page, f"{label}_sipos_csv_notfound")
         dump_controls(page, f"{label}_sipos_csv_notfound")
         raise EtlError(f"{label}: 「CSVダウンロード」ボタンが見つかりませんでした。"
