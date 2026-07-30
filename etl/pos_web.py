@@ -293,10 +293,55 @@ def _sipos_set_datetime(page, label_text: str, value: str) -> bool:
     return ok
 
 
+def _sipos_open_transaction(page, base: str, label: str) -> bool:
+    """メニューから『取引照会』へ遷移する。/list を直接GETするとリダイレクトされるため、
+    アプリ内リンクをクリックして進む。折りたたみメニューは親を開いてから探す。"""
+    def _try_click() -> bool:
+        try:
+            lk = page.locator("a:has-text('取引照会')")
+            if lk.count():
+                lk.first.click(timeout=5_000)
+                _sipos_wait(page)
+                return "transaction" in page.url.lower()
+        except Exception:
+            pass
+        return False
+
+    if _try_click():
+        return True
+    # 折りたたみメニュー（取引/売上/レポート等）を開いてから再挑戦。
+    for grp in ("取引", "売上", "レポート", "集計", "分析", "データ"):
+        try:
+            g = page.locator(
+                f"a:has-text('{grp}'), button:has-text('{grp}'), [data-toggle]:has-text('{grp}')"
+            ).first
+            if g.count():
+                g.click(timeout=2_000)
+                page.wait_for_timeout(600)
+                if _try_click():
+                    return True
+        except Exception:
+            continue
+    # 最後の手段：リンクの href を取り出して直接遷移する。
+    try:
+        lk = page.locator("a:has-text('取引照会')")
+        if lk.count():
+            href = lk.first.get_attribute("href")
+            if href:
+                target = href if href.startswith("http") else base + href
+                page.goto(target, wait_until="domcontentloaded")
+                _sipos_wait(page)
+                return "transaction" in page.url.lower()
+    except Exception:
+        pass
+    return False
+
+
 def _fetch_sipos(page, context, url: str, d0: str, d1: str, label: str) -> bytes:
     """SIPOS：ログイン済みページから 取引照会→期間→検索→CSVダウンロード。"""
     base = _origin(url)
-    search_url = base + SIPOS_SEARCH_PATH
+    debug = bool(os.environ.get("POS_DEBUG") or os.environ.get("POS_ONLY_STORE")
+                 or os.environ.get("POS_LIMIT"))
 
     # 1) 店舗選択（サーバ側セッションに反映させる）。ログイン直後は storeSelect にいる想定。
     if "storeselect" not in page.url.lower():
@@ -307,19 +352,32 @@ def _fetch_sipos(page, context, url: str, d0: str, d1: str, label: str) -> bytes
             pass
     _sipos_select_all_stores(page, label)
 
-    # 2) 取引照会へ。店舗未選択だと storeSelect に戻されるので、その時はもう一度選ぶ。
-    print(f"  {label}: 取引照会へ移動します {search_url}")
-    page.goto(search_url, wait_until="domcontentloaded")
+    # 2) 取引照会へは「メニューのリンクをクリック」してアプリ内遷移で進む
+    #    （/list を直接GETすると商品検索へリダイレクトされるため）。
+    #    まずダッシュボードを開き、取引照会リンクを探してクリックする。
+    page.goto(base + "/management/", wait_until="domcontentloaded")
     _sipos_wait(page)
-    if "storeselect" in page.url.lower():
-        print("  店舗選択に戻されました。もう一度全店舗を選択して進みます。")
-        _sipos_select_all_stores(page, label)
-        page.goto(search_url, wait_until="domcontentloaded")
-        _sipos_wait(page)
 
-    # 到達したページを診断（テスト時のみ）。取引照会でなければ目印を出す。
-    if (os.environ.get("POS_DEBUG") or os.environ.get("POS_ONLY_STORE")
-            or os.environ.get("POS_LIMIT")):
+    if debug:
+        # メニューの全リンク（取引/売上系）を洗い出して href を確定する。
+        try:
+            links = page.evaluate(r"""() => [...document.querySelectorAll('a[href]')]
+              .map(a => ({t:(a.innerText||'').trim().replace(/\s+/g,' ').slice(0,24),
+                          href:a.getAttribute('href'),
+                          vis:!!(a.getBoundingClientRect().width||a.getBoundingClientRect().height)}))
+              .filter(l => /transaction|取引|売上|sales|日報|レポート|report|集計|明細/.test((l.t||'')+(l.href||'')))""")
+            print(f"  {label}: メニュー候補（取引/売上系）:")
+            for l in links[:30]:
+                print(f"    menu {l}")
+        except Exception as e:
+            print(f"  （メニュー診断に失敗: {e}）")
+
+    if not _sipos_open_transaction(page, base, label):
+        dump_page(page, f"{label}_sipos_menu_notfound")
+        dump_controls(page, f"{label}_sipos_menu_notfound")
+        raise EtlError(f"{label}: 取引照会メニューへ移動できませんでした。")
+
+    if debug:
         print(f"  {label}: 取引照会の到達URL = {page.url}")
         dump_controls(page, f"{label}_sipos_landed")
 
