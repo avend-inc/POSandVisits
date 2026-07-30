@@ -1,0 +1,66 @@
+# ============================================================
+#  店舗一覧 一括登録（CSV1枚で 店マスタ＋レジ接続 をまとめて反映）
+#
+#  使い方:
+#   1. 店舗一覧CSV（列: store, code, ownership, visible, pos_type, url,
+#      login_id, login_pw, pos_name, active）を用意
+#   2. Supabase → Storage の【非公開】バケット（例: imports）へアップロード
+#      ※ パスワードを含むので必ず非公開バケット。取り込み後はCSVを削除。
+#   3. Actions →「店舗一覧 一括登録」→ Run workflow（bucket/path を指定）
+#
+#  前提SQL: 010(store_pos/Vault) と 015(service_upsert_pos) を実行済み。
+#  認証情報は既存の SUPABASE_URL / SUPABASE_SERVICE_KEY を流用します。
+# ============================================================
+name: 店舗一覧 一括登録
+
+on:
+  workflow_dispatch:
+    inputs:
+      bucket:
+        description: "非公開バケット名"
+        required: true
+        default: "imports"
+      path:
+        description: "CSVのパス（バケット内のファイル名）"
+        required: true
+        default: "stores.csv"
+      export:
+        description: "取り込み後にダッシュボードも更新する"
+        required: false
+        default: true
+        type: boolean
+
+concurrency:
+  group: notime-import-stores
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TZ: Asia/Tokyo
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pandas requests
+      - name: 設定確認
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_KEY" ]; then
+            echo "::error::SUPABASE_URL / SUPABASE_SERVICE_KEY が未登録です"; exit 1
+          fi
+      - name: 店舗一覧を一括登録
+        run: |
+          ARGS="--bucket '${{ inputs.bucket }}' --path '${{ inputs.path }}'"
+          if [ "${{ inputs.export }}" = "true" ]; then ARGS="$ARGS --export"; fi
+          echo "python -m tools.import_stores $ARGS"
+          eval python -m tools.import_stores $ARGS
