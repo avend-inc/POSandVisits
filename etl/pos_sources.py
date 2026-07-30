@@ -19,11 +19,16 @@ def _secret(sb: Supabase, pos_id: int) -> str | None:
         json={"p_id": pos_id}, timeout=60,
     )
     if resp.status_code != 200:
+        # 失敗理由を表示（本文にPWは含まれない＝失敗応答なので安全）。
+        print(f"    ⚠️ get_pos_secret(#{pos_id}) HTTP {resp.status_code}: {resp.text[:300]}")
         return None
     try:
         val = resp.json()
     except ValueError:
         val = (resp.text or "").strip().strip('"')
+    if not val:
+        # 200だが空 = Vaultの復号ビューが行を返していない（連携/権限の切り分け用）。
+        print(f"    ⚠️ get_pos_secret(#{pos_id}) 200だが空応答: {resp.text[:120]!r}")
     return val or None
 
 
