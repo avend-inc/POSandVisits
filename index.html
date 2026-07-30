@@ -313,6 +313,39 @@ function sumRowsForIds(from,to,idset){ return sumRows(DATA.daily.filter(r=>idset
 function isMonthPeriod(){ const ym=state.from.slice(0,7); return state.from===ym+"-01" && state.to.slice(0,7)===ym; }
 // KPIカード＆店舗比較で使う指標（税抜売上・取引数・販売数はカードに出さない）
 const KPI_CARDS=["in","v","pr","aov","upt","aup"];
+// ---- グレード（ランク帯）判定：カテゴリ→季節、税抜単価→帯（下限しきい値で下の帯に寄せる）----
+function gradeOf(category, price){
+  const season=(DATA.catSeason||{})[category];
+  if(season!=="SS"&&season!=="AW")return null;               // その他・未設定は対象外
+  const bands=(DATA.gradeBands||[]).filter(b=>b.season===season).slice().sort((a,b)=>b.lo-a.lo);
+  for(const b of bands){ if(price>=b.lo)return b.grade; }
+  return null;                                               // 最小の下限未満
+}
+function gradeAgg(from,to,store){
+  const g={}; let ta=0,tq=0;
+  for(const r of (DATA.catp||[])){
+    if(!storeMatch(r.s,store))continue; if(r.d<from||r.d>to)continue;
+    const gr=gradeOf(r.c,r.p); if(!gr)continue;
+    const x=g[gr]||(g[gr]={a:0,q:0}); x.a+=r.a||0; x.q+=r.q||0; ta+=r.a||0; tq+=r.q||0;
+  }
+  return {g,ta,tq};
+}
+function hasGrades(){ return !!(DATA.gradeBands&&DATA.gradeBands.length&&DATA.catSeason&&DATA.catp&&DATA.catp.length); }
+function drawGrade(from,to,store){
+  const panel=document.getElementById("grade-panel"); if(!panel)return;
+  if(!hasGrades()){ panel.style.display="none"; return; }
+  const {g,ta,tq}=gradeAgg(from,to,store); const keys=Object.keys(g);
+  if(!keys.length){ panel.style.display="none"; return; }
+  panel.style.display="";
+  const bySales=keys.slice().sort((x,y)=>g[y].a-g[x].a).slice(0,3);
+  const byQty=keys.slice().sort((x,y)=>g[y].q-g[x].q).slice(0,3);
+  const rows=(arr,val,tot,fmt)=>arr.map((k,i)=>
+    `<tr><td>${i+1}</td><td>ランク ${esc(k)}</td><td>${fmt(g[k][val])}</td><td>${tot>0?F1(g[k][val]/tot*100)+"%":"—"}</td></tr>`).join("")
+    ||`<tr><td colspan="4" class="sub">対象データなし</td></tr>`;
+  document.getElementById("grade-sales").innerHTML=`<thead><tr><th>#</th><th>ランク</th><th>売上</th><th>比率</th></tr></thead><tbody>${rows(bySales,"a",ta,v=>YEN(v)+"円")}</tbody>`;
+  document.getElementById("grade-qty").innerHTML=`<thead><tr><th>#</th><th>ランク</th><th>販売数</th><th>比率</th></tr></thead><tbody>${rows(byQty,"q",tq,v=>NUM(v)+"点")}</tbody>`;
+  document.getElementById("grade-note").textContent=`比率＝ランク対象（SS/AW）の合計に対する割合（その他カテゴリは除く）`;
+}
 // 指定範囲・指定店舗の日次行
 function rowsIn(from,to,storeId){
   return DATA.daily.filter(r=>storeMatch(r.s,storeId)&&r.d>=from&&r.d<=to);
@@ -403,6 +436,13 @@ function render(){
       <h2>店舗比較 <span class="sub" style="font-weight:500">（同じ分類の店舗どうし）</span></h2><p class="note" id="cmp-note"></p>
       <div class="tblwrap"><table id="cmp"></table></div>
     </div>
+    <div class="panel" id="grade-panel" style="display:none">
+      <h2>ランク帯別 構成比 <span class="sub" style="font-weight:500">（上位3・対象期間）</span></h2><p class="note" id="grade-note"></p>
+      <div class="row2">
+        <div class="tblwrap"><table id="grade-sales"></table></div>
+        <div class="tblwrap"><table id="grade-qty"></table></div>
+      </div>
+    </div>
     <div class="row2">
       <div class="panel"><h2>カテゴリ別 売上ランキング</h2><p class="note" id="cat-sales-note"></p><div class="tblwrap"><table id="cat-sales"></table></div></div>
       <div class="panel"><h2>カテゴリ別 販売数ランキング</h2><p class="note" id="cat-qty-note"></p><div class="tblwrap"><table id="cat-qty"></table></div></div>
@@ -469,22 +509,42 @@ function draw(){
   }
   drawCompare(rowsC,showLand);
 
-  // ---- ② カテゴリ別 ランキング（上位5・実数＋割合）----
+  // ---- ② ランク帯別（グレード）構成比 上位3 ----
+  drawGrade(state.from,state.to,state.store);
+
+  // ---- ② カテゴリ別 ランキング（上位5・実数＋割合／押すと価格帯順位）----
   const cats=catIn(state.from,state.to,state.store);
   drawCatRank(cats);
-  document.getElementById("cat-sales-note").textContent=`上位5（${storeName}・対象期間）／割合＝全カテゴリ合計に対する比率`;
-  document.getElementById("cat-qty-note").textContent=`上位5（${storeName}・対象期間）`;
+  document.getElementById("cat-sales-note").textContent=`上位5（${storeName}・対象期間）／割合＝全カテゴリ合計に対する比率${(DATA.catp&&DATA.catp.length)?"／行を押すと価格帯の順位":""}`;
+  document.getElementById("cat-qty-note").textContent=`上位5（${storeName}・対象期間）${(DATA.catp&&DATA.catp.length)?"／行を押すと価格帯の順位":""}`;
 }
 function drawCatRank(cats){
   const byA=cats.slice().sort((a,b)=>b.a-a.a), byQ=cats.slice().sort((a,b)=>b.q-a.q);
   const totA=cats.reduce((s,c)=>s+(c.a||0),0), totQ=cats.reduce((s,c)=>s+(c.q||0),0);
-  const rows=(arr,val,tot,fmt)=>arr.slice(0,5).map((c,i)=>
-    `<tr><td>${i+1}</td><td>${esc(c.c)}</td><td>${fmt(val(c))}</td><td>${tot>0?F1(val(c)/tot*100)+"%":"—"}</td></tr>`).join("")
+  const hasP=!!(DATA.catp&&DATA.catp.length);
+  const mk=(arr,val,tot,fmt)=>arr.slice(0,5).map((c,i)=>
+    `<tr class="catrow${hasP?" clk":""}" data-cat="${esc(c.c)}"><td>${i+1}</td><td>${hasP?'<span class="caret">▸</span>':''}${esc(c.c)}</td><td>${fmt(val(c))}</td><td>${tot>0?F1(val(c)/tot*100)+"%":"—"}</td></tr>`
+    +`<tr class="catdetail" style="display:none"><td colspan="4"></td></tr>`).join("")
     ||`<tr><td colspan="4" class="sub">データがありません</td></tr>`;
   document.getElementById("cat-sales").innerHTML=
-    `<thead><tr><th>#</th><th>カテゴリ</th><th>売上</th><th>割合</th></tr></thead><tbody>${rows(byA,c=>c.a,totA,v=>YEN(v)+"円")}</tbody>`;
+    `<thead><tr><th>#</th><th>カテゴリ</th><th>売上</th><th>割合</th></tr></thead><tbody>${mk(byA,c=>c.a,totA,v=>YEN(v)+"円")}</tbody>`;
   document.getElementById("cat-qty").innerHTML=
-    `<thead><tr><th>#</th><th>カテゴリ</th><th>販売数</th><th>割合</th></tr></thead><tbody>${rows(byQ,c=>c.q,totQ,v=>NUM(v)+"点")}</tbody>`;
+    `<thead><tr><th>#</th><th>カテゴリ</th><th>販売数</th><th>割合</th></tr></thead><tbody>${mk(byQ,c=>c.q,totQ,v=>NUM(v)+"点")}</tbody>`;
+  if(hasP) bindCatExpand();
+}
+function bindCatExpand(){
+  document.querySelectorAll("#cat-sales tr.catrow.clk, #cat-qty tr.catrow.clk").forEach(tr=>tr.onclick=()=>{
+    const det=tr.nextElementSibling, caret=tr.querySelector(".caret"); if(!det)return;
+    if(det.style.display!=="none"){det.style.display="none";if(caret)caret.textContent="▸";return;}
+    const rows=(catPriceIn(state.from,state.to,state.store,tr.dataset.cat)||[]);
+    const cell=det.firstElementChild;
+    if(!rows.length){cell.innerHTML=`<div class="sub" style="padding:8px 26px">価格帯データがありません（次回の集計更新後に表示されます）。</div>`;}
+    else{const tot=rows.reduce((s,r)=>s+r.a,0);
+      cell.innerHTML=`<table class="subtbl"><thead><tr><th>順位</th><th>価格帯(税抜)</th><th>売上</th><th>販売数</th><th>比率</th></tr></thead><tbody>`+
+        rows.map((r,i)=>`<tr><td>${i+1}</td><td>${YEN(r.p)}円</td><td>${YEN(r.a)}円</td><td>${NUM(r.q)}点</td><td>${tot>0?F1(r.a/tot*100)+"%":"—"}</td></tr>`).join("")+
+        `</tbody></table>`;}
+    det.style.display="";if(caret)caret.textContent="▾";
+  });
 }
 
 // 着地見込み（自動・税込）：対象月の残日数×平日/土日祝の平均で月末を予測（店舗比較用）。
