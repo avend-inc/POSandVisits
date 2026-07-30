@@ -254,8 +254,6 @@ def _sipos_select_all_stores(page, label: str) -> None:
                 continue
     except Exception:
         pass
-    # 「決定/表示/選択」等の確定ボタンがあれば押す（無い画面もある）。
-    _click_by_text(page, ["決定", "この店舗", "選択して表示", "表示する", "適用", "OK"])
     _sipos_wait(page)
 
 
@@ -318,6 +316,12 @@ def _fetch_sipos(page, context, url: str, d0: str, d1: str, label: str) -> bytes
         _sipos_select_all_stores(page, label)
         page.goto(search_url, wait_until="domcontentloaded")
         _sipos_wait(page)
+
+    # 到達したページを診断（テスト時のみ）。取引照会でなければ目印を出す。
+    if (os.environ.get("POS_DEBUG") or os.environ.get("POS_ONLY_STORE")
+            or os.environ.get("POS_LIMIT")):
+        print(f"  {label}: 取引照会の到達URL = {page.url}")
+        dump_controls(page, f"{label}_sipos_landed")
 
     # 期間（YYYY/MM/DD HH:MM）：開始 00:00 / 終了 23:59
     start_v = f"{d0.replace('-', '/')} 00:00"
