@@ -23,6 +23,10 @@ on:
         description: "試す接続数（まず1で流れ確認）。0なら全部"
         required: false
         default: "1"
+      store:
+        description: "特定の店舗だけ試す（店舗ID or 店名の一部。例: 9）。空なら絞らない"
+        required: false
+        default: ""
       export:
         description: "取得できたらダッシュボードも更新する"
         required: false
@@ -57,6 +61,7 @@ jobs:
       - name: レジ接続を試す（--only pos）
         env:
           POS_LIMIT: ${{ inputs.limit }}
+          POS_ONLY_STORE: ${{ inputs.store }}
         run: |
           ARGS="--only pos --force"
           if [ -n "${{ inputs.date }}" ]; then ARGS="$ARGS --date ${{ inputs.date }}"; fi
