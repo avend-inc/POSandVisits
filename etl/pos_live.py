@@ -84,7 +84,9 @@ def run_live_pos(sb, business_date: str, run_id: str,
     for c in conns:
         print(f"    #{c['id']:>3} {c['pos_type']:<8} name={ (c.get('pos_name') or '') !r:<10} "
               f"store_id={c.get('store_id')} url={'○' if c.get('url') else '×'} "
-              f"id={'○' if c.get('login_id') else '×'} pw={'○' if c.get('login_pw') else '×'}")
+              f"id={'○' if c.get('login_id') else '×'} "
+              f"secret={'○' if c.get('pw_secret_id') else '×'} "
+              f"pw(復号)={'○' if c.get('login_pw') else '×'}")
 
     # 動作確認用：POS_LIMIT=1 や POS_ONLY_STORE=店名 で対象を絞る（目印確定のテスト向け）。
     import os as _os

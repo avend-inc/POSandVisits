@@ -49,5 +49,6 @@ def load_connections(sb: Supabase, pos_type: str | None = None,
             "pos_type": r["pos_type"], "pos_name": r.get("pos_name") or "",
             "url": r.get("url"), "login_id": r.get("login_id"),
             "active": r.get("active", True), "login_pw": pw,
+            "pw_secret_id": r.get("pw_secret_id"),  # 診断用（Vault連携の有無）
         })
     return out
