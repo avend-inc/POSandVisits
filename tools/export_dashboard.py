@@ -97,6 +97,24 @@ def build_data(sb: Supabase) -> dict:
     except Exception:
         pass
 
+    # カテゴリ→季節区分（SS/AW/other）と、グレード別 価格帯（税抜）。未作成でも動く。
+    cat_season: dict[str, str] = {}
+    grade_bands: list[dict] = []
+    try:
+        for r in sb.select("category_season", {"select": "category,season"}):
+            if r.get("category"):
+                cat_season[str(r["category"])] = r.get("season") or "other"
+    except Exception:
+        pass
+    try:
+        for r in sb.select("grade_bands", {"select": "*", "order": "season,sort"}):
+            grade_bands.append({"season": r["season"], "grade": r["grade"],
+                                "lo": r["lo"], "hi": r.get("hi"),
+                                "ntm": r.get("ntm_pct"), "sfg": r.get("sfg_pct"),
+                                "sort": r.get("sort", 0)})
+    except Exception:
+        pass
+
     tx_seen: set[tuple] = set()
     daily: dict[tuple, dict] = {}     # (date, store_id) -> 伝票合計
     cat: dict[tuple, dict] = {}       # (date, store_id, category) -> 明細合計
@@ -232,6 +250,8 @@ def build_data(sb: Supabase) -> dict:
         "catp": catprice_rows,
         "bundles": bundle_rows,
         "bundleNames": bundle_names,
+        "catSeason": cat_season,
+        "gradeBands": grade_bands,
     }
 
 
