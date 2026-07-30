@@ -47,6 +47,12 @@ def _read_si_table(text: str) -> pd.DataFrame:
 
 def _to_common(csv_text: str, pos_type: str, pos_name: str) -> pd.DataFrame:
     if pos_type == "ezregi":
+        # SIPOSは2形式ある：取引照会CSV（取引日付/合計金額…＝1取引1行）と、
+        # 【Si】DB明細CSV（店舗コード/商品分類名…）。見出しで判定して振り分ける。
+        head = (csv_text or "")[:2000]
+        if "取引日付" in head and ("合計金額" in head or "レシートNo" in head and "合計点数" in head):
+            df = pd.read_csv(io.StringIO(csv_text), dtype=str)
+            return adapters.adapt_ezregi_tran(df, pos_name)
         return adapters.adapt_ezregi(_read_si_table(csv_text), pos_name)
     if pos_type == "airregi":
         df = pd.read_csv(io.StringIO(csv_text), dtype=str)

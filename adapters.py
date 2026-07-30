@@ -242,6 +242,59 @@ def adapt_ezregi(df: pd.DataFrame, pos_name: str, store: str | None = None) -> p
 
 
 # ============================================================
+# SIPOS 取引照会（TranList）— 1行=1取引（レシート単位）
+# ============================================================
+# 【実CSVで確定した仕様】管理画面 取引照会 → 検索 → CSVダウンロード
+#  - 文字コード: UTF-8 (BOM付き)。ヘッダは1行目。
+#  - 列: 取引日付, 店舗名, レジNo, レシートNo, 合計点数, 合計金額, 支払方法, 取引区分
+#  - 1行 = 1取引（レシート）。**商品明細は無い**
+#    → カテゴリ別・価格帯別（グレード帯）の分析は不可
+#    → 売上・購入客数・点数・客単価・商品単価 は算出できる
+#  - 「合計金額」は税込（÷1.1 でNOTIME価格体系に一致）。税抜は ÷1.1 で近似。
+#  - 「取引区分」に "返品"/"取消" 等が入りうる → "支払" のみを売上として扱う。
+def adapt_ezregi_tran(df: pd.DataFrame, pos_name: str, store: str | None = None) -> pd.DataFrame:
+    """SIPOS 取引照会 CSV（TranList形式）→ 共通スキーマ。1行=1取引。"""
+    df = df.copy()
+    df.columns = [str(c).strip().lstrip("﻿") for c in df.columns]
+    df = df.fillna("")
+    # 集計行・空行を捨てる（店舗名または取引日付が空）
+    df = df[(df["店舗名"].astype(str).str.strip() != "")
+            & (df["取引日付"].astype(str).str.strip() != "")]
+    # 売上対象は「支払」のみ（返品・取消などは除外）
+    if "取引区分" in df.columns:
+        kb = df["取引区分"].astype(str).str.strip()
+        df = df[(kb == "") | (kb == "支払")]
+
+    out = pd.DataFrame()
+    dt = pd.to_datetime(df["取引日付"], errors="coerce")
+    out["date"] = dt.dt.strftime("%Y-%m-%d")
+    out["ts"] = dt.dt.strftime("%Y-%m-%d %H:%M:%S")
+    out["ts"] = out["ts"].fillna(out["date"].astype(str) + " 00:00:00")
+    out["store"] = _normalize_store_name(df["店舗名"])
+    # レシート = レジNo + レシートNo（レシートNoは時系列で連番＝店内で一意）。
+    out["tx_id"] = (pos_name + ":" + df["レジNo"].astype(str) + "-"
+                    + df["レシートNo"].astype(str))
+    out["pos_name"] = pos_name
+
+    intax = _num(df["合計金額"])                 # 税込
+    qty = _num(df["合計点数"])
+    ex = (intax / EZREGI_TAX_RATE).round()       # 税抜（10%想定の近似）
+    out["sales_in_tax"] = intax
+    out["sales_ex_tax"] = ex
+    out["tx_qty"] = qty
+    # 明細が無いので、取引全体を1明細として扱う（カテゴリ・単価は不明）。
+    out["line_category"] = "その他"
+    out["line_price"] = 0
+    out["line_qty"] = qty
+    out["line_amount"] = ex
+    out["bundle_code"] = ""
+    out["is_parent"] = False
+    out["is_child"] = False
+    out["is_normal"] = True
+    return out[COMMON_COLUMNS]
+
+
+# ============================================================
 # アダプタ登録
 # ============================================================
 ADAPTERS = {
