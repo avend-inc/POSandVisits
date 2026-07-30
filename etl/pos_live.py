@@ -79,6 +79,13 @@ def run_live_pos(sb, business_date: str, run_id: str,
         print("  レジ接続（Air/EZ）が未登録です。管理画面『レジ接続』で登録してください。")
         return []
 
+    # 接続の状態一覧（PWは中身を出さず有無だけ）。目印確定・登録漏れの切り分け用。
+    print(f"  接続一覧（active/Air・EZ）: {len(conns)}件")
+    for c in conns:
+        print(f"    #{c['id']:>3} {c['pos_type']:<8} name={ (c.get('pos_name') or '') !r:<10} "
+              f"store_id={c.get('store_id')} url={'○' if c.get('url') else '×'} "
+              f"id={'○' if c.get('login_id') else '×'} pw={'○' if c.get('login_pw') else '×'}")
+
     # 動作確認用：POS_LIMIT=1 や POS_ONLY_STORE=店名 で対象を絞る（目印確定のテスト向け）。
     import os as _os
     only_store = (_os.environ.get("POS_ONLY_STORE") or "").strip()
