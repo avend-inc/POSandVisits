@@ -79,14 +79,23 @@ def run_live_pos(sb, business_date: str, run_id: str,
         print("  レジ接続（Air/EZ）が未登録です。管理画面『レジ接続』で登録してください。")
         return []
 
-    # 接続の状態一覧（PWは中身を出さず有無だけ）。目印確定・登録漏れの切り分け用。
-    print(f"  接続一覧（active/Air・EZ）: {len(conns)}件")
-    for c in conns:
-        print(f"    #{c['id']:>3} {c['pos_type']:<8} name={ (c.get('pos_name') or '') !r:<10} "
-              f"store_id={c.get('store_id')} url={'○' if c.get('url') else '×'} "
-              f"id={'○' if c.get('login_id') else '×'} "
-              f"secret={'○' if c.get('pw_secret_id') else '×'} "
-              f"pw(復号)={'○' if c.get('login_pw') else '×'}")
+    # 接続の状態サマリ（PWは中身を出さず有無だけ）。復号できたPWが0なら設定漏れ/RPC未作成。
+    import os as _os0
+    n_pw_ok = sum(1 for c in conns if c.get("login_pw"))
+    n_secret = sum(1 for c in conns if c.get("pw_secret_id"))
+    print(f"  接続一覧（active/Air・EZ）: {len(conns)}件 / Vault秘密あり {n_secret}件 / PW復号OK {n_pw_ok}件")
+    if n_pw_ok == 0 and n_secret > 0:
+        print("  ⚠️ Vaultに秘密はあるがPWを1件も復号できません。"
+              "get_pos_secret 未作成の可能性 → sql/011_pos_fetch.sql を実行してください。")
+    # 明細は動作確認（POS_LIMIT / POS_ONLY_STORE / POS_DEBUG）のときだけ。日次は静かに。
+    if (_os0.environ.get("POS_LIMIT") or _os0.environ.get("POS_ONLY_STORE")
+            or _os0.environ.get("POS_DEBUG")):
+        for c in conns:
+            print(f"    #{c['id']:>3} {c['pos_type']:<8} name={ (c.get('pos_name') or '') !r:<10} "
+                  f"store_id={c.get('store_id')} url={'○' if c.get('url') else '×'} "
+                  f"id={'○' if c.get('login_id') else '×'} "
+                  f"secret={'○' if c.get('pw_secret_id') else '×'} "
+                  f"pw(復号)={'○' if c.get('login_pw') else '×'}")
 
     # 動作確認用：POS_LIMIT=1 や POS_ONLY_STORE=店名 で対象を絞る（目印確定のテスト向け）。
     import os as _os
