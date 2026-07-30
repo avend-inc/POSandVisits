@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import time
+from urllib.parse import urlparse
 
 from .browser import browser_page, dump_page, dump_controls
 from .settings import EtlError, RETRIES, RETRY_WAIT_SEC
@@ -185,6 +186,127 @@ def _download(page, context, prefix: str, label: str) -> bytes:
     raise EtlError(f"{label}: CSVダウンロードが完了しませんでした。debug/{label}_csv_download_failed_report.txt の通信記録をご確認ください。")
 
 
+# --- SIPOS（EZレジ）専用フロー ------------------------------------------------
+# 画面：ログイン → 店舗選択（既定で全店舗選択済み）→ 取引照会 → 期間指定 → 検索 → CSV。
+# 実機のスクショで確定：取引照会 = /management/transaction/transactionSearch/list、
+# 期間は「検索開始日時 / 検索終了日時」= YYYY/MM/DD HH:MM、結果に「CSVダウンロード」。
+SIPOS_SEARCH_PATH = "/management/transaction/transactionSearch/list"
+
+
+def _is_sipos(url: str) -> bool:
+    return "sipos.services" in (url or "").lower()
+
+
+def _origin(url: str) -> str:
+    p = urlparse(url)
+    return f"{p.scheme}://{p.netloc}"
+
+
+def _sipos_set_datetime(page, label_text: str, value: str) -> bool:
+    """『検索開始日時』等のラベル直後の入力欄に YYYY/MM/DD HH:MM を入れる。"""
+    try:
+        lbl = page.get_by_text(label_text, exact=False).first
+        inp = lbl.locator("xpath=following::input[1]")
+        inp.wait_for(state="visible", timeout=10_000)
+    except Exception as e:
+        print(f"    日時欄が見つかりません（{label_text}）: {e}")
+        return False
+    try:
+        inp.click(timeout=5_000)
+    except Exception:
+        pass
+    try:
+        inp.fill(value, timeout=5_000)
+        ok = True
+    except Exception:
+        # readonly / 日付ピッカーは JS で値を入れてイベントを発火させる
+        try:
+            h = inp.element_handle()
+            page.evaluate(
+                "([el,v])=>{try{el.removeAttribute('readonly');}catch(e){}"
+                "el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));"
+                "el.dispatchEvent(new Event('change',{bubbles:true}));}",
+                [h, value])
+            ok = True
+        except Exception as e:
+            print(f"    日時の入力に失敗（{label_text}）: {e}")
+            ok = False
+    try:
+        page.keyboard.press("Escape")   # カレンダーを閉じる
+    except Exception:
+        pass
+    return ok
+
+
+def _fetch_sipos(page, context, url: str, d0: str, d1: str, label: str) -> bytes:
+    """SIPOS：ログイン済みページから 取引照会→期間→検索→CSVダウンロード。"""
+    search_url = _origin(url) + SIPOS_SEARCH_PATH
+    print(f"  {label}: 取引照会へ移動します {search_url}")
+    page.goto(search_url, wait_until="domcontentloaded")
+    try:
+        page.wait_for_load_state("networkidle", timeout=30_000)
+    except Exception:
+        pass
+
+    # まれに店舗未選択で storeSelect に戻される→「全店舗選択」して再度移動
+    if "storeselect" in page.url.lower():
+        print("  店舗選択に戻されました。全店舗を選択して取引照会へ進みます。")
+        for sel in ("#check_all_stores", "input[id*='check_all']"):
+            try:
+                page.locator(sel).first.check(timeout=3_000)
+                break
+            except Exception:
+                continue
+        page.goto(search_url, wait_until="domcontentloaded")
+        try:
+            page.wait_for_load_state("networkidle", timeout=30_000)
+        except Exception:
+            pass
+
+    # 期間（YYYY/MM/DD HH:MM）：開始 00:00 / 終了 23:59
+    start_v = f"{d0.replace('-', '/')} 00:00"
+    end_v = f"{d1.replace('-', '/')} 23:59"
+    print(f"  {label}: 期間を {start_v} 〜 {end_v} に設定します")
+    _sipos_set_datetime(page, "検索開始日時", start_v)
+    _sipos_set_datetime(page, "検索終了日時", end_v)
+
+    # 検索
+    if not (_click_exact(page, ["検索"]) or _click_by_text(page, ["検索"])):
+        dump_page(page, f"{label}_sipos_search_notfound")
+        dump_controls(page, f"{label}_sipos_search_notfound")
+        raise EtlError(f"{label}: 取引照会の「検索」ボタンが見つかりませんでした。")
+    try:
+        page.wait_for_load_state("networkidle", timeout=30_000)
+    except Exception:
+        pass
+    page.wait_for_timeout(1500)
+
+    # CSVダウンロード（別タブで開く場合にも備えて download を拾う）
+    downloads: list = []
+    page.on("download", lambda d: downloads.append(d))
+    context.on("page", lambda pg: pg.on("download", lambda d: downloads.append(d)))
+
+    if _click_first_text(page, ["CSVダウンロード", "CSV出力", "CSVエクスポート", "CSV"]) is None:
+        dump_page(page, f"{label}_sipos_csv_notfound")
+        dump_controls(page, f"{label}_sipos_csv_notfound")
+        raise EtlError(f"{label}: 「CSVダウンロード」ボタンが見つかりませんでした。"
+                       "（検索結果が0件だと出ないことがあります）")
+    _confirm_download_modal(page)
+
+    deadline = time.time() + 90
+    while not downloads and time.time() < deadline:
+        page.wait_for_timeout(500)
+    if downloads:
+        path = downloads[0].path()
+        if path:
+            data = open(path, "rb").read()
+            print(f"  {label}: CSVを取得しました（{len(data)} bytes）")
+            return data
+    dump_page(page, f"{label}_sipos_download_failed")
+    dump_controls(page, f"{label}_sipos_download_failed")
+    raise EtlError(f"{label}: CSVダウンロードが完了しませんでした。debug/ の通信記録をご確認ください。")
+
+
 def fetch(url: str, login_id: str, login_pw: str, business_date: str,
           pos_type: str, label: str = "pos", headless: bool = True,
           end_date: str | None = None) -> str:
@@ -198,6 +320,8 @@ def fetch(url: str, login_id: str, login_pw: str, business_date: str,
         try:
             with browser_page(headless=headless) as (page, context):
                 _login(page, url, login_id or "", login_pw or "", prefix, label)
+                if _is_sipos(url):
+                    return decode_csv(_fetch_sipos(page, context, url, business_date, d1, label))
                 _set_date_range(page, business_date, d1, prefix, label)
                 return decode_csv(_download(page, context, prefix, label))
         except Exception as e:
