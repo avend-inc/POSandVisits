@@ -142,6 +142,11 @@ def run_live_pos(sb, business_date: str, run_id: str,
         try:
             csv_text = pos_web.fetch(c["url"], c["login_id"], c["login_pw"],
                                      business_date, c["pos_type"], label=label, headless=headless)
+            import os as _os2
+            if _os2.environ.get("POS_DEBUG") or _os2.environ.get("POS_ONLY_STORE") \
+                    or _os2.environ.get("POS_LIMIT"):
+                head = "\n".join((csv_text or "").splitlines()[:8])
+                print(f"  [CSV先頭 {label}] 長さ={len(csv_text or '')}\n----\n{head}\n----")
             common = _to_common(csv_text, c["pos_type"], c["pos_name"] or c["pos_type"])
             common = common[common["date"].notna()].copy()
             if len(common) == 0:
