@@ -79,6 +79,17 @@ def run_live_pos(sb, business_date: str, run_id: str,
         print("  レジ接続（Air/EZ）が未登録です。管理画面『レジ接続』で登録してください。")
         return []
 
+    # 動作確認用：POS_LIMIT=1 や POS_ONLY_STORE=店名 で対象を絞る（目印確定のテスト向け）。
+    import os as _os
+    only_store = (_os.environ.get("POS_ONLY_STORE") or "").strip()
+    if only_store:
+        conns = [c for c in conns if only_store in (c.get("pos_name") or "")
+                 or str(c.get("store_id")) == only_store]
+    limit = (_os.environ.get("POS_LIMIT") or "").strip()
+    if limit.isdigit() and int(limit) > 0:
+        conns = conns[:int(limit)]
+        print(f"  （テスト用に対象を {len(conns)} 件へ絞りました：POS_LIMIT={limit}）")
+
     cache = sb.store_map()
     results: list[Result] = []
     for c in conns:
