@@ -15,6 +15,8 @@
 from __future__ import annotations
 
 import os
+import re
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -56,12 +58,74 @@ CASHIER_REQUIRED_COLUMNS = [
 #   直営店をブランド付きの正式名に統一しても、従来の名前（cashierの「山形」等）が
 #   正しく同じ店にマッチし続けるよう、ここで正式名へ変換する。
 #   （旧名のまま既存している場合は、get_or_create_store が正式名へ自動リネームする）
+#
+#   ⚠️ ここに書くのは「ブランド名が付かない略称」など、名前の正規化だけでは
+#      同じ店だと分からないものだけ。「NOTIME天王台店」と「NOTIME天王台」の
+#      ような “店/スペース の有無” の違いは STORE_KEY で自動的に吸収される。
 STORE_NAME_ALIAS = {
     "山形":   "NOTIME山形店",
     "いわき": "NOTIMEいわき店",
     "福井":   "NOTIME福井店",
     "下北沢": "NOTIME下北沢店",
 }
+
+
+def _clean_name(name: str) -> str:
+    """
+    店舗名の表記ゆれをそろえる下ごしらえ。
+      ・全角/半角のゆれ（NFKC。全角英数→半角、全角スペース→半角 など）
+      ・前後・途中の空白（半角/全角）を全部除去
+    """
+    n = unicodedata.normalize("NFKC", name or "")
+    n = re.sub(r"\s+", "", n)
+    return n.strip()
+
+
+def store_key(name: str) -> str:
+    """
+    「同じ店か？」を判定するためのカギ（正規化キー）を作る。
+
+    システム（POS / デジテール / cashier）ごとに店舗名の書き方が違っても、
+    同じ店なら同じカギになるようにする。具体的には:
+      ① 空白と全角/半角のゆれを消す（_clean_name）
+      ② 略称→正式名の対応（STORE_NAME_ALIAS）を当てる（例: 山形→NOTIME山形店）
+      ③ 末尾の「店」を落とす（例: NOTIME天王台店 と NOTIME天王台 を同じ扱いに）
+
+    例:
+      "NOTIME天王台店" → "NOTIME天王台"
+      "NOTIME天王台"   → "NOTIME天王台"
+      "ＮＯＴＩＭＥ 天王台 店" → "NOTIME天王台"
+      "山形"           → "NOTIME山形"（①→②で NOTIME山形店 → ③で 店 を落とす）
+    """
+    n = _clean_name(name)
+    n = STORE_NAME_ALIAS.get(n, n)   # 略称→正式名（このキーも空白なしで持つ）
+    n = _clean_name(n)
+    if n.endswith("店"):
+        n = n[:-1]
+    return n
+
+
+def canonical_store_name(name: str) -> str:
+    """
+    新しく店舗を登録するときの「表示名」を決める。
+    略称なら正式名へ直す（例: 山形 → NOTIME山形店）。それ以外は空白だけ整えて返す。
+    """
+    n = _clean_name(name)
+    return STORE_NAME_ALIAS.get(n, n)
+
+
+def better_store_name(a: str, b: str) -> str:
+    """
+    2つの店舗名のうち、表示名としてふさわしい方（情報量の多い方）を選ぶ。
+    重複店をまとめるときに「どちらの名前を残すか」を決めるのに使う。
+    優先順位: ブランド名で始まる > 末尾が「店」 > 文字数が多い。
+    """
+    def score(x: str) -> tuple:
+        x = (x or "").strip()
+        brand = 1 if (x.startswith("NOTIME") or x.startswith("SELFURUGI")) else 0
+        has_ten = 1 if x.endswith("店") else 0
+        return (brand, has_ten, len(x))
+    return a if score(a) >= score(b) else b
 
 # ブラウザ操作のタイムアウト（ミリ秒）とリトライ
 BROWSER_TIMEOUT_MS = 60_000

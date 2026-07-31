@@ -32,6 +32,7 @@ from .settings import (
     EtlError,
     load_dotenv,
     new_run_id,
+    store_key,
     validate_date,
     yesterday_jst,
 )
@@ -194,7 +195,10 @@ def run_digitel(sb: Supabase, business_date: str, run_id: str,
             # 新しく見つかった店には digitel_slug を書き込んで、次回からスラッグで安定して引けるようにする。
             store_id = slug_to_id.get(slug)
             if store_id is None:
-                is_new_store = name not in name_cache
+                # 正規化キーで既存店を探す（「NOTIME天王台店」と「NOTIME天王台」を同じ扱いに）。
+                # 本当に初めての店だけ ownership='FC' を付ける。
+                nkey = store_key(name)
+                is_new_store = not any(store_key(nm) == nkey for nm in name_cache)
                 store_id = sb.get_or_create_store(name, name_cache)
                 patch = {"digitel_slug": slug, "has_entry_data": True}
                 # デジテールで“初めて”見つかる店はFC。
