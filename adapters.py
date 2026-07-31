@@ -285,7 +285,9 @@ def adapt_ezregi_tran(df: pd.DataFrame, pos_name: str, store: str | None = None)
     out["sales_ex_tax"] = ex
     out["tx_qty"] = qty
     # 明細が無いので、取引全体を1明細として扱う（カテゴリ・単価は不明）。
-    out["line_category"] = "その他"
+    # カテゴリは「（明細なし）」という専用ラベルにして、集計側でカテゴリ別/価格帯別
+    # ランキングから除外する（売上・客数・点数などのKPIには含める）。
+    out["line_category"] = "（明細なし）"
     out["line_price"] = 0
     out["line_qty"] = qty
     out["line_amount"] = ex
