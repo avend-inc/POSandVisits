@@ -1,0 +1,49 @@
+# ============================================================
+#  店舗の重複をまとめる
+#
+#  同じ店が別レコードで登録されている（「NOTIME天王台店」と「NOTIME天王台」など）
+#  のを、正規化キーで見つけて1つに統合する。
+#
+#  使い方: Actions →「店舗の重複をまとめる」→ Run workflow
+#    mode: preview（既定・下見だけ／DBは変えない） ／ apply（実際にまとめる）
+#
+#  ※ 先に sql/013_merge_stores.sql を Supabase の SQL Editor で1回 Run しておくこと。
+# ============================================================
+name: 店舗の重複をまとめる
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "preview=下見だけ / apply=実際にまとめる"
+        required: false
+        default: "preview"
+        type: choice
+        options: [preview, apply]
+
+concurrency:
+  group: notime-daily-etl
+  cancel-in-progress: false
+
+jobs:
+  dedupe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TZ: Asia/Tokyo
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: 重複をまとめる
+        run: |
+          ARGS=""
+          if [ "${{ inputs.mode }}" != "apply" ]; then ARGS="--dry-run"; fi
+          python -m tools.dedupe_stores $ARGS

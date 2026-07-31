@@ -121,6 +121,16 @@ class Supabase:
             self._raise(resp, f"読み出し（{table}）")
         return resp.json()
 
+    def rpc(self, func: str, args: dict) -> object:
+        """データベースの関数（RPC）を呼ぶ。例: merge_store(...)。"""
+        resp = self._send(
+            "POST", f"{self.url}/rest/v1/rpc/{func}",
+            data=json.dumps(args, ensure_ascii=False).encode("utf-8"),
+        )
+        if resp.status_code >= 400:
+            self._raise(resp, f"関数の実行（{func}）")
+        return resp.json() if resp.text.strip() else None
+
     def insert(self, table: str, rows: list[dict]) -> list[dict]:
         """普通の追加（重複が起きたらエラーになる）。"""
         resp = self._send(
@@ -212,39 +222,45 @@ class Supabase:
 
         ⚠️ わざと「エラーで止める」ではなく「自動追加」にしている。
            新店舗が増えたときにデータを取りこぼす方が損失が大きいため。
-           追加された場合は画面に注意書きを出す。
 
-        直営店の正式名そろえ（STORE_NAME_ALIAS）:
-          ・入ってくる名前（例: cashierの「山形」）を正式名（「NOTIME山形店」）へ変換。
-          ・まだ旧名のまま既存する店は、正式名へ自動リネームして使う（＝店の分裂を防ぐ）。
+        店舗の同一判定は「正規化キー（store_key）」で行う。
+          ・POS / デジテール / cashier で店名の書き方が違っても
+            （「NOTIME天王台店」「NOTIME天王台」「ＮＯＴＩＭＥ 天王台」など）、
+            同じ店なら同じ店idに寄せる（＝店の分裂を防ぐ）。
+          ・略称（cashierの「山形」等）は STORE_NAME_ALIAS で正式名へ寄せる。
+          ・既存店の表示名がより良い正式名になるなら、そっと直す。
         """
-        from .settings import STORE_NAME_ALIAS
-        alias = STORE_NAME_ALIAS.get(name, name)
+        from .settings import store_key, canonical_store_name, better_store_name
 
-        if alias in cache:
-            return cache[alias]
+        # そのままの名前で既にあるなら、それを使う（余計なリネームをしない）
+        if name in cache:
+            return cache[name]
 
-        # 旧名（山形 等）のまま既存 → 正式名にリネームして、その既存店を使う
-        if alias != name and name in cache:
-            store_id = cache[name]
-            try:
-                self._send(
-                    "PATCH", self._endpoint("stores") + f"?id=eq.{store_id}",
-                    headers={"Prefer": "return=minimal"}, json={"name": alias},
-                )
-                print(f"  店舗名を正式名にそろえました：『{name}』→『{alias}』")
-            except Exception as e:
-                print(f"  （店舗名のリネームは後回しにします：{e}）")
-            cache[alias] = store_id
-            cache[name] = store_id
-            return store_id
+        key = store_key(name)
 
-        print(f"  ⚠️ 知らない店舗名『{alias}』が出てきたので stores に自動追加します。"
-              "（あとで sql/002_seed_stores.sql に追記しておくと綺麗です）")
-        code = f"auto_{abs(hash(alias)) % 10**8}"
-        created = self.insert("stores", [{"code": code, "name": alias}])
+        # 既存店の中から「同じ店（正規化キーが一致）」を探す
+        for nm, sid in list(cache.items()):
+            if store_key(nm) == key:
+                # 表示名がより情報量の多い正式名になるなら、そろえる
+                best = better_store_name(nm, canonical_store_name(name))
+                if best != nm:
+                    try:
+                        self.update_store(sid, {"name": best})
+                        print(f"  店舗名をそろえました：『{nm}』→『{best}』")
+                        cache[best] = sid
+                    except Exception as e:
+                        print(f"  （店舗名のそろえは後回しにします：{e}）")
+                cache[name] = sid
+                return sid
+
+        # 無ければ新規作成（正式名で）
+        disp = canonical_store_name(name)
+        print(f"  ⚠️ 知らない店舗『{disp}』(key={key}) が出てきたので stores に自動追加します。")
+        code = f"auto_{abs(hash(key)) % 10**8}"
+        created = self.insert("stores", [{"code": code, "name": disp}])
         store_id = created[0]["id"]
-        cache[alias] = store_id
+        cache[disp] = store_id
+        cache[name] = store_id
         return store_id
 
     # --------------------------------------------------------
