@@ -51,50 +51,74 @@ def main() -> int:
     with browser_page(headless=True) as (page, context):
         digitel_fetch.login(page, user, pw)
 
-        # ダッシュボードのトップへ（SPAが店舗一覧を読みにいく想定）。
+        # ダッシュボードのトップへ。
         try:
             page.goto(DIGITEL_BASE_URL + "/", wait_until="networkidle")
         except Exception:
             pass
         page.wait_for_timeout(2500)
 
-        # 1) 管理画面が叩いた通信のうち、店舗一覧っぽいAPIを洗い出す。
-        reqs = getattr(page, "_notime_requests", []) or []
-        apis = [r for r in reqs if any(k in r.lower()
-                for k in ("api", "store", "shop", "kpi", "list", "me", "account", "org", "tenant"))]
-        print("\n----- ログイン後の通信（店舗一覧APIの候補）-----")
-        for r in dict.fromkeys(apis):
-            print(f"  {r}")
-
-        # 2) 画面内リンク（slug らしき文字を含むもの）。
-        try:
-            links = page.evaluate(
-                r"""() => [...document.querySelectorAll('a[href]')].map(a => ({
-                    t:(a.innerText||'').trim().replace(/\s+/g,' ').slice(0,30),
-                    href:a.getAttribute('href')})) """)
-        except Exception:
-            links = []
-        print("\n----- 画面内リンク（店舗スラッグの候補）-----")
-        for l in [x for x in links if x.get("href") and "/kpi" in x["href"]
-                  or (x.get("href", "").count("/") >= 1 and x.get("t"))][:60]:
-            print(f"  {l}")
-
-        # 3) 候補APIを実際に叩いて、JSONで店舗一覧が返るか見る。
-        cand = ["/api/stores", "/api/user/stores", "/api/me", "/api/account",
-                "/api/v1/stores", "/api/organizations", "/api/shops", "/api/kpi/stores",
-                "/stores", "/api/users/me", "/api/tenants"]
-        print("\n----- 候補APIの応答（先頭のみ）-----")
-        for ep in cand:
+        # 1) 「店舗を選択」ドロップダウンを開いて、店舗の一覧（名前＋スラッグ/ID）を取り出す。
+        print("\n----- 店舗ドロップダウンを開いて一覧を取る -----")
+        opened = False
+        for sel in ["button:has-text('店舗を選択')", "text=店舗を選択",
+                    "[role=combobox]", "button[aria-haspopup='listbox']"]:
             try:
-                r = context.request.get(DIGITEL_BASE_URL + ep, timeout=20_000)
-                body = ""
-                try:
-                    body = r.text()[:400]
-                except Exception:
-                    body = "(本文取得不可)"
-                print(f"  GET {ep} -> {r.status}  {body!r}")
-            except Exception as e:
-                print(f"  GET {ep} -> ERR {e}")
+                page.locator(sel).first.click(timeout=5_000)
+                opened = True
+                break
+            except Exception:
+                continue
+        page.wait_for_timeout(1500)
+        try:
+            opts = page.evaluate(r"""() => {
+              const sels = "[role=option],[cmdk-item],[data-radix-collection-item],li[role],[role=menuitem]";
+              const seen=new Set(); const out=[];
+              document.querySelectorAll(sels).forEach(el=>{
+                const t=(el.innerText||'').trim().replace(/\s+/g,' ').slice(0,40);
+                if(!t||seen.has(t))return; seen.add(t);
+                const a={}; for(const at of (el.attributes||[])){ if(/value|id|slug|store|href|data-/.test(at.name)) a[at.name]=(at.value||'').slice(0,60);}
+                out.push({t, a});
+              });
+              return out;
+            }""")
+        except Exception as e:
+            opts = f"(取得失敗 {e})"
+        print(f"  店舗オプション: {json.dumps(opts, ensure_ascii=False)}")
+
+        # 2) Remix等がHTMLに埋め込んだデータから店舗/スラッグらしきものを探す。
+        print("\n----- 埋め込みデータからスラッグ/店舗を探す -----")
+        try:
+            html = page.content()
+        except Exception:
+            html = ""
+        import re as _re
+        # /{slug}/kpi/visits や "slug":"..." / notime_xxx / selfurugi_xxx の断片を拾う。
+        pats = [r'"[A-Za-z0-9_\-]+/kpi', r'"slug"\s*:\s*"[^"]+"',
+                r'\b(?:notime|selfurugi)[_a-z0-9]+', r'"stores?"\s*:\s*\[',
+                r'/[a-z0-9_\-]+/kpi/visits']
+        found = []
+        for p in pats:
+            for m in _re.findall(p, html)[:20]:
+                found.append(m)
+        for m in dict.fromkeys(found)[:60]:
+            print(f"  {m}")
+
+        # 3) Remix のルート/ローダーデータ（window.__remixContext）から店舗を探す。
+        try:
+            rmx = page.evaluate(r"""() => {
+              try{
+                const c = window.__remixContext || window.__remixRouteModules || null;
+                const s = JSON.stringify(c);
+                if(!s) return null;
+                // storeやslugを含む断片だけ返す（長すぎるので）
+                const hits = (s.match(/[^{}\[\],"]*(?:slug|store|kpi|visits)[^{}\[\],"]*/gi)||[]).slice(0,40);
+                return hits;
+              }catch(e){ return "err:"+e; }
+            }""")
+        except Exception as e:
+            rmx = f"(取得失敗 {e})"
+        print(f"\n----- __remixContext 内の店舗/スラッグ断片 -----\n  {json.dumps(rmx, ensure_ascii=False)}")
 
         dump_page(page, f"digitel_dashboard_{label}")
     print("\n===== 調査おわり =====")
