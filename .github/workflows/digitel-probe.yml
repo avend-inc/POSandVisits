@@ -1,0 +1,59 @@
+# ============================================================
+#  デジテール店舗一覧の調査
+#
+#  ログインしたアカウントが見られる“全店舗”とスラッグを自動で拾うために、
+#  管理画面の「店舗一覧の在りか（API/リンク）」を1回だけ調べる（結果はログに出る）。
+#
+#  使い方: Actions →「デジテール店舗一覧の調査」→ Run workflow
+#    account: notime（既定）… DIGITAIL_ID/PW  ／ selfurugi … DIGITAIL_SF_ID/PW
+# ============================================================
+name: デジテール店舗一覧の調査
+
+on:
+  workflow_dispatch:
+    inputs:
+      account:
+        description: "調べるアカウント"
+        required: false
+        default: "notime"
+        type: choice
+        options: [notime, selfurugi]
+
+concurrency:
+  group: notime-daily-etl
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TZ: Asia/Tokyo
+      DIGITAIL_ID: ${{ secrets.DIGITAIL_ID }}
+      DIGITAIL_PW: ${{ secrets.DIGITAIL_PW }}
+      DIGITAIL_SF_ID: ${{ secrets.DIGITAIL_SF_ID }}
+      DIGITAIL_SF_PW: ${{ secrets.DIGITAIL_SF_PW }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: ブラウザ(Chromium)を用意
+        run: python -m playwright install --with-deps chromium
+      - name: 店舗一覧を調べる
+        run: |
+          ARGS=""
+          if [ "${{ inputs.account }}" = "selfurugi" ]; then ARGS="--sf"; fi
+          python -m tools.digitel_probe $ARGS
+      - name: 調査用ファイルを保存
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: digitel-probe-${{ github.run_id }}
+          path: debug/
+          if-no-files-found: ignore
+          retention-days: 7
