@@ -186,7 +186,7 @@ function brandOf(sid){const s=storeMeta(sid);const n=(s&&s.name)||"";
   if(n.indexOf("SELFURUGI")===0)return "SELFURUGI"; if(n.indexOf("NOTIME")===0)return "NOTIME"; return "その他";}
 function hasFCStores(){return usableStores().some(s=>ownOf(s.id)!=="直営");}
 const AGG_SCOPES={all:1,own:1,fc:1,sf:1,nt:1};
-const SCOPE_LABEL={all:"総合（全店）",own:"直営（合計）",fc:"合計（FC）",sf:"合計（SELFURUGI）",nt:"合計（NOTIME）"};
+const SCOPE_LABEL={all:"全店",own:"直営店",fc:"合計（FC）",sf:"SELFURUGI（FC）",nt:"NOTIME（FC）"};
 function scopePred(store){
   if(store==="all")return ()=>true;
   if(store==="own")return s=>ownOf(s.id)==="直営";
@@ -204,8 +204,7 @@ function aggStores(){return usableStores().filter(scopePred(state.store));}
 function aggScopeList(){
   const us=usableStores();
   const out=[{id:"all",name:SCOPE_LABEL.all}];
-  if(us.some(s=>ownOf(s.id)==="直営") && us.some(s=>ownOf(s.id)==="FC"))
-    out.push({id:"own",name:SCOPE_LABEL.own},{id:"fc",name:SCOPE_LABEL.fc});
+  if(us.some(s=>ownOf(s.id)==="直営"))out.push({id:"own",name:SCOPE_LABEL.own});
   if(us.some(s=>brandOf(s.id)==="SELFURUGI"))out.push({id:"sf",name:SCOPE_LABEL.sf});
   if(us.some(s=>brandOf(s.id)==="NOTIME"))out.push({id:"nt",name:SCOPE_LABEL.nt});
   return out;

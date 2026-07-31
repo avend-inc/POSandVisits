@@ -281,18 +281,18 @@ function storeMatch(sid,scope){
   return sid===scope;
 }
 const AGG_SCOPES={all:1,own:1,fc:1,sf:1,nt:1};
-const SCOPE_LABEL={all:"総合（全店）",own:"直営（合計）",fc:"合計（FC）",sf:"合計（SELFURUGI）",nt:"合計（NOTIME）"};
+const SCOPE_LABEL={all:"全店",own:"直営店",fc:"合計（FC）",sf:"SELFURUGI（FC）",nt:"NOTIME（FC）"};
 // 店名の頭文字でブランドを判定（SELFURUGI…／NOTIME…／その他）
 function brandOf(sid){const s=storeMeta(sid);const n=(s&&s.name)||"";
   if(n.indexOf("SELFURUGI")===0)return "SELFURUGI"; if(n.indexOf("NOTIME")===0)return "NOTIME"; return "その他";}
 function visibleOf(sid){const s=storeMeta(sid);return s?(s.visible!==false):true;}
 // いま表示できる合計スコープの一覧（該当店がある合計だけ出す）
 function aggScopeList(){
+  // 店舗セレクタの先頭に出すグループ。並び：全店 / 直営店 / SELFURUGI（FC）/ NOTIME（FC）。
+  // 該当する店舗があるグループだけ表示する。
   const us=usableStores();
   const out=[{id:"all",name:SCOPE_LABEL.all}];
-  if(us.some(s=>ownOf(s.id)==="直営") && us.some(s=>ownOf(s.id)==="FC")){
-    out.push({id:"own",name:SCOPE_LABEL.own},{id:"fc",name:SCOPE_LABEL.fc});
-  }
+  if(us.some(s=>ownOf(s.id)==="直営"))out.push({id:"own",name:SCOPE_LABEL.own});
   if(us.some(s=>brandOf(s.id)==="SELFURUGI"))out.push({id:"sf",name:SCOPE_LABEL.sf});
   if(us.some(s=>brandOf(s.id)==="NOTIME"))out.push({id:"nt",name:SCOPE_LABEL.nt});
   return out;
@@ -449,7 +449,7 @@ function render(){
     </div>
     <div class="foot">
       「着地見込み」は<b>今月</b>を選んだときだけ表示します（月末までの予測・税込。日別・週別などでは非表示）。
-      店舗比較は「選んだ店舗と<b>同じ分類</b>（直営／SELFURUGI FC／NOTIME FC）」の店舗どうしで並べます。総合・合計を選ぶと<b>分類ごとの合計</b>を比較します。
+      店舗比較は、<b>全店</b>では分類ごとの合計、<b>直営店／SELFURUGI（FC）／NOTIME（FC）</b>ではそのグループの店舗、<b>個別の店</b>ではその店と同じ分類の店舗を並べます。
       指標：購入率＝取引数÷来店客数／客単価（税込）＝税込売上÷取引数／平均購入数＝総点数÷取引数／商品単価（税抜）＝税抜売上÷総点数。来店客数はデジテール、売上はcashier。カテゴリの割合は「全カテゴリ合計」に対する比率です。
     </div>`;
 
@@ -494,18 +494,27 @@ function draw(){
   // ---- ① 店舗比較（選んだ店舗と同じ分類の店舗どうし）----
   let rowsC=[];
   if(!AGG_SCOPES[state.store]){
+    // 特定の店舗：同じ分類の店舗どうしを並べ、最後に分類合計。
     const cls=classOf(state.store), members=classMembers(cls);
     rowsC=members.map(s=>{const p=sumRows(rowsIn(state.from,state.to,s.id));p._name=s.name;p._sel=(s.id===state.store);p._land=showLand?computeAutoLandingIn(s.id,fym):null;return p;});
     const ids=new Set(members.map(s=>s.id));
     const t=sumRowsForIds(state.from,state.to,ids);t._name=cls+" 合計";t._agg=true;t._land=showLand?computeAutoLandingForIds(ids,fym):null;rowsC.push(t);
     document.getElementById("cmp-note").textContent=`分類「${cls}」の店舗（${state.from} 〜 ${state.to}）`;
-  }else{
+  }else if(state.store==="all"){
+    // 全店：分類ごとの合計を比較（直営／SELFURUGI FC／NOTIME FC）＋総合。
     for(const cls of classesInData()){
       const ids=new Set(classMembers(cls).map(s=>s.id));
       const t=sumRowsForIds(state.from,state.to,ids);t._name=cls;t._agg=true;t._land=showLand?computeAutoLandingForIds(ids,fym):null;rowsC.push(t);
     }
     const tot=sumRows(rowsIn(state.from,state.to,"all"));tot._name="総合";tot._agg=true;tot._sel=true;tot._land=showLand?computeAutoLandingIn("all",fym):null;rowsC.push(tot);
     document.getElementById("cmp-note").textContent=`分類ごとの合計（${state.from} 〜 ${state.to}）`;
+  }else{
+    // 直営店／SELFURUGI（FC）／NOTIME（FC）：そのグループの店舗を並べ、最後にグループ合計。
+    const members=usableStores().filter(s=>storeMatch(s.id,state.store));
+    rowsC=members.map(s=>{const p=sumRows(rowsIn(state.from,state.to,s.id));p._name=s.name;p._land=showLand?computeAutoLandingIn(s.id,fym):null;return p;});
+    const ids=new Set(members.map(s=>s.id));
+    const t=sumRowsForIds(state.from,state.to,ids);t._name=SCOPE_LABEL[state.store]+" 合計";t._agg=true;t._sel=true;t._land=showLand?computeAutoLandingForIds(ids,fym):null;rowsC.push(t);
+    document.getElementById("cmp-note").textContent=`「${SCOPE_LABEL[state.store]}」の店舗（${state.from} 〜 ${state.to}）`;
   }
   drawCompare(rowsC,showLand);
 
