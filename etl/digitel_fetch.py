@@ -89,7 +89,8 @@ def discover_stores(page) -> dict[str, str]:
     out: dict[str, str] = {}
     for name, slug in pairs:
         name = name.strip()
-        if not name or "本部" in name:
+        # 本部（ブランド名そのまま = アカウントの入れ物。slugは"code"等で店ではない）は除く
+        if not name or name in ("NOTIME", "SELFURUGI") or "本部" in name:
             continue
         out.setdefault(name, slug)
     return out
