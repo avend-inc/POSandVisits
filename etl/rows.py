@@ -194,3 +194,79 @@ def visits_rows(csv_text: str, store_id: int,
             "purchase_rate":   _to_float(record.get("purchase_rate")),
         })
     return rows
+
+
+# ============================================================
+# デジテール 売上（無人店の売上をデジテールから取る店＝伊予松前 など）
+# ============================================================
+# デジテール売上CSVの列（isMujin=0＝無人+有人）:
+#   日付,合計売上金額,無人売上金額,有人売上金額,平均購買単価,売り上げ回数
+DIGITEL_SALES_MAP = {
+    "日付":         "date",
+    "合計売上金額": "total",
+    "平均購買単価": "avg",
+    "売り上げ回数": "count",
+}
+# sales の pos_name。既存POS(cashier/SIPOS)と混ざらないよう別名にする。
+DIGITEL_SALES_POS = "DIGITEL"
+
+
+def digitel_sales_rows(csv_text: str, store_id: int,
+                       business_date: str | None) -> list[dict]:
+    """
+    デジテールの“売上”CSV → sales テーブルに入れる行の一覧。
+
+    デジテールは「1日の合計売上」と「売り上げ回数(取引数)」しか出ないため、
+    その日の合計を回数ぶんの取引に割り振って入れる（＝取引数・客単価が正しく出る）。
+    合計が端数でズレないよう、基準額＋余りを先頭の取引から1円ずつ足して合わせる。
+    明細（商品カテゴリ・点数）は無いので line_category='（明細なし）'。
+    """
+    try:
+        df = pd.read_csv(StringIO(csv_text), dtype=str)
+    except Exception as e:
+        raise EtlError(f"デジテールの売上CSVを読めませんでした: {e}")
+    if len(df) == 0:
+        return []
+
+    df = df.rename(columns=DIGITEL_SALES_MAP)
+    if "date" not in df.columns or "total" not in df.columns or "count" not in df.columns:
+        raise EtlError(
+            "デジテール売上CSVの見出しが想定と違います。\n"
+            f"  実際: {list(df.columns)}\n"
+            "  → etl/rows.py の DIGITEL_SALES_MAP を直してください。"
+        )
+
+    df["date"] = df["date"].astype(str).str.strip()
+    if business_date is not None:
+        df = df[df["date"] == business_date]
+
+    rows: list[dict] = []
+    for record in df.to_dict(orient="records"):
+        day = str(record.get("date") or "").strip()
+        total = _to_int(record.get("total")) or 0
+        n = _to_int(record.get("count")) or 0
+        if not day or n <= 0 or total <= 0:
+            continue
+        base, rem = divmod(total, n)          # 合計を回数で割る（端数は rem 件に1円ずつ）
+        for i in range(n):
+            amount = base + (1 if i < rem else 0)
+            rows.append({
+                "business_date": day,
+                "store_id":      store_id,
+                "pos_name":      DIGITEL_SALES_POS,
+                "tx_id":         f"{day}-{i}",     # その日の擬似取引番号（回数ぶん）
+                "line_no":       0,
+                "ts":            None,
+                "sales_ex_tax":  round(amount / 1.10, 2),
+                "sales_in_tax":  float(amount),
+                "tx_qty":        None,             # 点数（商品数）はデジテールに無い
+                "line_category": "（明細なし）",
+                "line_price":    0.0,
+                "line_qty":      0.0,
+                "line_amount":   float(amount),
+                "bundle_code":   "",
+                "is_parent":     False,
+                "is_child":      False,
+                "is_normal":     True,
+            })
+    return rows

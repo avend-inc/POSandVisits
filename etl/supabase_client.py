@@ -121,6 +121,13 @@ class Supabase:
             self._raise(resp, f"読み出し（{table}）")
         return resp.json()
 
+    def delete(self, table: str, params: dict[str, str]) -> None:
+        """条件に合う行を削除する（例: ある店のDIGITEL売上を範囲で消す）。"""
+        resp = self._send("DELETE", self._endpoint(table), params=params,
+                          headers={"Prefer": "return=minimal"})
+        if resp.status_code >= 400:
+            self._raise(resp, f"削除（{table}）")
+
     def rpc(self, func: str, args: dict) -> object:
         """データベースの関数（RPC）を呼ぶ。例: merge_store(...)。"""
         resp = self._send(
