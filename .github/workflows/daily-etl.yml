@@ -78,6 +78,8 @@ jobs:
       CASHIER_PW: ${{ secrets.CASHIER_PW }}
       DIGITAIL_ID: ${{ secrets.DIGITAIL_ID }}
       DIGITAIL_PW: ${{ secrets.DIGITAIL_PW }}
+      DIGITAIL_SF_ID: ${{ secrets.DIGITAIL_SF_ID }}
+      DIGITAIL_SF_PW: ${{ secrets.DIGITAIL_SF_PW }}
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
       # 任意：これを登録するとダッシュボードが「Googleログイン制(社内のみ)」になる。

@@ -196,6 +196,16 @@ class Supabase:
         rows = self.select("stores", {"select": "id,name"})
         return {r["name"]: r["id"] for r in rows}
 
+    def update_store(self, store_id: int, patch: dict) -> None:
+        """店舗マスタの一部の列を更新する（例: digitel_slug を後から埋める）。"""
+        resp = self._send(
+            "PATCH", self._endpoint("stores") + f"?id=eq.{store_id}",
+            headers={"Prefer": "return=minimal"},
+            data=json.dumps(patch, ensure_ascii=False).encode("utf-8"),
+        )
+        if resp.status_code >= 400:
+            self._raise(resp, "店舗マスタの更新")
+
     def get_or_create_store(self, name: str, cache: dict[str, int]) -> int:
         """
         店舗名からidを引く。知らない店舗なら自動で登録する。
