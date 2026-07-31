@@ -116,15 +116,16 @@ def canonical_store_name(name: str) -> str:
 
 def better_store_name(a: str, b: str) -> str:
     """
-    2つの店舗名のうち、表示名としてふさわしい方（情報量の多い方）を選ぶ。
+    2つの店舗名のうち、表示名としてふさわしい方を選ぶ。
     重複店をまとめるときに「どちらの名前を残すか」を決めるのに使う。
-    優先順位: ブランド名で始まる > 末尾が「店」 > 文字数が多い。
+    優先順位: ブランド名で始まる > 末尾が「店」 > 余計な空白が無い > 文字数が多い。
     """
     def score(x: str) -> tuple:
         x = (x or "").strip()
         brand = 1 if (x.startswith("NOTIME") or x.startswith("SELFURUGI")) else 0
         has_ten = 1 if x.endswith("店") else 0
-        return (brand, has_ten, len(x))
+        no_space = 0 if re.search(r"\s", x) else 1
+        return (brand, has_ten, no_space, len(re.sub(r"\s+", "", x)))
     return a if score(a) >= score(b) else b
 
 # ブラウザ操作のタイムアウト（ミリ秒）とリトライ
