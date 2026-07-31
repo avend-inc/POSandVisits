@@ -88,31 +88,41 @@ def main() -> int:
         names = option_texts()
         print(f"  店舗名: {json.dumps(names, ensure_ascii=False)}")
 
-        # 2) 各店を選択して、URL / ダウンロードリンク から スラッグ を確定する。
-        print("\n----- 各店の スラッグ（URL/ダウンロードリンク）-----")
-        mapping = {}
-        for name in [n for n in names if n and n != "本部"]:
-            if not open_dropdown():
-                print(f"  {name}: ドロップダウンを開けませんでした"); continue
-            page.wait_for_timeout(500)
-            clicked = False
-            for sel in [f"[data-slot='select-item']:has-text('{name}')",
-                        f"[role=option]:has-text('{name}')"]:
-                try:
-                    page.locator(sel).first.click(timeout=3_000); clicked = True; break
-                except Exception:
-                    continue
-            if not clicked:
-                print(f"  {name}: 選択できませんでした"); continue
-            page.wait_for_timeout(1200)
-            info = page.evaluate(r"""() => {
-              const dl=[...document.querySelectorAll('a[href]')].map(a=>a.getAttribute('href'))
-                       .find(h=>h && h.includes('/kpi/visits'));
-              return {path: location.pathname, dl: dl||null};
-            }""")
-            mapping[name] = info
-            print(f"  {name} -> path={info.get('path')} dl={info.get('dl')}")
-        print(f"\n  === 店舗→スラッグ候補 ===\n  {json.dumps(mapping, ensure_ascii=False)}")
+        # 2) 店舗リストは Remix のHTMLに埋め込まれている想定。各店名の周辺を出して
+        #    スラッグ/IDの入り方を確認する（単発・堅牢）。
+        print("\n----- HTML内 店舗名の周辺（スラッグ/IDの確認）-----")
+        try:
+            html = page.content()
+        except Exception:
+            html = ""
+        print(f"  （HTML長: {len(html)}）")
+        for name in [n for n in names if n and n != "本部"][:4]:
+            idx = html.find(name)
+            if idx < 0:
+                print(f"  {name}: HTMLに見つからず"); continue
+            ctx = html[max(0, idx - 160):idx + 60].replace("\n", " ")
+            print(f"  【{name}】…{ctx}…")
+
+        # 3) 埋め込みJSON配列から {name, slug/id} の組を機械的に拾ってみる。
+        print("\n----- 埋め込みデータから 名前↔スラッグ を抽出 -----")
+        try:
+            pairs = page.evaluate(r"""(names) => {
+              const html = document.documentElement.outerHTML;
+              const out = {};
+              for(const nm of names){
+                if(nm==='本部')continue;
+                // 名前の近く（前後300字）から slug/uuid/id らしき文字を拾う
+                let i = html.indexOf(nm);
+                if(i<0){ out[nm]=null; continue; }
+                const seg = html.slice(Math.max(0,i-300), i+300);
+                const m = seg.match(/"(?:slug|storeSlug|store_slug|code|uuid|id)"\s*:\s*"([^"]{2,60})"/g);
+                out[nm] = m ? m.slice(0,6) : null;
+              }
+              return out;
+            }""", names)
+        except Exception as e:
+            pairs = f"(失敗 {e})"
+        print(f"  {json.dumps(pairs, ensure_ascii=False)}")
 
         dump_page(page, f"digitel_dashboard_{label}")
     print("\n===== 調査おわり =====")
