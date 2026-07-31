@@ -32,9 +32,11 @@ from .settings import (
 )
 
 
-def login(page) -> None:
-    user = require_env("DIGITAIL_ID", "デジテールのユーザー名（メールアドレスではない）")
-    password = require_env("DIGITAIL_PW", "デジテールのパスワード")
+def login(page, user: str | None = None, password: str | None = None) -> None:
+    # 2アカウント（NOTIME / SELFURUGI）対応のため、認証情報は引数でも渡せる。
+    # 省略時は従来どおり DIGITAIL_ID / DIGITAIL_PW を使う。
+    user = user or require_env("DIGITAIL_ID", "デジテールのユーザー名（メールアドレスではない）")
+    password = password or require_env("DIGITAIL_PW", "デジテールのパスワード")
 
     print("デジテールにログインしています...")
     page.goto(DIGITEL_LOGIN_URL, wait_until="domcontentloaded")
