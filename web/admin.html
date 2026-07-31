@@ -53,10 +53,24 @@
   .gbtn .g{width:18px;height:18px;border-radius:50%;background:conic-gradient(#ea4335 0 25%,#fbbc05 0 50%,#34a853 0 75%,#4285f4 0);}
   .err{padding:20px;color:var(--bad);font-weight:600;}
   .notice{background:var(--accent-weak);border:1px solid transparent;border-radius:12px;padding:16px 18px;color:var(--ink);font-size:14px;line-height:1.8;}
+  body{padding-bottom:72px;}
+  .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:60;background:var(--surface);border-top:1px solid var(--border);box-shadow:0 -2px 12px rgba(0,0,0,.07);padding-bottom:env(safe-area-inset-bottom);}
+  .tabbar-in{max-width:600px;margin:0 auto;display:flex;}
+  .tabbar a{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 2px 9px;text-decoration:none;color:var(--ink2);font-size:11px;font-weight:700;letter-spacing:.02em;-webkit-tap-highlight-color:transparent;}
+  .tabbar a .ic{font-size:19px;line-height:1;filter:grayscale(.25) opacity(.85);}
+  .tabbar a.on{color:var(--accent);} .tabbar a.on .ic{filter:none;} .tabbar a:active{opacity:.55;}
 </style>
 </head>
 <body>
 <div class="wrap" id="app"><div class="sub" style="padding:40px 0">読み込み中…</div></div>
+<nav class="tabbar"><div class="tabbar-in">
+  <a href="index.html"><span class="ic">📊</span>サマリー</a>
+  <a href="pl.html"><span class="ic">📋</span>予実</a>
+  <a href="trends.html"><span class="ic">📈</span>推移</a>
+  <a href="promo.html"><span class="ic">🏷️</span>販促</a>
+  <a href="ask.html"><span class="ic">🔍</span>分析AI</a>
+  <a href="admin.html" class="on"><span class="ic">⚙️</span>管理</a>
+</div></nav>
 <script>
 "use strict";
 const CONFIG_URL="https://rwfcsanmqvkxiuwdeddv.supabase.co/storage/v1/object/public/dashboard/config.json";
@@ -131,7 +145,9 @@ async function render(){
     <div class="panel">
       <h2>店舗管理</h2>
       <p class="note">直営/FC の区分・デジテール入店slug・オープン日などを設定できます。売上取り込みは<b>CSVの店舗名で自動的に店舗を追加</b>します（新しいFC店はここに自動で現れます）。<br>
-        「入店取得」＝夜間などデジテール来店を<b>集める</b>か／「KPIに来店」＝来店数・購入率の<b>KPIに使う</b>か（例：下北沢は取得ON・KPI OFF）。</p>
+        「<b>表示</b>」＝ダッシュボード（サマリー・予実・推移・販促）に<b>出す/隠す</b>（チェックを外すと一覧・店舗選択・合計から外れます。データ取り込みは続きます）。<br>
+        「入店取得」＝夜間などデジテール来店を<b>集める</b>か／「KPIに来店」＝来店数・購入率の<b>KPIに使う</b>か（例：下北沢は取得ON・KPI OFF）。<br>
+        保存後、ダッシュボードは次回の集計更新（毎日の取り込み時、または管理者の再集計）で反映されます。</p>
       <div class="tblwrap"><table id="stbl"><tbody><tr><td class="sub">読み込み中…</td></tr></tbody></table></div>
       <div class="addrow">
         <input id="s_name" placeholder="店舗名（例：下北沢）">
@@ -163,14 +179,10 @@ async function render(){
     </div>
     <div class="panel">
       <h2>バンドル名（SALE）</h2>
-      <p class="note">レジのバンドル（セット割＝SALE）の<b>コード→名称</b>の対応です。新しいSALEを作ったら、ここに<b>コードと名前を1行足す</b>だけで「🏷️販促」に名称が出ます（SQLは不要）。<br>
-        コードは cashier の「バンドル」画面や、🏷️販促タブで名称が「BUNDLE0xx」のまま出ている行で分かります。</p>
+      <p class="note">レジのバンドル（セット割＝SALE）の<b>コード→名称</b>の一覧です。<br>
+        <b>この一覧は自動で更新されます</b>。毎日の取り込みで cashier の「バンドル」画面から名称を取得し、
+        新しいSALEができれば自動で登録します。<b>手入力は不要</b>です（「🏷️販促」タブに名称がそのまま出ます）。</p>
       <div class="tblwrap"><table id="btbl"><tbody><tr><td class="sub">読み込み中…</td></tr></tbody></table></div>
-      <div class="addrow">
-        <input id="b_code" placeholder="コード（例：BUNDLE016）" style="width:180px">
-        <input id="b_name" class="wide" placeholder="名前（例：山形店_3点20%OFF）">
-        <button class="btn" id="b_add">バンドル名を追加</button>
-      </div>
       <p class="msg" id="b_msg"></p>
     </div>`);
   document.getElementById("themebtn").onclick=()=>{const r=document.documentElement;const c=r.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");r.setAttribute("data-theme",c==="dark"?"light":"dark");};
@@ -178,40 +190,23 @@ async function render(){
   document.getElementById("u_add").onclick=addUser;
   document.getElementById("s_add").onclick=addStore;
   document.getElementById("p_add").onclick=addPos;
-  document.getElementById("b_add").onclick=addBundle;
   await loadUsers(); await loadStores(); await loadPos(); await loadBundles();
 }
 
+// バンドル名は日次ETLが自動で取得・登録するので、ここは「確認用の一覧」（読み取り専用）。
 async function loadBundles(){
-  const {data,error}=await SB.from("bundle_master").select("code,name,category").order("code");
+  const {data,error}=await SB.from("bundle_master").select("code,name,category,updated_at").order("code");
   const tb=document.querySelector("#btbl");
   if(error){tb.innerHTML=`<tbody><tr><td class="err">読み込み失敗：${esc(error.message)}</td></tr></tbody>`;return;}
-  const head=`<thead><tr><th>コード</th><th>名前</th><th></th></tr></thead>`;
+  const fmt=t=>{try{return t?new Date(t).toLocaleDateString("ja-JP"):"";}catch(e){return"";}};
+  const head=`<thead><tr><th>コード</th><th>名前（SALE）</th><th>カテゴリ</th><th>更新日</th></tr></thead>`;
   const rows=(data||[]).map(b=>`<tr>
     <td>${esc(b.code)}</td>
-    <td><input data-code="${esc(b.code)}" class="bname" value="${esc(b.name||"")}" style="min-width:220px"></td>
-    <td><button class="btn ghost" data-bsave="${esc(b.code)}">保存</button> <button class="btn danger" data-bdel="${esc(b.code)}">削除</button></td></tr>`).join("");
-  tb.innerHTML=head+"<tbody>"+(rows||'<tr><td class="sub" colspan="3">まだ登録がありません。下の行から追加してください。</td></tr>')+"</tbody>";
-  tb.querySelectorAll("[data-bsave]").forEach(bt=>bt.onclick=async()=>{
-    const code=bt.dataset.bsave;
-    const name=(tb.querySelector(`.bname[data-code="${CSS.escape(code)}"]`).value||"").trim();
-    const {error}=await SB.from("bundle_master").update({name,updated_at:new Date().toISOString()}).eq("code",code);
-    msg("b_msg", error?("保存失敗："+error.message):`${code} を保存しました`, !error);
-  });
-  tb.querySelectorAll("[data-bdel]").forEach(bt=>bt.onclick=async()=>{
-    const code=bt.dataset.bdel; if(!confirm(`${code} を削除しますか？`))return;
-    const {error}=await SB.from("bundle_master").delete().eq("code",code);
-    msg("b_msg", error?("削除失敗："+error.message):`${code} を削除しました`, !error);
-    if(!error)loadBundles();
-  });
-}
-async function addBundle(){
-  const code=(document.getElementById("b_code").value||"").trim();
-  const name=(document.getElementById("b_name").value||"").trim();
-  if(!code){msg("b_msg","コードは必須です",false);return;}
-  const {error}=await SB.from("bundle_master").upsert({code,name,updated_at:new Date().toISOString()},{onConflict:"code"});
-  msg("b_msg", error?("追加失敗："+error.message):`${code} を追加しました`, !error);
-  if(!error){document.getElementById("b_code").value="";document.getElementById("b_name").value="";loadBundles();}
+    <td>${esc(b.name||"")}</td>
+    <td class="sub">${esc(b.category||"")}</td>
+    <td class="sub">${esc(fmt(b.updated_at))}</td></tr>`).join("");
+  tb.innerHTML=head+"<tbody>"+(rows||'<tr><td class="sub" colspan="4">まだ登録がありません（次回の取り込みで自動登録されます）。</td></tr>')+"</tbody>";
+  msg("b_msg", `${(data||[]).length}件（自動取得）`, true);
 }
 
 function msg(id,text,ok){const el=document.getElementById(id);if(el){el.textContent=text;el.className="msg "+(ok?"ok":"err");}}
@@ -256,9 +251,10 @@ async function loadStores(){
   STORESCACHE=data||[];
   const psel=document.getElementById("p_store");
   if(psel)psel.innerHTML='<option value="">（アカウント全体・複数店）</option>'+STORESCACHE.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join("");
-  const head=`<thead><tr><th>店舗</th><th>区分</th><th>入店slug</th><th>入店取得</th><th>KPIに来店</th><th>オープン日</th><th></th></tr></thead>`;
+  const head=`<thead><tr><th>店舗</th><th>表示</th><th>区分</th><th>入店slug</th><th>入店取得</th><th>KPIに来店</th><th>オープン日</th><th></th></tr></thead>`;
   const rows=data.map(s=>`<tr>
     <td>${esc(s.name)} <span class="sub">${esc(s.code||"")}</span></td>
+    <td style="text-align:center"><input type="checkbox" data-id="${s.id}" class="svis" ${s.visible!==false?"checked":""} title="ダッシュボードに表示"></td>
     <td><select data-id="${s.id}" class="sown"><option value="直営" ${(s.ownership||"直営")==="直営"?"selected":""}>直営</option><option value="FC" ${s.ownership==="FC"?"selected":""}>FC</option></select></td>
     <td><input data-id="${s.id}" class="sslug" value="${esc(s.digitel_slug||"")}" placeholder="—" style="width:130px"></td>
     <td style="text-align:center"><input type="checkbox" data-id="${s.id}" class="sentry" ${s.has_entry_data?"checked":""}></td>
@@ -272,9 +268,16 @@ async function loadStores(){
     const slug=tb.querySelector(`.sslug[data-id="${id}"]`).value.trim()||null;
     const entry=tb.querySelector(`.sentry[data-id="${id}"]`).checked;
     const kv=tb.querySelector(`.skv[data-id="${id}"]`).checked;
+    const vis=tb.querySelector(`.svis[data-id="${id}"]`).checked;
     const open=tb.querySelector(`.sopen[data-id="${id}"]`).value||null;
-    const {error}=await SB.from("stores").update({ownership:own,digitel_slug:slug,has_entry_data:entry,kpi_visitors:kv,open_date:open}).eq("id",id);
-    msg("s_msg", error?("保存失敗："+error.message):"店舗を保存しました", !error);
+    const {data,error}=await SB.from("stores").update({ownership:own,digitel_slug:slug,has_entry_data:entry,kpi_visitors:kv,visible:vis,open_date:open}).eq("id",id).select();
+    if(error){ msg("s_msg","保存失敗："+error.message,false); }
+    else if(!data||!data.length){
+      // RLSで弾かれると 0件・エラー無し で返る＝「保存したつもりで戻る」の原因。
+      msg("s_msg","保存できませんでした（権限）。あなたのアカウントに更新権限が無い可能性があります。管理者に sql/012_fix_store_ownership.sql の実行を依頼してください。",false);
+    } else {
+      msg("s_msg","店舗を保存しました",true);
+    }
   });
 }
 async function addStore(){
