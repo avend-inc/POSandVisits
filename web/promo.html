@@ -65,11 +65,13 @@
 <body>
 <div class="wrap" id="app"><div class="sub" style="padding:40px 0">読み込み中…</div></div>
 <nav class="tabbar"><div class="tabbar-in">
-  <a href="index.html"><span class="ic">📊</span>サマリー</a>
+  <a href="index.html?g=own"><span class="ic">🏢</span>直営</a>
+  <a href="index.html?g=fc"><span class="ic">🏬</span>FC</a>
   <a href="pl.html"><span class="ic">📋</span>予実</a>
   <a href="trends.html"><span class="ic">📈</span>推移</a>
   <a href="promo.html" class="on"><span class="ic">🏷️</span>販促</a>
   <a href="ask.html"><span class="ic">🔍</span>分析AI</a>
+  <a href="admin.html" id="tab-admin" style="display:none"><span class="ic">⚙️</span>管理</a>
 </div></nav>
 <script>
 "use strict";
@@ -124,12 +126,35 @@ function showDenied(email){ screen(`<div class="gate"><div class="logo">🏷️ 
   <button class="gbtn" id="lo"><span class="g"></span>別のアカウントでログイン</button></div>`);
   document.getElementById("lo").onclick=async()=>{try{await SB.auth.signOut();}catch(e){}location.reload();}; }
 
-function usableStores(){const w=new Set(DATA.daily.map(r=>r.s));return (DATA.stores||[]).filter(s=>w.has(s.id));}
-function ownOf(sid){const s=(DATA.stores||[]).find(x=>String(x.id)===String(sid));return (s&&s.own)?s.own:"直営";}
+function usableStores(){const w=new Set(DATA.daily.map(r=>r.s));return (DATA.stores||[]).filter(s=>w.has(s.id)&&s.visible!==false);}
+function storeMeta(sid){return (DATA.stores||[]).find(x=>String(x.id)===String(sid))||null;}
+function ownOf(sid){const s=storeMeta(sid);return (s&&s.own)?s.own:"直営";}
+function brandOf(sid){const s=storeMeta(sid);const n=(s&&s.name)||"";
+  if(n.indexOf("SELFURUGI")===0)return "SELFURUGI"; if(n.indexOf("NOTIME")===0)return "NOTIME"; return "その他";}
+function visibleOf(sid){const s=storeMeta(sid);return s?(s.visible!==false):true;}
 function hasFC(){return usableStores().some(s=>ownOf(s.id)!=="直営");}
-function inScope(sid){ if(state.store==="all")return true; if(state.store==="own")return ownOf(sid)==="直営"; return sid===state.store; }
+const AGG_SCOPES={all:1,own:1,fc:1,sf:1,nt:1};
+const SCOPE_LABEL={all:"全店",own:"直営店",fc:"合計（FC）",sf:"SELFURUGI（FC）",nt:"NOTIME（FC）"};
+function inScope(sid){
+  if(!visibleOf(sid))return false;
+  if(state.store==="all")return true;
+  if(state.store==="own")return ownOf(sid)==="直営";
+  if(state.store==="fc") return ownOf(sid)==="FC";
+  if(state.store==="sf") return brandOf(sid)==="SELFURUGI";
+  if(state.store==="nt") return brandOf(sid)==="NOTIME";
+  return sid===state.store;
+}
+function aggScopeList(){
+  const us=usableStores();
+  const out=[{id:"all",name:SCOPE_LABEL.all}];
+  if(us.some(s=>ownOf(s.id)==="直営"))out.push({id:"own",name:SCOPE_LABEL.own});
+  if(us.some(s=>brandOf(s.id)==="SELFURUGI"))out.push({id:"sf",name:SCOPE_LABEL.sf});
+  if(us.some(s=>brandOf(s.id)==="NOTIME"))out.push({id:"nt",name:SCOPE_LABEL.nt});
+  return out;
+}
+function syncAdminTab(){const t=document.getElementById("tab-admin");if(t)t.style.display=(ME&&ME.role==="admin")?"":"none";}
 function inRange(d){ return d>=state.from&&d<=state.to; }
-function storeName(){return state.store==="all"?"総合（全店）":state.store==="own"?"直営（合計）":(usableStores().find(s=>s.id===state.store)||{}).name||"";}
+function storeName(){return AGG_SCOPES[state.store]?SCOPE_LABEL[state.store]:(usableStores().find(s=>s.id===state.store)||{}).name||"";}
 
 // バンドル(SALE)別集計：コードごとに 利用数・売上・期間・店舗
 function bundleAgg(){
@@ -144,8 +169,9 @@ function couponAgg(){ let n=0,amt=0; for(const r of DATA.daily){ if(!inScope(r.s
 function totalSalesIn(){ let s=0; for(const r of DATA.daily){ if(!inScope(r.s)||!inRange(r.d))continue; s+=r.in||0; } return s; }
 
 function render(){
+  syncAdminTab();
   const us=usableStores();
-  const stores=[{id:"all",name:"総合（全店）"},...(hasFC()?[{id:"own",name:"直営（合計）"}]:[]),...us.map(s=>({id:s.id,name:s.name}))];
+  const stores=[...aggScopeList(),...us.map(s=>({id:s.id,name:s.name}))];
   const hasBundleData=(DATA.bundles||[]).length>0;
   const namedCount=Object.keys(DATA.bundleNames||{}).length;
   screen(`
@@ -168,7 +194,7 @@ function render(){
     <div id="body"></div>
     <p class="note">SALE＝レジのバンドル（セット割）。利用数＝そのバンドルを使った伝票数、売上＝バンドル（セール商品）の金額。名称は「バンドル名 取り込み」で反映されます${namedCount?`（登録済み ${namedCount}件）`:"（未登録＝コード表示）"}。クーポンは「クーポン」明細の利用数・割引額。データは締日まで。</p>`);
   document.getElementById("themebtn").onclick=()=>{const r=document.documentElement;const c=r.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");r.setAttribute("data-theme",c==="dark"?"light":"dark");};
-  document.getElementById("store").onchange=e=>{const v=e.target.value;state.store=(v==="all"||v==="own")?v:+v;render();};
+  document.getElementById("store").onchange=e=>{const v=e.target.value;state.store=AGG_SCOPES[v]?v:+v;render();};
   document.getElementById("from").onchange=e=>{state.from=e.target.value||DATA._min;if(state.from>state.to)state.to=state.from;render();};
   document.getElementById("to").onchange=e=>{state.to=e.target.value||DATA._max;if(state.to<state.from)state.from=state.to;render();};
   document.querySelectorAll(".chip[data-preset]").forEach(b=>b.onclick=()=>{setPreset(b.dataset.preset);render();});
@@ -185,7 +211,7 @@ function drawBody(hasBundleData){
   const saleTotal=rows.reduce((s,r)=>s+r.a,0), saleUses=rows.reduce((s,r)=>s+r.n,0);
   rows.sort((a,b)=> state.sort==="n"? b.n-a.n : state.sort==="name"? (a.name<b.name?-1:1) : b.a-a.a);
   const maxA=Math.max(1,...rows.map(r=>r.a));
-  const showStore=(state.store==="all"||state.store==="own");
+  const showStore=!!AGG_SCOPES[state.store];
   const nm=id=>(usableStores().find(s=>s.id===id)||{}).name||id;
 
   const hero=`<div class="panel"><h2>${esc(storeName())}｜${state.from} 〜 ${state.to}</h2>
