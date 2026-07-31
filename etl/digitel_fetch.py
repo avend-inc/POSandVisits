@@ -18,6 +18,7 @@
 """
 from __future__ import annotations
 
+import re
 import time
 
 from .browser import browser_page, dump_page
@@ -64,6 +65,34 @@ def login(page, user: str | None = None, password: str | None = None) -> None:
             f"  → まずご自分のブラウザで {DIGITEL_LOGIN_URL} に入れるか確かめてください。"
         )
     print("  ログイン成功")
+
+
+def discover_stores(page) -> dict[str, str]:
+    """
+    ログインしたアカウントが見られる“全店舗”とスラッグを、手入力なしで拾う。
+
+    デジテールの管理画面は Remix（React）で、店舗一覧が画面のHTMLの中に
+    「"NOTIME鎌ヶ谷店","notime_kamagaya"」のように 名前・スラッグの並びで
+    埋め込まれている（実データで確認済み）。ここではその並びを機械的に拾う。
+
+    戻り値: {"NOTIME鎌ヶ谷店": "notime_kamagaya", ...}  ※本部などは除く
+    """
+    page.goto(DIGITEL_BASE_URL + "/", wait_until="domcontentloaded")
+    page.wait_for_timeout(2500)
+    # HTML内は \" とエスケープされていることがあるので素の " に戻してから拾う
+    html = page.content().replace('\\"', '"')
+
+    # 店名（NOTIME / SELFURUGI で始まる）のすぐ後ろに スラッグ（英小文字＋_）が続く並び
+    pairs = re.findall(
+        r'"((?:NOTIME|SELFURUGI)[^"]{0,30}?)"\s*,\s*"([a-z][a-z0-9_]{2,})"', html)
+
+    out: dict[str, str] = {}
+    for name, slug in pairs:
+        name = name.strip()
+        if not name or "本部" in name:
+            continue
+        out.setdefault(name, slug)
+    return out
 
 
 def fetch_store_csv(context, slug: str, start: str, end: str) -> str:
@@ -127,3 +156,55 @@ def fetch(slugs: dict[str, str], start: str, end: str,
                 time.sleep(wait)
 
     raise EtlError(f"デジテールのCSVを{RETRIES}回試しても取得できませんでした。\n{last_error}")
+
+
+def fetch_all(start: str, end: str, headless: bool = True,
+              user: str | None = None, password: str | None = None) -> dict[str, dict]:
+    """
+    ログインしたアカウントで“見える全店舗”を自動で見つけて、それぞれのCSVを取ってくる。
+
+    引数:
+        start / end : YYYY-MM-DD（同じ日にすればその1日ぶん）
+        user / password : 省略時は DIGITAIL_ID / DIGITAIL_PW（NOTIMEアカウント）
+    戻り値:
+        {"NOTIME鎌ヶ谷店": {"slug": "notime_kamagaya", "csv": "..."}, ...}
+        ※CSVが取れなかった店舗は入らない
+    """
+    last_error: Exception | None = None
+
+    for attempt in range(1, RETRIES + 1):
+        try:
+            with browser_page(headless=headless) as (page, context):
+                login(page, user, password)
+
+                stores = discover_stores(page)
+                if not stores:
+                    dump_page(page, "digitel_no_stores")
+                    raise EtlError(
+                        "デジテールの店舗一覧を画面から取得できませんでした。\n"
+                        "  （管理画面の作りが変わった可能性があります）"
+                    )
+                print(f"  このアカウントで見える店舗: {len(stores)}件 "
+                      f"{list(stores.keys())}")
+
+                results: dict[str, dict] = {}
+                for store_name, slug in stores.items():
+                    try:
+                        csv = fetch_store_csv(context, slug, start, end)
+                        results[store_name] = {"slug": slug, "csv": csv}
+                        print(f"  【{store_name}】CSV取得OK（{slug}）")
+                    except Exception as e:
+                        print(f"  【{store_name}】❌ {e}")
+
+                if not results:
+                    raise EtlError("見つかった全店舗でCSVの取得に失敗しました。")
+                return results
+
+        except Exception as e:
+            last_error = e
+            if attempt < RETRIES:
+                wait = RETRY_WAIT_SEC * attempt
+                print(f"  {attempt}回目失敗（{e}）。{wait}秒待って再試行します...")
+                time.sleep(wait)
+
+    raise EtlError(f"デジテールを{RETRIES}回試しても取得できませんでした。\n{last_error}")

@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import traceback
 from datetime import datetime
@@ -148,102 +149,115 @@ def run_digitel(sb: Supabase, business_date: str, run_id: str,
 
     started = now_iso()
 
-    stores = sb.select("stores", {
-        "select": "id,name,digitel_slug",
-        "has_entry_data": "eq.true",
-        "digitel_slug": "not.is.null",
-        "order": "id",
-    })
-    if not stores:
-        message = ("入店データを取る店舗が stores テーブルに1件もありません。\n"
-                   "  → sql/002_seed_stores.sql を Supabase の SQL Editor で実行してください。")
+    # 店舗マスタを1回だけ読み込む。スラッグ→店id、名前→店id を作っておく。
+    all_stores = sb.select("stores", {"select": "id,name,digitel_slug"})
+    slug_to_id: dict[str, int] = {
+        s["digitel_slug"]: s["id"] for s in all_stores if s.get("digitel_slug")
+    }
+    name_cache: dict[str, int] = {s["name"]: s["id"] for s in all_stores}
+
+    # 使うアカウント。NOTIMEは既定の DIGITAIL_ID/PW。
+    # SELFURUGIは DIGITAIL_SF_ID/PW が登録されていれば追加で取る。
+    accounts: list[tuple[str, str | None, str | None]] = [("NOTIME", None, None)]
+    sf_id = os.environ.get("DIGITAIL_SF_ID", "").strip()
+    sf_pw = os.environ.get("DIGITAIL_SF_PW", "").strip()
+    if sf_id and sf_pw:
+        accounts.append(("SELFURUGI", sf_id, sf_pw))
+    else:
+        print("  ℹ️ SELFURUGIアカウント（DIGITAIL_SF_ID / DIGITAIL_SF_PW）が未登録のため、"
+              "NOTIMEアカウントぶんだけ取得します。")
+
+    results: list[StepResult] = []
+
+    for label, user, pw in accounts:
+        print(f"\n--- デジテール {label} アカウント ---")
+
+        # このアカウントで“見える全店舗”を自動で見つけて、まとめて取得
+        try:
+            found = digitel_fetch.fetch_all(
+                business_date, business_date,
+                headless=headless, user=user, password=pw,
+            )
+        except Exception as e:
+            detail = f"{type(e).__name__}: {e}"
+            print(f"  ❌ {label}アカウント失敗: {detail}")
+            sb.log(run_id=run_id, source="digitel", business_date=business_date,
+                   store_id=None, status="failed",
+                   message=f"[{label}] {detail}"[:2000], started_at=started)
+            results.append(StepResult(f"digitel/{label}", "failed", detail))
+            continue
+
+        for name, info in found.items():
+            slug, csv_text = info["slug"], info["csv"]
+
+            # 店idを決める（スラッグ優先 → 店名 → 自動追加）。
+            # 新しく見つかった店には digitel_slug を書き込んで、次回からスラッグで安定して引けるようにする。
+            store_id = slug_to_id.get(slug)
+            if store_id is None:
+                store_id = sb.get_or_create_store(name, name_cache)
+                try:
+                    sb.update_store(store_id,
+                                    {"digitel_slug": slug, "has_entry_data": True})
+                except Exception as e:
+                    print(f"  （店舗への digitel_slug 記録は後回しにします：{e}）")
+                slug_to_id[slug] = store_id
+
+            # 既に取り込み済みならスキップ（--force で解除）
+            if not force and sb.already_succeeded("digitel", business_date, store_id):
+                message = (f"{business_date} の【{name}】来店数は既に取り込み済みです。"
+                           "二重取り込みは行いません（--force で解除）。")
+                print(f"  ⛔ NG: {message}")
+                sb.log(run_id=run_id, source="digitel", business_date=business_date,
+                       store_id=store_id, status="rejected_duplicate",
+                       message=message, started_at=started)
+                results.append(StepResult(f"digitel/{name}",
+                                          "rejected_duplicate", message))
+                continue
+
+            try:
+                save_raw(csv_text, "digitel", name, business_date)
+                payload = rows_mod.visits_rows(csv_text, store_id, business_date)
+
+                if not payload:
+                    message = (f"{business_date} の【{name}】来店数がCSVに含まれていません"
+                               "（デジテール側の反映待ちの可能性があります）。")
+                    print(f"  ℹ️ {message}")
+                    sb.log(run_id=run_id, source="digitel", business_date=business_date,
+                           store_id=store_id, status="no_data", message=message,
+                           started_at=started)
+                    results.append(StepResult(f"digitel/{name}", "no_data", message))
+                    continue
+
+                # 来店数は「その営業日の確定値」なので上書き（同じ日を取り直したら最新値へ）
+                affected = sb.upsert(
+                    "visits", payload, on_conflict="business_date,store_id,source"
+                )
+                visitors = payload[0].get("visitors")
+                print(f"  【{name}】来店 {visitors}人 → 反映 {affected}行（新規/更新）")
+
+                sb.log(run_id=run_id, source="digitel", business_date=business_date,
+                       store_id=store_id, status="success",
+                       rows_fetched=len(payload), rows_inserted=affected,
+                       rows_duplicate=0, message=f"来店客数 {visitors}",
+                       started_at=started)
+                results.append(StepResult(f"digitel/{name}", "success",
+                                          f"来店 {visitors}人",
+                                          len(payload), affected, 0))
+
+            except Exception as e:
+                detail = f"{type(e).__name__}: {e}"
+                print(f"  【{name}】❌ 失敗: {detail}")
+                sb.log(run_id=run_id, source="digitel", business_date=business_date,
+                       store_id=store_id, status="failed", message=detail[:2000],
+                       started_at=started)
+                results.append(StepResult(f"digitel/{name}", "failed", detail))
+
+    if not results:
+        message = "デジテールで取得できた店舗がありませんでした。"
         print(f"  ❌ {message}")
         sb.log(run_id=run_id, source="digitel", business_date=business_date,
                store_id=None, status="failed", message=message, started_at=started)
         return [StepResult("digitel", "failed", message)]
-
-    # 既に取り込み済みの店舗をよける
-    targets, results = {}, []
-    id_by_name = {}
-    for store in stores:
-        if not force and sb.already_succeeded("digitel", business_date, store["id"]):
-            message = (f"{business_date} の【{store['name']}】来店数は既に取り込み済みです。"
-                       "二重取り込みは行いません（--force で解除）。")
-            print(f"  ⛔ NG: {message}")
-            sb.log(run_id=run_id, source="digitel", business_date=business_date,
-                   store_id=store["id"], status="rejected_duplicate",
-                   message=message, started_at=started)
-            results.append(StepResult(f"digitel/{store['name']}",
-                                      "rejected_duplicate", message))
-            continue
-        targets[store["name"]] = store["digitel_slug"]
-        id_by_name[store["name"]] = store["id"]
-
-    if not targets:
-        return results
-
-    # --- まとめて取得 ---
-    try:
-        csv_by_store = digitel_fetch.fetch(targets, business_date, business_date,
-                                           headless=headless)
-    except Exception as e:
-        detail = f"{type(e).__name__}: {e}"
-        print(f"  ❌ 失敗: {detail}")
-        for name, store_id in id_by_name.items():
-            sb.log(run_id=run_id, source="digitel", business_date=business_date,
-                   store_id=store_id, status="failed", message=detail[:2000],
-                   started_at=started)
-            results.append(StepResult(f"digitel/{name}", "failed", detail))
-        return results
-
-    # --- 店舗ごとに保存 ---
-    for name, store_id in id_by_name.items():
-        csv_text = csv_by_store.get(name)
-        if csv_text is None:
-            message = "CSVを取得できませんでした（上のログを確認してください）。"
-            sb.log(run_id=run_id, source="digitel", business_date=business_date,
-                   store_id=store_id, status="failed", message=message,
-                   started_at=started)
-            results.append(StepResult(f"digitel/{name}", "failed", message))
-            continue
-
-        try:
-            save_raw(csv_text, "digitel", name, business_date)
-            payload = rows_mod.visits_rows(csv_text, store_id, business_date)
-
-            if not payload:
-                message = (f"{business_date} の【{name}】来店数がCSVに含まれていません"
-                           "（デジテール側の反映待ちの可能性があります）。")
-                print(f"  ℹ️ {message}")
-                sb.log(run_id=run_id, source="digitel", business_date=business_date,
-                       store_id=store_id, status="no_data", message=message,
-                       started_at=started)
-                results.append(StepResult(f"digitel/{name}", "no_data", message))
-                continue
-
-            # 来店数は「その営業日の確定値」なので上書き（同じ日を取り直したら最新値へ）
-            affected = sb.upsert(
-                "visits", payload, on_conflict="business_date,store_id,source"
-            )
-            visitors = payload[0].get("visitors")
-            print(f"  【{name}】来店 {visitors}人 → 反映 {affected}行（新規/更新）")
-
-            sb.log(run_id=run_id, source="digitel", business_date=business_date,
-                   store_id=store_id, status="success",
-                   rows_fetched=len(payload), rows_inserted=affected,
-                   rows_duplicate=0, message=f"来店客数 {visitors}",
-                   started_at=started)
-            results.append(StepResult(f"digitel/{name}", "success",
-                                      f"来店 {visitors}人",
-                                      len(payload), affected, 0))
-
-        except Exception as e:
-            detail = f"{type(e).__name__}: {e}"
-            print(f"  【{name}】❌ 失敗: {detail}")
-            sb.log(run_id=run_id, source="digitel", business_date=business_date,
-                   store_id=store_id, status="failed", message=detail[:2000],
-                   started_at=started)
-            results.append(StepResult(f"digitel/{name}", "failed", detail))
 
     return results
 
