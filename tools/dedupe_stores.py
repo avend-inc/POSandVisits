@@ -27,7 +27,12 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from etl.settings import better_store_name, load_dotenv, store_key  # noqa: E402
+from etl.settings import (  # noqa: E402
+    better_store_name,
+    canonical_store_name,
+    load_dotenv,
+    store_key,
+)
 from etl.supabase_client import Supabase  # noqa: E402
 
 
@@ -65,6 +70,8 @@ def main() -> int:
             if better_store_name(canonical["name"], s["name"]) == s["name"] \
                     and s["name"] != canonical["name"]:
                 canonical = s
+        # 表示名は余計な空白・全角ゆれを整えた形にする（例:「SELFURUGI 町田店」→「SELFURUGI町田店」）
+        best_name = canonical_store_name(best_name)
 
         dupes = [s for s in grp if s["id"] != canonical["id"]]
         print(f"[{key}] 正本 id={canonical['id']}『{best_name}』")

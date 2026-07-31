@@ -241,8 +241,8 @@ class Supabase:
         # 既存店の中から「同じ店（正規化キーが一致）」を探す
         for nm, sid in list(cache.items()):
             if store_key(nm) == key:
-                # 表示名がより情報量の多い正式名になるなら、そろえる
-                best = better_store_name(nm, canonical_store_name(name))
+                # 表示名がより情報量の多い正式名になるなら、そろえる（空白などは整える）
+                best = canonical_store_name(better_store_name(nm, canonical_store_name(name)))
                 if best != nm:
                     try:
                         self.update_store(sid, {"name": best})
