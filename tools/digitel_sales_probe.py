@@ -58,63 +58,81 @@ def main() -> int:
         label = "NOTIME"
 
     slug = args.slug
-    print(f"===== デジテール 売上CSV 調査（{label} / slug={slug}）=====")
+    print(f"===== デジテール 売上 調査（{label} / slug={slug}）=====")
     print(f"  期間: {args.d_from} 〜 {args.d_to}")
 
-    seen_urls: list[str] = []
+    seen: list[str] = []
     with browser_page(headless=True) as (page, context):
-        # ログイン後にダッシュボードが叩く通信を記録（download/kpi を含むものだけ）
+        # この店に関する通信を全部記録（.data / download / kpi を見つける）
         def on_request(req):
             u = req.url
-            if "/download" in u or "/kpi/" in u:
-                if u not in seen_urls:
-                    seen_urls.append(u)
+            if slug in u and u not in seen:
+                seen.append(u)
         page.on("request", on_request)
 
         digitel_fetch.login(page, user, pw)
 
-        # トップ → 可能なら店舗ページへ（SPAなのでどちらでも通信は拾える）
-        for path in ["/", f"/{slug}", f"/{slug}/kpi"]:
+        # 売上ページを実際に開く（人と同じ動き）。日別も見るため interval=day も。
+        for path in [f"/{slug}/kpi/sales",
+                     f"/{slug}/kpi/sales?interval=day",
+                     f"/{slug}/kpi/sales?interval=day&from={args.d_from}&to={args.d_to}"]:
             try:
-                page.goto(DIGITEL_BASE_URL + path, wait_until="domcontentloaded")
+                page.goto(DIGITEL_BASE_URL + path, wait_until="networkidle")
                 page.wait_for_timeout(2500)
             except Exception:
                 pass
 
-        print("\n----- 通信で見えた download / kpi URL -----")
-        if seen_urls:
-            for u in seen_urls[:40]:
-                print("  " + u)
-        else:
-            print("  （該当なし）")
+        print("\n----- この店に関する通信URL（.data / download を探す）-----")
+        for u in seen[:60]:
+            mark = "★" if (".data" in u or "download" in u) else " "
+            print(f"  {mark} {u}")
 
-        # 画面内リンクのうち download を含むもの
-        print("\n----- 画面内リンク(href) の download -----")
+        # 売上ページ内の「ダウンロード/CSV」ボタン・リンク
+        print("\n----- 売上ページ内の ダウンロード/CSV ボタン・リンク -----")
         try:
-            hrefs = page.evaluate(
-                r"""() => Array.from(document.querySelectorAll('a[href]'))
-                        .map(a=>a.getAttribute('href'))
-                        .filter(h=>h && h.toLowerCase().includes('download'))""")
+            hits = page.evaluate(r"""() => {
+              const out=[];
+              document.querySelectorAll('a[href],button').forEach(el=>{
+                const t=(el.innerText||'')+' '+(el.getAttribute('href')||'')+' '+(el.getAttribute('aria-label')||'');
+                if(/download|csv|ダウンロード|エクスポート|出力/i.test(t))
+                  out.push({tag:el.tagName, text:(el.innerText||'').trim().slice(0,30), href:el.getAttribute('href')||''});
+              });
+              return out;
+            }""")
         except Exception:
-            hrefs = []
-        for h in (hrefs or [])[:40]:
-            print("  " + h)
-        if not hrefs:
-            print("  （該当なし）")
+            hits = []
+        print(f"  {hits if hits else '（該当なし）'}")
 
-        # 候補エンドポイントを実際にGETして中身を確認
-        print("\n----- 候補エンドポイントを実際にGET -----")
-        params = {"interval": "day", "from": args.d_from, "to": args.d_to}
-        for m in CANDIDATE_METRICS:
-            url = f"{DIGITEL_BASE_URL}/{slug}/kpi/{m}/download"
+        # 見つかった .data エンドポイントの中身を実際に読む（売上の数字が入っている想定）
+        print("\n----- .data エンドポイントの中身 -----")
+        data_urls = [u for u in seen if ".data" in u]
+        # 定番の候補も足す
+        for cand in [f"{DIGITEL_BASE_URL}/{slug}/kpi/sales/summary.data",
+                     f"{DIGITEL_BASE_URL}/{slug}/kpi/sales.data",
+                     f"{DIGITEL_BASE_URL}/{slug}/kpi/sales/daily.data"]:
+            if cand not in data_urls:
+                data_urls.append(cand)
+        for u in data_urls[:12]:
             try:
-                resp = context.request.get(url, params=params, timeout=30_000)
-                body = resp.body().decode("utf-8-sig", errors="replace")
-                head = body.replace("\r", "")[:220].replace("\n", " / ")
-                ok = "✅" if resp.ok else "  "
-                print(f"  {ok} [{resp.status}] kpi/{m}/download  先頭: {head!r}")
+                resp = context.request.get(u, timeout=30_000)
+                body = resp.body().decode("utf-8", errors="replace")
+                print(f"\n  [{resp.status}] {u}\n    {body[:1400]!r}")
             except Exception as e:
-                print(f"     [ERR] kpi/{m}/download  {type(e).__name__}: {e}")
+                print(f"  [ERR] {u}  {type(e).__name__}: {e}")
+
+        # 念のため download 系も再確認（sales の下位ルート含む）
+        print("\n----- download 候補（再確認）-----")
+        params = {"interval": "day", "from": args.d_from, "to": args.d_to}
+        for path in [f"/{slug}/kpi/sales/download",
+                     f"/{slug}/kpi/sales/summary/download",
+                     f"/{slug}/kpi/sales/daily/download",
+                     f"/{slug}/kpi/visits/summary.data"]:
+            try:
+                resp = context.request.get(DIGITEL_BASE_URL + path, params=params, timeout=30_000)
+                head = resp.body().decode("utf-8-sig", errors="replace")[:180].replace("\n", " / ")
+                print(f"  [{resp.status}] {path}  先頭: {head!r}")
+            except Exception as e:
+                print(f"  [ERR] {path}  {type(e).__name__}: {e}")
 
         dump_page(page, f"digitel_sales_probe_{slug}")
     print("\n===== 調査おわり =====")
