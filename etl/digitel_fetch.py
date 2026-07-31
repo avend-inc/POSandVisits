@@ -117,6 +117,29 @@ def fetch_store_csv(context, slug: str, start: str, end: str) -> str:
     return text
 
 
+def fetch_sales_csv(context, slug: str, start: str, end: str) -> str:
+    """
+    デジテールの“売上”CSVを取る（来店とは別ルート）。
+      GET /{slug}/kpi/sales/summary/download?interval=day&isMujin=0&from=...&to=...
+      列: 日付,合計売上金額,無人売上金額,有人売上金額,平均購買単価,売り上げ回数
+    無人＋有人の合計(isMujin=0)を取る。無人店なら有人=0。
+    """
+    url = f"{DIGITEL_BASE_URL}/{slug}/kpi/sales/summary/download"
+    resp = context.request.get(
+        url, params={"interval": "day", "isMujin": "0", "from": start, "to": end},
+        timeout=60_000,
+    )
+    if not resp.ok:
+        raise EtlError(f"売上CSVの取得に失敗しました（HTTP {resp.status}） URL: {url}")
+    text = resp.body().decode("utf-8-sig")
+    if "日付" not in text[:40] or "売上" not in text[:60]:
+        raise EtlError(
+            "売上CSVではないものが返ってきました（画面仕様変更の可能性）。\n"
+            f"  先頭: {text[:120]!r}"
+        )
+    return text
+
+
 def fetch(slugs: dict[str, str], start: str, end: str,
           headless: bool = True) -> dict[str, str]:
     """
@@ -160,17 +183,22 @@ def fetch(slugs: dict[str, str], start: str, end: str,
 
 
 def fetch_all(start: str, end: str, headless: bool = True,
-              user: str | None = None, password: str | None = None) -> dict[str, dict]:
+              user: str | None = None, password: str | None = None,
+              sales_slugs: set[str] | None = None) -> dict[str, dict]:
     """
     ログインしたアカウントで“見える全店舗”を自動で見つけて、それぞれのCSVを取ってくる。
 
     引数:
         start / end : YYYY-MM-DD（同じ日にすればその1日ぶん）
         user / password : 省略時は DIGITAIL_ID / DIGITAIL_PW（NOTIMEアカウント）
+        sales_slugs : この集合に含まれるスラッグの店は“売上CSV”も一緒に取る
+                      （売上をデジテールから取る店＝伊予松前 など）
     戻り値:
-        {"NOTIME鎌ヶ谷店": {"slug": "notime_kamagaya", "csv": "..."}, ...}
-        ※CSVが取れなかった店舗は入らない
+        {"NOTIME鎌ヶ谷店": {"slug": "notime_kamagaya", "csv": "...",
+                            "sales_csv": "..."(対象店のみ)}, ...}
+        ※来店CSVが取れなかった店舗は入らない
     """
+    sales_slugs = sales_slugs or set()
     last_error: Exception | None = None
 
     for attempt in range(1, RETRIES + 1):
@@ -192,7 +220,14 @@ def fetch_all(start: str, end: str, headless: bool = True,
                 for store_name, slug in stores.items():
                     try:
                         csv = fetch_store_csv(context, slug, start, end)
-                        results[store_name] = {"slug": slug, "csv": csv}
+                        info = {"slug": slug, "csv": csv}
+                        if slug in sales_slugs:
+                            try:
+                                info["sales_csv"] = fetch_sales_csv(context, slug, start, end)
+                                print(f"  【{store_name}】売上CSVも取得OK（{slug}）")
+                            except Exception as e:
+                                print(f"  【{store_name}】売上CSV ❌ {e}")
+                        results[store_name] = info
                         print(f"  【{store_name}】CSV取得OK（{slug}）")
                     except Exception as e:
                         print(f"  【{store_name}】❌ {e}")

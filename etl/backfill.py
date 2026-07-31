@@ -82,9 +82,11 @@ def run_digitel_backfill(sb: Supabase, start: str, end: str,
     print(f"【2】デジテール 来店数  期間: {start} 〜 {end}")
     print("=" * 60)
 
-    all_stores = sb.select("stores", {"select": "id,name,digitel_slug"})
+    all_stores = sb.select("stores", {"select": "*"})   # digitel_sales 未追加でも落ちない
     slug_to_id = {s["digitel_slug"]: s["id"] for s in all_stores if s.get("digitel_slug")}
     name_cache = {s["name"]: s["id"] for s in all_stores}
+    sales_slugs = {s["digitel_slug"] for s in all_stores
+                   if s.get("digitel_sales") and s.get("digitel_slug")}
 
     accounts = [("NOTIME", None, None)]
     sf_id = os.environ.get("DIGITAIL_SF_ID", "").strip()
@@ -98,7 +100,8 @@ def run_digitel_backfill(sb: Supabase, start: str, end: str,
         print(f"\n--- デジテール {label} アカウント ---")
         try:
             found = digitel_fetch.fetch_all(
-                start, end, headless=headless, user=user, password=pw)
+                start, end, headless=headless, user=user, password=pw,
+                sales_slugs=sales_slugs)
         except Exception as e:
             print(f"  ❌ {label}アカウント失敗: {type(e).__name__}: {e}")
             continue
@@ -128,6 +131,25 @@ def run_digitel_backfill(sb: Supabase, start: str, end: str,
             days = sorted(r["business_date"] for r in payload)
             print(f"  【{name}】{days[0]} 〜 {days[-1]}（{len(payload)}日）"
                   f" → 反映 {affected}日（新規/更新）")
+
+            # 売上もデジテールから取る店（伊予松前など）は、期間の売上もsalesへ
+            scsv = info.get("sales_csv")
+            if scsv:
+                try:
+                    spay = rows_mod.digitel_sales_rows(scsv, store_id, business_date=None)
+                    sb.delete("sales", {
+                        "store_id": f"eq.{store_id}",
+                        "pos_name": f"eq.{rows_mod.DIGITEL_SALES_POS}",
+                        "and": f"(business_date.gte.{start},business_date.lte.{end})"})
+                    if spay:
+                        ins, _ = sb.insert_ignore_duplicates(
+                            "sales", spay, on_conflict="store_id,pos_name,tx_id,line_no")
+                        sdays = sorted({r["business_date"] for r in spay})
+                        ssum = sum(r["sales_in_tax"] for r in spay)
+                        print(f"  【{name}】デジテール売上 {sdays[0]}〜{sdays[-1]}"
+                              f"（{len(spay)}取引 / {int(ssum):,}円）→ 追加 {ins}行")
+                except Exception as e:
+                    print(f"  【{name}】デジテール売上 ❌ {type(e).__name__}: {e}")
 
 
 def main() -> int:

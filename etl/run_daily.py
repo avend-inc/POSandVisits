@@ -151,11 +151,17 @@ def run_digitel(sb: Supabase, business_date: str, run_id: str,
     started = now_iso()
 
     # 店舗マスタを1回だけ読み込む。スラッグ→店id、名前→店id を作っておく。
-    all_stores = sb.select("stores", {"select": "id,name,digitel_slug"})
+    # "*" にしておくと digitel_sales 列が未追加(sql/016前)でも落ちない（.getで既定None）
+    all_stores = sb.select("stores", {"select": "*"})
     slug_to_id: dict[str, int] = {
         s["digitel_slug"]: s["id"] for s in all_stores if s.get("digitel_slug")
     }
     name_cache: dict[str, int] = {s["name"]: s["id"] for s in all_stores}
+    # 売上もデジテールから取る店（例: 伊予松前）のスラッグ集合
+    sales_slugs: set[str] = {
+        s["digitel_slug"] for s in all_stores
+        if s.get("digitel_sales") and s.get("digitel_slug")
+    }
 
     # 使うアカウント。NOTIMEは既定の DIGITAIL_ID/PW。
     # SELFURUGIは DIGITAIL_SF_ID/PW が登録されていれば追加で取る。
@@ -178,6 +184,7 @@ def run_digitel(sb: Supabase, business_date: str, run_id: str,
             found = digitel_fetch.fetch_all(
                 business_date, business_date,
                 headless=headless, user=user, password=pw,
+                sales_slugs=sales_slugs,
             )
         except Exception as e:
             detail = f"{type(e).__name__}: {e}"
@@ -254,6 +261,26 @@ def run_digitel(sb: Supabase, business_date: str, run_id: str,
                 results.append(StepResult(f"digitel/{name}", "success",
                                           f"来店 {visitors}人",
                                           len(payload), affected, 0))
+
+                # 売上もデジテールから取る店（伊予松前など）は、売上もsalesへ入れる
+                scsv = info.get("sales_csv")
+                if scsv:
+                    try:
+                        spay = rows_mod.digitel_sales_rows(scsv, store_id, business_date)
+                        # 同じ日のDIGITEL売上を消してから入れ直す（回数が変わっても整合）
+                        sb.delete("sales", {
+                            "store_id": f"eq.{store_id}",
+                            "pos_name": f"eq.{rows_mod.DIGITEL_SALES_POS}",
+                            "business_date": f"eq.{business_date}"})
+                        if spay:
+                            ins, _ = sb.insert_ignore_duplicates(
+                                "sales", spay,
+                                on_conflict="store_id,pos_name,tx_id,line_no")
+                            sales_sum = sum(r["sales_in_tax"] for r in spay)
+                            print(f"  【{name}】デジテール売上 {len(spay)}取引 / "
+                                  f"{int(sales_sum):,}円 → 追加 {ins}行")
+                    except Exception as e:
+                        print(f"  【{name}】デジテール売上 ❌ {type(e).__name__}: {e}")
 
             except Exception as e:
                 detail = f"{type(e).__name__}: {e}"
