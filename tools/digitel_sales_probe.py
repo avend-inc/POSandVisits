@@ -120,21 +120,21 @@ def main() -> int:
             except Exception as e:
                 print(f"  [ERR] {u}  {type(e).__name__}: {e}")
 
-        # 念のため download 系も再確認（sales の下位ルート含む）
-        print("\n----- download 候補（再確認）-----")
-        params = {"interval": "day", "from": args.d_from, "to": args.d_to}
-        for path in [f"/{slug}/kpi/sales/download",
-                     f"/{slug}/kpi/sales/summary/download",
-                     f"/{slug}/kpi/sales/daily/download",
-                     f"/{slug}/kpi/visits/summary.data"]:
+        # ★確定URL（売上ページのCSVダウンロードリンク）でCSVを取り、中身をそのまま出す
+        print("\n===== 確定URLで売上CSVを取得（無人のみ=1 / 無人+有人=0）=====")
+        url = f"{DIGITEL_BASE_URL}/{slug}/kpi/sales/summary/download"
+        for mujin in ("1", "0"):
             try:
-                resp = context.request.get(DIGITEL_BASE_URL + path, params=params, timeout=30_000)
-                head = resp.body().decode("utf-8-sig", errors="replace")[:180].replace("\n", " / ")
-                print(f"  [{resp.status}] {path}  先頭: {head!r}")
+                resp = context.request.get(
+                    url, params={"interval": "day", "isMujin": mujin,
+                                 "from": args.d_from, "to": args.d_to}, timeout=30_000)
+                body = resp.body().decode("utf-8-sig", errors="replace")
+                ct = resp.headers.get("content-type", "")
+                print(f"\n----- isMujin={mujin}  [{resp.status}] CT={ct} -----")
+                print(body[:1600])
             except Exception as e:
-                print(f"  [ERR] {path}  {type(e).__name__}: {e}")
+                print(f"  [ERR] isMujin={mujin}  {type(e).__name__}: {e}")
 
-        dump_page(page, f"digitel_sales_probe_{slug}")
     print("\n===== 調査おわり =====")
     return 0
 
