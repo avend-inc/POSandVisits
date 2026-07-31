@@ -194,10 +194,17 @@ def run_digitel(sb: Supabase, business_date: str, run_id: str,
             # 新しく見つかった店には digitel_slug を書き込んで、次回からスラッグで安定して引けるようにする。
             store_id = slug_to_id.get(slug)
             if store_id is None:
+                is_new_store = name not in name_cache
                 store_id = sb.get_or_create_store(name, name_cache)
+                patch = {"digitel_slug": slug, "has_entry_data": True}
+                # デジテールで“初めて”見つかる店はFC。
+                #  （直営の4店＝山形/いわき/福井/下北沢 は既にマスタにあるので、
+                #    ここを通るのは新しいFC店だけ。既存店の区分は勝手に変えない。
+                #    stores.ownership の既定が「直営」なので、明示しないと直営に混ざってしまう）
+                if is_new_store:
+                    patch["ownership"] = "FC"
                 try:
-                    sb.update_store(store_id,
-                                    {"digitel_slug": slug, "has_entry_data": True})
+                    sb.update_store(store_id, patch)
                 except Exception as e:
                     print(f"  （店舗への digitel_slug 記録は後回しにします：{e}）")
                 slug_to_id[slug] = store_id
