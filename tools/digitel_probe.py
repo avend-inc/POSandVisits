@@ -58,67 +58,61 @@ def main() -> int:
             pass
         page.wait_for_timeout(2500)
 
-        # 1) 「店舗を選択」ドロップダウンを開いて、店舗の一覧（名前＋スラッグ/ID）を取り出す。
-        print("\n----- 店舗ドロップダウンを開いて一覧を取る -----")
-        opened = False
-        for sel in ["button:has-text('店舗を選択')", "text=店舗を選択",
-                    "[role=combobox]", "button[aria-haspopup='listbox']"]:
+        def open_dropdown() -> bool:
+            for sel in ["[data-slot='select-trigger']", "[role=combobox]",
+                        "button:has-text('店舗を選択')", "button[aria-haspopup='listbox']"]:
+                try:
+                    page.locator(sel).first.click(timeout=4_000)
+                    return True
+                except Exception:
+                    continue
+            return False
+
+        def option_texts() -> list[str]:
             try:
-                page.locator(sel).first.click(timeout=5_000)
-                opened = True
-                break
+                return page.evaluate(r"""() => {
+                  const seen=new Set(); const out=[];
+                  document.querySelectorAll("[data-slot='select-item'],[role=option],[data-radix-collection-item]").forEach(el=>{
+                    const t=(el.innerText||'').trim().replace(/\s+/g,' ').slice(0,40);
+                    if(t && !seen.has(t)){seen.add(t); out.push(t);}
+                  });
+                  return out;
+                }""")
             except Exception:
-                continue
-        page.wait_for_timeout(1500)
-        try:
-            opts = page.evaluate(r"""() => {
-              const sels = "[role=option],[cmdk-item],[data-radix-collection-item],li[role],[role=menuitem]";
-              const seen=new Set(); const out=[];
-              document.querySelectorAll(sels).forEach(el=>{
-                const t=(el.innerText||'').trim().replace(/\s+/g,' ').slice(0,40);
-                if(!t||seen.has(t))return; seen.add(t);
-                const a={}; for(const at of (el.attributes||[])){ if(/value|id|slug|store|href|data-/.test(at.name)) a[at.name]=(at.value||'').slice(0,60);}
-                out.push({t, a});
-              });
-              return out;
-            }""")
-        except Exception as e:
-            opts = f"(取得失敗 {e})"
-        print(f"  店舗オプション: {json.dumps(opts, ensure_ascii=False)}")
+                return []
 
-        # 2) Remix等がHTMLに埋め込んだデータから店舗/スラッグらしきものを探す。
-        print("\n----- 埋め込みデータからスラッグ/店舗を探す -----")
-        try:
-            html = page.content()
-        except Exception:
-            html = ""
-        import re as _re
-        # /{slug}/kpi/visits や "slug":"..." / notime_xxx / selfurugi_xxx の断片を拾う。
-        pats = [r'"[A-Za-z0-9_\-]+/kpi', r'"slug"\s*:\s*"[^"]+"',
-                r'\b(?:notime|selfurugi)[_a-z0-9]+', r'"stores?"\s*:\s*\[',
-                r'/[a-z0-9_\-]+/kpi/visits']
-        found = []
-        for p in pats:
-            for m in _re.findall(p, html)[:20]:
-                found.append(m)
-        for m in dict.fromkeys(found)[:60]:
-            print(f"  {m}")
+        # 1) 一覧（名前）を取る。
+        print("\n----- 店舗ドロップダウンの一覧 -----")
+        open_dropdown()
+        page.wait_for_timeout(1200)
+        names = option_texts()
+        print(f"  店舗名: {json.dumps(names, ensure_ascii=False)}")
 
-        # 3) Remix のルート/ローダーデータ（window.__remixContext）から店舗を探す。
-        try:
-            rmx = page.evaluate(r"""() => {
-              try{
-                const c = window.__remixContext || window.__remixRouteModules || null;
-                const s = JSON.stringify(c);
-                if(!s) return null;
-                // storeやslugを含む断片だけ返す（長すぎるので）
-                const hits = (s.match(/[^{}\[\],"]*(?:slug|store|kpi|visits)[^{}\[\],"]*/gi)||[]).slice(0,40);
-                return hits;
-              }catch(e){ return "err:"+e; }
+        # 2) 各店を選択して、URL / ダウンロードリンク から スラッグ を確定する。
+        print("\n----- 各店の スラッグ（URL/ダウンロードリンク）-----")
+        mapping = {}
+        for name in [n for n in names if n and n != "本部"]:
+            if not open_dropdown():
+                print(f"  {name}: ドロップダウンを開けませんでした"); continue
+            page.wait_for_timeout(500)
+            clicked = False
+            for sel in [f"[data-slot='select-item']:has-text('{name}')",
+                        f"[role=option]:has-text('{name}')"]:
+                try:
+                    page.locator(sel).first.click(timeout=3_000); clicked = True; break
+                except Exception:
+                    continue
+            if not clicked:
+                print(f"  {name}: 選択できませんでした"); continue
+            page.wait_for_timeout(1200)
+            info = page.evaluate(r"""() => {
+              const dl=[...document.querySelectorAll('a[href]')].map(a=>a.getAttribute('href'))
+                       .find(h=>h && h.includes('/kpi/visits'));
+              return {path: location.pathname, dl: dl||null};
             }""")
-        except Exception as e:
-            rmx = f"(取得失敗 {e})"
-        print(f"\n----- __remixContext 内の店舗/スラッグ断片 -----\n  {json.dumps(rmx, ensure_ascii=False)}")
+            mapping[name] = info
+            print(f"  {name} -> path={info.get('path')} dl={info.get('dl')}")
+        print(f"\n  === 店舗→スラッグ候補 ===\n  {json.dumps(mapping, ensure_ascii=False)}")
 
         dump_page(page, f"digitel_dashboard_{label}")
     print("\n===== 調査おわり =====")
