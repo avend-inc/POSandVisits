@@ -125,6 +125,10 @@ def build_data(sb: Supabase) -> dict:
     #  ・レジ袋 / クーポン … 物ではない（config.py の NON_MERCH と同じ考え方）
     #  ・「不明」は EZレジで明細が無いだけの“実売上”なので売上には残す（除外しない）
     EXCLUDE = {"レジ袋", "クーポン"}
+    # 「（明細なし）」= SIPOS取引照会のように商品明細が無い実売上。
+    #  売上・客数・点数などのKPIには含めるが、カテゴリ別/価格帯別ランキングには入れない
+    #  （カテゴリ不明のものが「その他」として上位を占めてしまうのを防ぐ）。
+    NOCAT = {"（明細なし）", "明細なし"}
 
     def _new() -> dict:
         # in/ex=伝票の税込/税抜合計、tx=伝票数、it=販売点数(レジ袋等を除く)、
@@ -188,6 +192,12 @@ def build_data(sb: Supabase) -> dict:
             continue
 
         rec["it"] += qty                       # 販売点数（レジ袋・クーポンを除く）
+
+        # 明細なし（SIPOS取引照会）は 点数・売上KPI には含めるが、
+        # カテゴリ別・価格帯別（→ランク帯）ランキングには入れない。
+        if c in NOCAT:
+            continue
+
         ck = (d, sid, c)
         crec = cat.setdefault(ck, {"a": 0.0, "q": 0.0})
         crec["a"] += amt
