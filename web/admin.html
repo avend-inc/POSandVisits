@@ -270,8 +270,14 @@ async function loadStores(){
     const kv=tb.querySelector(`.skv[data-id="${id}"]`).checked;
     const vis=tb.querySelector(`.svis[data-id="${id}"]`).checked;
     const open=tb.querySelector(`.sopen[data-id="${id}"]`).value||null;
-    const {error}=await SB.from("stores").update({ownership:own,digitel_slug:slug,has_entry_data:entry,kpi_visitors:kv,visible:vis,open_date:open}).eq("id",id);
-    msg("s_msg", error?("保存失敗："+error.message):"店舗を保存しました", !error);
+    const {data,error}=await SB.from("stores").update({ownership:own,digitel_slug:slug,has_entry_data:entry,kpi_visitors:kv,visible:vis,open_date:open}).eq("id",id).select();
+    if(error){ msg("s_msg","保存失敗："+error.message,false); }
+    else if(!data||!data.length){
+      // RLSで弾かれると 0件・エラー無し で返る＝「保存したつもりで戻る」の原因。
+      msg("s_msg","保存できませんでした（権限）。あなたのアカウントに更新権限が無い可能性があります。管理者に sql/012_fix_store_ownership.sql の実行を依頼してください。",false);
+    } else {
+      msg("s_msg","店舗を保存しました",true);
+    }
   });
 }
 async function addStore(){
