@@ -132,11 +132,20 @@ def run_digitel_backfill(sb: Supabase, start: str, end: str,
             print(f"  【{name}】{days[0]} 〜 {days[-1]}（{len(payload)}日）"
                   f" → 反映 {affected}日（新規/更新）")
 
-            # 売上もデジテールから取る店（伊予松前など）は、期間の売上もsalesへ
+            # 売上もデジテールから取る店（伊予松前など）は、期間の売上もsalesへ。
+            # 商品明細(sales_detail)があればカテゴリ付きで、無ければ日次合計で。
+            detail = info.get("sales_detail")
             scsv = info.get("sales_csv")
-            if scsv:
+            if (detail and detail.get("details")) or scsv:
                 try:
-                    spay = rows_mod.digitel_sales_rows(scsv, store_id, business_date=None)
+                    if detail and detail.get("details"):
+                        spay = rows_mod.digitel_detail_rows(
+                            detail.get("sales", ""), detail["details"],
+                            store_id, business_date=None)
+                        kind = "明細"
+                    else:
+                        spay = rows_mod.digitel_sales_rows(scsv, store_id, business_date=None)
+                        kind = "合計"
                     sb.delete("sales", {
                         "store_id": f"eq.{store_id}",
                         "pos_name": f"eq.{rows_mod.DIGITEL_SALES_POS}",
@@ -145,9 +154,10 @@ def run_digitel_backfill(sb: Supabase, start: str, end: str,
                         ins, _ = sb.insert_ignore_duplicates(
                             "sales", spay, on_conflict="store_id,pos_name,tx_id,line_no")
                         sdays = sorted({r["business_date"] for r in spay})
-                        ssum = sum(r["sales_in_tax"] for r in spay)
-                        print(f"  【{name}】デジテール売上 {sdays[0]}〜{sdays[-1]}"
-                              f"（{len(spay)}取引 / {int(ssum):,}円）→ 追加 {ins}行")
+                        txn = len({(r["business_date"], r["tx_id"]) for r in spay})
+                        ssum = sum(r["sales_in_tax"] for r in spay if r["line_no"] == 0)
+                        print(f"  【{name}】デジテール売上({kind}) {sdays[0]}〜{sdays[-1]}"
+                              f"（{txn}取引 / {int(ssum):,}円）→ 追加 {ins}行")
                 except Exception as e:
                     print(f"  【{name}】デジテール売上 ❌ {type(e).__name__}: {e}")
 

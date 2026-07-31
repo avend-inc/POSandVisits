@@ -270,3 +270,116 @@ def digitel_sales_rows(csv_text: str, store_id: int,
                 "is_normal":     True,
             })
     return rows
+
+
+def digitel_detail_rows(sales_csv: str, details_csv: str, store_id: int,
+                        business_date: str | None = None) -> list[dict]:
+    """
+    デジテールの“売上明細（商品別）”ZIP → sales テーブルに入れる行の一覧。
+
+    入力（fetch_sales_detail の戻り）:
+      sales_csv    : 取引単位。列 id,type,balance(税込),discount,createdOn,paymentType ほか
+      details_csv  : 商品明細。列 transactionId,name,price,taxRate,taxInclusionType,
+                     quantity,createdOn,discount,genre(=カテゴリ),subgenre(=価格帯) ほか
+
+    仕組み:
+      ・明細1行 = sales 1行（line_no は取引内の連番）。カテゴリ=genre、数量=quantity、
+        金額(税抜)= 単価×数量 − 値引（税込商品は税抜換算してから）。
+      ・取引の税込合計(sales_in_tax)は取引CSVの balance を正とし、各明細行に同じ値を持たせる
+        （export 側で tx_id 単位に1回だけ数えられる。cashierと同じ作り）。
+      ・税抜合計(sales_ex_tax)は明細の税抜金額の合計。
+    """
+    try:
+        sdf = pd.read_csv(StringIO(sales_csv), dtype=str) if sales_csv.strip() else pd.DataFrame()
+    except Exception:
+        sdf = pd.DataFrame()
+    try:
+        ddf = pd.read_csv(StringIO(details_csv), dtype=str)
+    except Exception as e:
+        raise EtlError(f"デジテール売上明細CSVを読めませんでした: {e}")
+    if len(ddf) == 0:
+        return []
+
+    # 取引CSV: id(取引ID) → 税込合計(balance)・支払方法・日時
+    tx_in_tax: dict[str, float] = {}
+    tx_paytype: dict[str, str] = {}
+    if len(sdf):
+        for r in sdf.to_dict(orient="records"):
+            tid = str(r.get("id") or "").strip()
+            if not tid:
+                continue
+            tx_in_tax[tid] = _to_float(r.get("balance")) or 0.0
+            tx_paytype[tid] = str(r.get("paymentType") or "").strip()
+
+    def _date_of(dt: str) -> str:
+        return (str(dt or "").strip().replace("/", "-")[:10])
+
+    # 明細を取引IDごとにまとめ、行を組み立てる
+    by_tx: dict[str, list[dict]] = {}
+    order: list[str] = []
+    for r in ddf.to_dict(orient="records"):
+        tid = str(r.get("transactionId") or "").strip()
+        if not tid:
+            continue
+        if tid not in by_tx:
+            by_tx[tid] = []
+            order.append(tid)
+        by_tx[tid].append(r)
+
+    rows: list[dict] = []
+    for tid in order:
+        lines = by_tx[tid]
+        # 取引の日付は明細の createdOn から
+        day = _date_of(lines[0].get("createdOn"))
+        if not day:
+            continue
+        if business_date is not None and day != business_date:
+            continue
+
+        # まず各明細の税抜金額を計算 → 取引の税抜合計
+        parsed = []
+        tx_ex = 0.0
+        tx_qty = 0.0
+        for ln in lines:
+            qty = _to_float(ln.get("quantity")) or 0.0
+            price = _to_float(ln.get("price")) or 0.0
+            rate = _to_float(ln.get("taxRate")) or 0.0
+            disc = _to_float(ln.get("discount")) or 0.0
+            incl = (str(ln.get("taxInclusionType") or "").strip().lower() == "inclusive")
+            unit_ex = price / (1.0 + rate) if (incl and rate > 0) else price
+            disc_ex = disc / (1.0 + rate) if (incl and rate > 0) else disc
+            net_ex = unit_ex * qty - disc_ex
+            if net_ex < 0:
+                net_ex = 0.0
+            cat = (str(ln.get("genre") or "").strip() or "その他")
+            parsed.append({"cat": cat, "qty": qty, "unit_ex": unit_ex,
+                           "net_ex": net_ex, "ts": str(ln.get("createdOn") or "").strip()})
+            tx_ex += net_ex
+            tx_qty += qty
+
+        # 取引の税込合計は取引CSVの balance を正に。無ければ税抜合計から税込換算。
+        tx_in = tx_in_tax.get(tid)
+        if tx_in is None:
+            tx_in = round(tx_ex * 1.10, 2)
+
+        for i, p in enumerate(parsed):
+            rows.append({
+                "business_date": day,
+                "store_id":      store_id,
+                "pos_name":      DIGITEL_SALES_POS,
+                "tx_id":         tid,
+                "line_no":       i,
+                "ts":            p["ts"] or None,
+                "sales_ex_tax":  round(tx_ex, 2),
+                "sales_in_tax":  round(float(tx_in), 2),
+                "tx_qty":        int(tx_qty) if tx_qty else None,
+                "line_category": p["cat"],
+                "line_price":    round(p["unit_ex"], 2),
+                "line_qty":      float(p["qty"]),
+                "line_amount":   round(p["net_ex"], 2),
+                "bundle_code":   "",
+                "is_parent":     False,
+                "is_child":      False,
+                "is_normal":     True,
+            })
+    return rows

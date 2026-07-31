@@ -262,11 +262,20 @@ def run_digitel(sb: Supabase, business_date: str, run_id: str,
                                           f"来店 {visitors}人",
                                           len(payload), affected, 0))
 
-                # 売上もデジテールから取る店（伊予松前など）は、売上もsalesへ入れる
+                # 売上もデジテールから取る店（伊予松前など）は、売上もsalesへ入れる。
+                # 商品明細(sales_detail)があればカテゴリ付きで、無ければ日次合計で。
+                detail = info.get("sales_detail")
                 scsv = info.get("sales_csv")
-                if scsv:
+                if (detail and detail.get("details")) or scsv:
                     try:
-                        spay = rows_mod.digitel_sales_rows(scsv, store_id, business_date)
+                        if detail and detail.get("details"):
+                            spay = rows_mod.digitel_detail_rows(
+                                detail.get("sales", ""), detail["details"],
+                                store_id, business_date)
+                            kind = "明細"
+                        else:
+                            spay = rows_mod.digitel_sales_rows(scsv, store_id, business_date)
+                            kind = "合計"
                         # 同じ日のDIGITEL売上を消してから入れ直す（回数が変わっても整合）
                         sb.delete("sales", {
                             "store_id": f"eq.{store_id}",
@@ -276,8 +285,10 @@ def run_digitel(sb: Supabase, business_date: str, run_id: str,
                             ins, _ = sb.insert_ignore_duplicates(
                                 "sales", spay,
                                 on_conflict="store_id,pos_name,tx_id,line_no")
-                            sales_sum = sum(r["sales_in_tax"] for r in spay)
-                            print(f"  【{name}】デジテール売上 {len(spay)}取引 / "
+                            txn = len({r["tx_id"] for r in spay})
+                            sales_sum = sum(
+                                r["sales_in_tax"] for r in spay if r["line_no"] == 0)
+                            print(f"  【{name}】デジテール売上({kind}) {txn}取引 / "
                                   f"{int(sales_sum):,}円 → 追加 {ins}行")
                     except Exception as e:
                         print(f"  【{name}】デジテール売上 ❌ {type(e).__name__}: {e}")
