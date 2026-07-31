@@ -70,42 +70,64 @@ def run_cashier_backfill(sb: Supabase, start: str, end: str,
 
 def run_digitel_backfill(sb: Supabase, start: str, end: str,
                          headless: bool) -> None:
+    """
+    デジテールの過去来店数を、2アカウント（NOTIME / SELFURUGI）で
+    “見える全店舗を自動発見”して期間まるごと取り込む（日次と同じやり方）。
+    """
+    import os
     from . import digitel_fetch, rows as rows_mod
+    from .settings import store_key
 
     print("\n" + "=" * 60)
     print(f"【2】デジテール 来店数  期間: {start} 〜 {end}")
     print("=" * 60)
 
-    stores = sb.select("stores", {
-        "select": "id,name,digitel_slug",
-        "has_entry_data": "eq.true",
-        "digitel_slug": "not.is.null",
-        "order": "id",
-    })
-    if not stores:
-        print("  ❌ 対象店舗が stores にありません（sql/setup_all.sql を実行済みか確認）。")
-        return
+    all_stores = sb.select("stores", {"select": "id,name,digitel_slug"})
+    slug_to_id = {s["digitel_slug"]: s["id"] for s in all_stores if s.get("digitel_slug")}
+    name_cache = {s["name"]: s["id"] for s in all_stores}
 
-    slugs = {s["name"]: s["digitel_slug"] for s in stores}
-    id_by_name = {s["name"]: s["id"] for s in stores}
+    accounts = [("NOTIME", None, None)]
+    sf_id = os.environ.get("DIGITAIL_SF_ID", "").strip()
+    sf_pw = os.environ.get("DIGITAIL_SF_PW", "").strip()
+    if sf_id and sf_pw:
+        accounts.append(("SELFURUGI", sf_id, sf_pw))
+    else:
+        print("  ℹ️ SELFURUGIアカウント未登録のため、NOTIMEぶんだけ取得します。")
 
-    csv_by_store = digitel_fetch.fetch(slugs, start, end, headless=headless)
-
-    for name, store_id in id_by_name.items():
-        csv_text = csv_by_store.get(name)
-        if csv_text is None:
-            print(f"  【{name}】❌ CSVを取得できませんでした")
+    for label, user, pw in accounts:
+        print(f"\n--- デジテール {label} アカウント ---")
+        try:
+            found = digitel_fetch.fetch_all(
+                start, end, headless=headless, user=user, password=pw)
+        except Exception as e:
+            print(f"  ❌ {label}アカウント失敗: {type(e).__name__}: {e}")
             continue
-        payload = rows_mod.visits_rows(csv_text, store_id, business_date=None)
-        if not payload:
-            print(f"  【{name}】対象期間の来店データは0日でした")
-            continue
-        affected = sb.upsert(
-            "visits", payload, on_conflict="business_date,store_id,source"
-        )
-        days = sorted(r["business_date"] for r in payload)
-        print(f"  【{name}】{days[0]} 〜 {days[-1]}（{len(payload)}日）"
-              f" → 反映 {affected}日（新規/更新）")
+
+        for name, info in found.items():
+            slug, csv_text = info["slug"], info["csv"]
+            store_id = slug_to_id.get(slug)
+            if store_id is None:
+                nkey = store_key(name)
+                is_new = not any(store_key(nm) == nkey for nm in name_cache)
+                store_id = sb.get_or_create_store(name, name_cache)
+                patch = {"digitel_slug": slug, "has_entry_data": True}
+                if is_new:
+                    patch["ownership"] = "FC"
+                try:
+                    sb.update_store(store_id, patch)
+                except Exception as e:
+                    print(f"  （店舗への digitel_slug 記録は後回し：{e}）")
+                slug_to_id[slug] = store_id
+
+            payload = rows_mod.visits_rows(csv_text, store_id, business_date=None)
+            if not payload:
+                print(f"  【{name}】対象期間の来店データは0日でした")
+                continue
+            affected = sb.upsert(
+                "visits", payload, on_conflict="business_date,store_id,source")
+            days = sorted(r["business_date"] for r in payload)
+            print(f"  【{name}】{days[0]} 〜 {days[-1]}（{len(payload)}日）"
+                  f" → 反映 {affected}日（新規/更新）")
 
 
 def main() -> int:
