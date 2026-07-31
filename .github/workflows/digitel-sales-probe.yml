@@ -23,6 +23,12 @@ on:
         default: "notime"
         type: choice
         options: [notime, selfurugi]
+      mode:
+        description: "summary=売上合計の調査 / detail=売上明細(商品別)DL URLの調査"
+        required: false
+        default: "detail"
+        type: choice
+        options: [detail, summary]
 
 concurrency:
   group: notime-daily-etl
@@ -53,7 +59,11 @@ jobs:
         run: |
           ARGS="--slug ${{ inputs.slug }}"
           if [ "${{ inputs.account }}" = "selfurugi" ]; then ARGS="$ARGS --sf"; fi
-          python -m tools.digitel_sales_probe $ARGS
+          if [ "${{ inputs.mode }}" = "summary" ]; then
+            python -m tools.digitel_sales_probe $ARGS
+          else
+            python -m tools.digitel_detail_probe $ARGS
+          fi
       - name: 調査用ファイルを保存
         if: always()
         uses: actions/upload-artifact@v4
