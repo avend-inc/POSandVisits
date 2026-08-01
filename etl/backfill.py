@@ -236,6 +236,46 @@ def run_smaregi_backfill(sb: Supabase, start: str, end: str, headless: bool,
         print(f"  ✅ スマレジ backfill 完了（合計 追加 {total_ins}行）")
 
 
+def run_airregi_backfill(sb: Supabase, start: str, end: str,
+                         headless: bool, store_cache: dict) -> None:
+    """Airレジ（下北沢）の過去分を一括取り込み。1回のログインで期間まとめて取る。"""
+    from io import StringIO
+    import pandas as pd
+    import adapters
+    from . import airregi_fetch, rows as rows_mod
+    from .run_daily import AIRREGI_STORE_NAME, AIRREGI_POS
+
+    print("\n" + "=" * 60)
+    print(f"【4】Airレジ 会計明細（下北沢）  期間: {start} 〜 {end}")
+    print("=" * 60)
+
+    store_id = sb.get_or_create_store(AIRREGI_STORE_NAME, store_cache)
+    csv_text = airregi_fetch.fetch_range(start, end, headless=headless)
+    df_in = pd.read_csv(StringIO(csv_text), dtype=str)
+    common = adapters.adapt_airregi(df_in, AIRREGI_POS, AIRREGI_STORE_NAME)
+    common = common[common["date"].notna()].copy()
+    common = common[(common["date"] >= start) & (common["date"] <= end)].copy()
+    if len(common) == 0:
+        print("  ℹ️ 対象期間の明細は0行でした。")
+        return
+    common["line_no"] = common.groupby("tx_id").cumcount()
+
+    # 期間内の既存 AirREGI 売上を消してから入れ直す（再実行に強く）。
+    sb.delete("sales", {
+        "store_id": f"eq.{store_id}",
+        "pos_name": f"eq.{AIRREGI_POS}",
+        "and": f"(business_date.gte.{start},business_date.lte.{end})"})
+    payload = rows_mod.cashier_rows(common, lambda name: store_id)
+    inserted, duplicate = sb.insert_ignore_duplicates(
+        "sales", payload, on_conflict="store_id,pos_name,tx_id,line_no")
+    dates = sorted(common["date"].unique().tolist())
+    txn = len({r["tx_id"] for r in payload})
+    ssum = sum(r["sales_in_tax"] for r in payload if r["line_no"] == 0)
+    print(f"  【下北沢/Airレジ】{dates[0]}〜{dates[-1]}（{len(dates)}日） "
+          f"{txn}取引 / {int(ssum):,}円")
+    print(f"  Supabaseへ保存: 新規 {inserted}行 / 既存で無視 {duplicate}行")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="NOTIME 過去分の一括取り込み（backfill）"
@@ -244,7 +284,7 @@ def main() -> int:
                         help=f"開始日 YYYY-MM-DD（既定 {DEFAULT_FROM}）")
     parser.add_argument("--to", dest="date_to", default=None,
                         help="終了日 YYYY-MM-DD（既定は今日）")
-    parser.add_argument("--only", choices=["cashier", "digitel", "smaregi"],
+    parser.add_argument("--only", choices=["cashier", "digitel", "smaregi", "airregi"],
                         help="片方だけ動かす")
     parser.add_argument("--headed", action="store_true",
                         help="ブラウザの画面を出して動かす")
@@ -294,6 +334,13 @@ def main() -> int:
         except Exception as e:
             failed = True
             print(f"  ❌ スマレジ backfill 失敗: {type(e).__name__}: {e}")
+
+    if args.only in (None, "airregi"):
+        try:
+            run_airregi_backfill(sb, start, end, headless, store_cache)
+        except Exception as e:
+            failed = True
+            print(f"  ❌ Airレジ backfill 失敗: {type(e).__name__}: {e}")
 
     print("\n" + "=" * 60)
     if failed:

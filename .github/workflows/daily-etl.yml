@@ -39,7 +39,7 @@ on:
         required: false
         default: "both"
         type: choice
-        options: [both, cashier, digitel, smaregi]
+        options: [both, cashier, digitel, smaregi, airregi]
       force:
         description: "取り込み済みの日でも、もう一度取り込む"
         required: false
@@ -82,6 +82,15 @@ jobs:
       DIGITAIL_SF_PW: ${{ secrets.DIGITAIL_SF_PW }}
       SMAREGI_ID: ${{ secrets.SMAREGI_ID }}
       SMAREGI_PW: ${{ secrets.SMAREGI_PW }}
+      AIRREGI_ID: ${{ secrets.AIRREGI_ID }}
+      AIRREGI_PW: ${{ secrets.AIRREGI_PW }}
+      # 調査モード。1 にすると Airレジのログイン後の画面構造をログに出す（目印確定用）。
+      AIRREGI_DEBUG: ${{ vars.AIRREGI_DEBUG }}
+      # 会計明細URL/セレクタを実DOM確定後に上書きするための任意の変数。
+      AIRREGI_SALES_URL: ${{ vars.AIRREGI_SALES_URL }}
+      AIRREGI_CSV_SELECTOR: ${{ vars.AIRREGI_CSV_SELECTOR }}
+      AIRREGI_DATE_FROM_SEL: ${{ vars.AIRREGI_DATE_FROM_SEL }}
+      AIRREGI_DATE_TO_SEL: ${{ vars.AIRREGI_DATE_TO_SEL }}
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
       # 任意：これを登録するとダッシュボードが「Googleログイン制(社内のみ)」になる。
@@ -130,6 +139,7 @@ jobs:
             if [ "${{ inputs.only }}" = "cashier" ]; then ARGS="$ARGS --only cashier"; fi
             if [ "${{ inputs.only }}" = "digitel" ]; then ARGS="$ARGS --only digitel"; fi
             if [ "${{ inputs.only }}" = "smaregi" ]; then ARGS="$ARGS --only smaregi"; fi
+            if [ "${{ inputs.only }}" = "airregi" ]; then ARGS="$ARGS --only airregi"; fi
             echo "実行(backfill): python -m etl.backfill $ARGS"
             python -m etl.backfill $ARGS
           else
@@ -138,6 +148,7 @@ jobs:
             if [ "${{ inputs.only }}" = "cashier" ]; then ARGS="$ARGS --only cashier"; fi
             if [ "${{ inputs.only }}" = "digitel" ]; then ARGS="$ARGS --only digitel"; fi
             if [ "${{ inputs.only }}" = "smaregi" ]; then ARGS="$ARGS --only smaregi"; fi
+            if [ "${{ inputs.only }}" = "airregi" ]; then ARGS="$ARGS --only airregi"; fi
             if [ "${{ inputs.force }}" = "true" ]; then ARGS="$ARGS --force"; fi
             echo "実行: python -m etl.run_daily $ARGS"
             python -m etl.run_daily $ARGS
