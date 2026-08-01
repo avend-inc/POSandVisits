@@ -37,9 +37,16 @@ from .settings import (BROWSER_TIMEOUT_MS, EtlError, RETRIES, RETRY_WAIT_SEC,
 # ------------------------------------------------------------
 # 取得先（既定値。実DOM確定後に定数 or 環境変数で上書き）
 # ------------------------------------------------------------
-AIRREGI_LOGIN_URL = "https://airregi.jp/"
+# バックオフィスのログイン画面（宣伝トップ https://airregi.jp/ ではない）。
+AIRREGI_LOGIN_URL = "https://airregi.jp/CLP/view/login/"
+# バックオフィスのトップ（ログイン後の起点。ここから会計明細メニューへ辿る）。
+AIRREGI_HOME_URL = "https://airregi.jp/CLP/"
 # 会計明細（取引履歴）画面。実URLは調査モードで確定して上書きする。
 AIRREGI_SALES_URL = "https://airregi.jp/CLP/view/salesList/"
+
+# 立ち上げ中は True。ログイン直後にバックオフィスの構造をログへ出して目印を確定する。
+# 目印確定後に False にする（本番の日次ログを静かにするため）。
+_BRINGUP = True
 
 # ログイン欄の候補（AirIDは1画面 or ID→次へ→パスワードの2段の両対応）
 LOGIN_ID_SELECTORS = [
@@ -337,8 +344,18 @@ def fetch_range(start_date: str, end_date: str, headless: bool = True) -> str:
         try:
             with browser_page(headless=headless) as (page, context):
                 login(page, airid, password)
-                if _env("AIRREGI_DEBUG"):
+                if _env("AIRREGI_DEBUG") or _BRINGUP:
+                    print("  ▼ ログイン直後の画面構造:")
                     discover(page)
+                    # バックオフィスのトップも見て、会計明細メニューを探す。
+                    try:
+                        page.goto(_env("AIRREGI_HOME_URL") or AIRREGI_HOME_URL,
+                                  wait_until="domcontentloaded")
+                        page.wait_for_load_state("networkidle", timeout=30_000)
+                        print("  ▼ バックオフィスTOPの画面構造:")
+                        discover(page)
+                    except Exception as _e:
+                        print(f"  （TOP構造の取得はスキップ: {_e}）")
                 try:
                     open_sales(page)
                     set_date_range(page, start_date, end_date)
