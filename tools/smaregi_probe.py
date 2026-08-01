@@ -88,10 +88,16 @@ def main() -> int:
                 print(f"  HTTP {st}")
                 try:
                     obj = json.loads(body)
-                    pretty = json.dumps(obj, ensure_ascii=False, indent=2)
-                    print(pretty[:2500])
+                    if m == "getSalesInfo":
+                        # 取引数・客数のフィールド名を確定したいので全キー＆全文を出す
+                        d = obj.get("data")
+                        if isinstance(d, dict):
+                            print("  data keys:", list(d.keys()))
+                        print(json.dumps(obj, ensure_ascii=False, indent=2)[:6000])
+                    else:
+                        print(json.dumps(obj, ensure_ascii=False, indent=2)[:2500])
                 except Exception:
-                    print(body[:2000])
+                    print(body[:3000])
             except Exception as e:
                 print(f"  ERR {type(e).__name__}: {e}")
 
