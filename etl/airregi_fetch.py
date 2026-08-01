@@ -398,17 +398,16 @@ def fetch_range(start_date: str, end_date: str, headless: bool = True) -> str:
                 login(page, airid, password)
                 select_store(page)   # 複数店アカウント→下北沢を選ぶ
                 if _env("AIRREGI_DEBUG") or _BRINGUP:
-                    print("  ▼ ログイン直後の画面構造:")
-                    discover(page)
-                    # バックオフィスのトップも見て、会計明細メニューを探す。
+                    # 会計明細の在り処を探す。売上集計(salesList)画面のメニュー・CSV・
+                    # 日付欄を洗い出して、正しいレポート(会計明細/取引履歴)を特定する。
                     try:
-                        page.goto(_env("AIRREGI_HOME_URL") or AIRREGI_HOME_URL,
+                        page.goto(_env("AIRREGI_SALES_URL") or AIRREGI_SALES_URL,
                                   wait_until="domcontentloaded")
-                        page.wait_for_load_state("networkidle", timeout=30_000)
-                        print("  ▼ バックオフィスTOPの画面構造:")
+                        page.wait_for_timeout(2500)
+                        print("  ▼ salesList画面の構造（会計明細メニューを探す）:")
                         discover(page)
                     except Exception as _e:
-                        print(f"  （TOP構造の取得はスキップ: {_e}）")
+                        print(f"  （salesList構造の取得はスキップ: {_e}）")
                 try:
                     open_sales(page)
                     set_date_range(page, start_date, end_date)
