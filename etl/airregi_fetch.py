@@ -253,8 +253,14 @@ def discover(page) -> None:
       const dates = [...document.querySelectorAll('input')]
         .filter(i => ['date','text'].includes((i.type||'').toLowerCase()))
         .map(i => ({name:i.name, id:i.id, type:i.type, ph:cut(i.placeholder,20)}))
-        .filter(x => (x.name||x.id)).slice(0,30);
-      return {nav, dl, forms, dates};
+        .filter(x => (x.name||x.id)).slice(0,40);
+      // 全ボタン/クリック要素（ラベルが CSV 等でなくても拾う。SPAの出力ボタン特定用）
+      const btns = [...document.querySelectorAll('button,[role=button],a,[data-testid]')]
+        .map(el => ({tag:el.tagName, text:cut(el.innerText||el.value,40),
+                     tid:el.getAttribute&&el.getAttribute('data-testid'),
+                     vis:vis(el)}))
+        .filter(x => (x.text||x.tid)).slice(0,120);
+      return {nav, dl, forms, dates, btns};
     }
     """
     try:
@@ -276,6 +282,12 @@ def discover(page) -> None:
     print("  --- 日付らしき入力欄 ---")
     for x in info.get("dates", []):
         print(f"    name={x.get('name')} id={x.get('id')} type={x.get('type')} ph={x.get('ph')}")
+    print("  --- 全ボタン/クリック要素（text | data-testid | vis）---")
+    for x in info.get("btns", []):
+        t = x.get("text") or ""
+        if not t and not x.get("tid"):
+            continue
+        print(f"    <{x.get('tag')}> {t!r} tid={x.get('tid')} vis={x.get('vis')}")
     dump_page(page, "airregi_discover")
 
 
