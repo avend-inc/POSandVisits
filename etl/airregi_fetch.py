@@ -44,6 +44,10 @@ AIRREGI_HOME_URL = "https://airregi.jp/CLP/"
 # 会計明細（取引履歴）画面。実URLは調査モードで確定して上書きする。
 AIRREGI_SALES_URL = "https://airregi.jp/CLP/view/salesList/"
 
+# ログイン後の「利用する店舗を選択」画面で選ぶ店舗名（部分一致）。
+# このAirIDは複数店（SELFURUGI/吉祥寺/本郷/下北沢）を持つため、下北沢を選ぶ。
+AIRREGI_STORE_SELECT = "下北沢"
+
 # 立ち上げ中は True。ログイン直後にバックオフィスの構造をログへ出して目印を確定する。
 # 目印確定後に False にする（本番の日次ログを静かにするため）。
 _BRINGUP = True
@@ -164,6 +168,54 @@ def login(page, airid: str, password: str) -> None:
         dump_page(page, "airregi_login_failed")
         raise EtlError("Airレジのログインに失敗した可能性があります"
                        "（ID/PW誤り、または追加認証）。debug/airregi_login_failed を確認してください。")
+
+
+def select_store(page, store_name: str | None = None) -> None:
+    """ログイン後の「利用する店舗を選択」画面で目的の店舗を選ぶ。
+
+    このAirIDは複数店を持ち、ログイン直後に choose-store 画面が出る。
+    store_name（部分一致）のリンクを押して、その店のバックオフィスへ入る。
+    店舗選択画面でなければ何もしない（1店だけのアカウント等）。
+    """
+    store_name = store_name or _env("AIRREGI_STORE_SELECT") or AIRREGI_STORE_SELECT
+    try:
+        url = (page.url or "").lower()
+    except Exception:
+        url = ""
+    # choose-store 画面かどうか。URL か「店舗を選択」の見出しで判定。
+    on_choose = "choose-store" in url
+    if not on_choose:
+        try:
+            on_choose = page.locator('text=利用する店舗を選択').count() > 0
+        except Exception:
+            on_choose = False
+    if not on_choose:
+        return
+
+    # 店舗名（部分一致）のリンク/要素を押す。全角スペース等の表記ゆれは has-text の
+    # 部分一致で吸収（"下北沢" は "NOTIME　下北沢店" に含まれる）。
+    clicked = False
+    for sel in (f'a:has-text("{store_name}")',
+                f'.storeList__list__innerBox__name:has-text("{store_name}")',
+                f'[class*="storeList"]:has-text("{store_name}")',
+                f'li:has-text("{store_name}")',
+                f'text={store_name}'):
+        try:
+            loc = page.locator(sel)
+            if loc.count():
+                loc.first.click()
+                clicked = True
+                break
+        except Exception:
+            continue
+    if not clicked:
+        dump_page(page, "airregi_choose_store_notfound")
+        raise EtlError(f"Airレジの店舗選択で「{store_name}」が見つかりませんでした。"
+                       "debug/airregi_choose_store_notfound を確認してください。")
+    try:
+        page.wait_for_load_state("networkidle", timeout=45_000)
+    except Exception:
+        pass
 
 
 def _looks_like_login(page) -> bool:
@@ -344,6 +396,7 @@ def fetch_range(start_date: str, end_date: str, headless: bool = True) -> str:
         try:
             with browser_page(headless=headless) as (page, context):
                 login(page, airid, password)
+                select_store(page)   # 複数店アカウント→下北沢を選ぶ
                 if _env("AIRREGI_DEBUG") or _BRINGUP:
                     print("  ▼ ログイン直後の画面構造:")
                     discover(page)
@@ -401,6 +454,7 @@ def main() -> int:
         password = require_env("AIRREGI_PW", "Airレジ（AirID）のパスワード")
         with browser_page(headless=headless) as (page, context):
             login(page, airid, password)
+            select_store(page)
             discover(page)
             # 会計明細画面へも行ってみて、そこの構造も出す
             try:
