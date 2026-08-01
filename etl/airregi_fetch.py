@@ -49,9 +49,8 @@ AIRREGI_SALES_URL = "https://airregi.jp/CLP/view/salesJournal/"
 # このAirIDは複数店（SELFURUGI/吉祥寺/本郷/下北沢）を持つため、下北沢を選ぶ。
 AIRREGI_STORE_SELECT = "下北沢"
 
-# 立ち上げ中は True。ログイン直後にバックオフィスの構造をログへ出して目印を確定する。
-# 目印確定後に False にする（本番の日次ログを静かにするため）。
-_BRINGUP = True
+# 立ち上げ調査フラグ。手順は確定したので通常は False（必要時 AIRREGI_DEBUG=1）。
+_BRINGUP = False
 
 # ログイン欄の候補（AirIDは1画面 or ID→次へ→パスワードの2段の両対応）
 LOGIN_ID_SELECTORS = [
@@ -307,75 +306,140 @@ def open_sales(page) -> None:
                            "debug/airregi_sales_nav_notfound を確認してください。")
 
 
-def set_date_range(page, start_date: str, end_date: str | None = None) -> None:
-    end_date = end_date or start_date
-    from_sel = _env("AIRREGI_DATE_FROM_SEL")
-    to_sel = _env("AIRREGI_DATE_TO_SEL")
-    f = page.locator(from_sel).first if from_sel else _first_visible(page, DATE_FROM_SELECTORS)
-    t = page.locator(to_sel).first if to_sel else _first_visible(page, DATE_TO_SELECTORS)
-    for field, value in ((f, start_date), (t, end_date)):
-        if field is None:
-            continue
-        for v in (value, value.replace("-", "/")):
-            try:
-                field.fill("")
-                field.fill(v)
-                break
-            except Exception:
-                continue
-    _click_by_text(page, SEARCH_TEXTS)
+# ------------------------------------------------------------
+# CSVダウンロード（取引履歴→ダウンロードアイコン→ジャーナル履歴(CSV)→
+#   モーダルで期間指定→「ダウンロードの準備を開始する」→非同期生成→
+#   「ダウンロードする」でCSV取得、という手順）
+# ------------------------------------------------------------
+JOURNAL_MENU_TEXTS = ["ジャーナル履歴(CSV)", "ジャーナル履歴（CSV）", "ジャーナル履歴"]
+PREP_TEXTS = ["ダウンロードの準備を開始する", "ダウンロードの準備を開始",
+              "準備を開始する", "準備を開始"]
+DL_DONE_TEXTS = ["ダウンロードする"]
+
+
+def _open_download_menu(page) -> bool:
+    """取引履歴の右上「ダウンロードアイコン」を押して、CSV種別メニューを開く。"""
     try:
-        page.wait_for_load_state("networkidle", timeout=45_000)
+        if page.get_by_text("ジャーナル履歴").first.is_visible():
+            return True
     except Exception:
         pass
+    cands = [_env("AIRREGI_DL_ICON_SEL"),
+             'button[aria-label*="ダウンロード"]', 'a[aria-label*="ダウンロード"]',
+             '[title*="ダウンロード"]', '[aria-label*="download" i]',
+             '[class*="download" i]', '[class*="Download"]',
+             'button:has(img)', 'a:has(img)', 'button:has(svg)', 'a:has(svg)']
+    for sel in cands:
+        if not sel:
+            continue
+        try:
+            loc = page.locator(sel)
+            for i in range(min(loc.count(), 12)):
+                el = loc.nth(i)
+                try:
+                    if not el.is_visible():
+                        continue
+                    el.click(timeout=3000)
+                except Exception:
+                    continue
+                page.wait_for_timeout(600)
+                try:
+                    if page.get_by_text("ジャーナル履歴").first.is_visible():
+                        return True
+                except Exception:
+                    continue
+        except Exception:
+            continue
+    return False
 
 
-# ------------------------------------------------------------
-# CSVダウンロード
-# ------------------------------------------------------------
-def download_csv(page, context) -> bytes:
+def _set_modal_daterange(page, start_date: str, end_date: str) -> bool:
+    """モーダル内「対象期間」欄に期間を入れる（best-effort。既定＝当日範囲）。"""
+    vs, ve = start_date.replace("-", "/"), end_date.replace("-", "/")
+    fld = None
+    for sel in ['input[value*="~"]', 'input[value*="〜"]',
+                'input[placeholder*="~"]', 'input[placeholder*="対象"]',
+                'input[type="text"]']:
+        try:
+            loc = page.locator(sel)
+            for i in range(min(loc.count(), 8)):
+                el = loc.nth(i)
+                if el.is_visible():
+                    fld = el
+                    break
+            if fld:
+                break
+        except Exception:
+            continue
+    if fld is None:
+        return False
+    for val in (f"{vs} ~ {ve}", f"{vs} 〜 {ve}", vs):
+        try:
+            fld.click()
+            fld.fill("")
+            fld.type(val)
+            page.keyboard.press("Enter")
+            page.wait_for_timeout(400)
+            return True
+        except Exception:
+            continue
+    return False
+
+
+def download_csv(page, context, start_date: str | None = None,
+                 end_date: str | None = None) -> bytes:
     downloads: list = []
     try:
         page.on("download", lambda d: downloads.append(d))
     except Exception:
         pass
 
-    csv_sel = _env("AIRREGI_CSV_SELECTOR")
-    clicked = None
-    if csv_sel:
+    # 1) ダウンロードアイコンのメニューを開く
+    if not _open_download_menu(page):
+        dump_page(page, "airregi_dl_icon_notfound")
+        discover(page)
+        raise EtlError("Airレジのダウンロードアイコン（ジャーナル履歴）が開けませんでした。"
+                       "debug/airregi_dl_icon_notfound を確認してください。")
+    # 2) 「ジャーナル履歴(CSV)」を押す → モーダル表示
+    if not _click_by_text(page, JOURNAL_MENU_TEXTS):
+        dump_page(page, "airregi_journal_menu_notfound")
+        raise EtlError("「ジャーナル履歴(CSV)」が押せませんでした。"
+                       "debug/airregi_journal_menu_notfound を確認してください。")
+    page.wait_for_timeout(1500)
+    # 3) 対象期間を設定（既定は当日範囲。指定があれば入れる）
+    if start_date:
+        _set_modal_daterange(page, start_date, end_date or start_date)
+    # 4) 「ダウンロードの準備を開始する」（サーバ側で非同期生成）
+    _click_by_text(page, PREP_TEXTS)
+    # 5) 生成完了を待って、最新の「ダウンロードする」を押す
+    page.wait_for_timeout(8000)   # 新しい準備済みファイルが一覧の先頭に出るのを待つ
+    deadline = time.time() + 150
+    while time.time() < deadline and not downloads:
         try:
-            page.locator(csv_sel).first.click()
-            clicked = csv_sel
+            btn = page.get_by_text("ダウンロードする").first
+            if btn and btn.is_visible():
+                btn.click()
         except Exception:
-            clicked = None
-    if clicked is None:
-        clicked = _click_by_text(page, CSV_TEXTS)
-    if clicked is None:
-        dump_page(page, "airregi_csv_button_notfound")
-        raise EtlError("Airレジの「CSVダウンロード」ボタンが見つかりませんでした。"
-                       "debug/airregi_csv_button_notfound を確認してください。")
-
-    # ダウンロード確定モーダルがあれば「ダウンロード/OK」を押す
-    time.sleep(1.0)
-    _click_by_text(page, ["ダウンロード", "OK", "はい", "実行", "確定"])
-
-    deadline = time.time() + 60
-    while not downloads and time.time() < deadline:
-        page.wait_for_timeout(500)
+            pass
+        for _ in range(10):
+            if downloads:
+                break
+            page.wait_for_timeout(500)
+        page.wait_for_timeout(2000)
     if downloads:
         path = downloads[0].path()
         if path:
             with open(path, "rb") as fh:
                 return fh.read()
 
-    # ダウンロードイベントが取れない場合、通信ログからCSVらしきURLを直接GET
+    # フォールバック: 通信ログからCSVらしきURLを直接GET
     log = getattr(page, "_notime_requests", None) or []
     for entry in reversed(log):
         m = re.search(r"(https?://\S+)", entry)
         if not m:
             continue
         u = m.group(1)
-        if any(k in u.lower() for k in ("csv", "export", "download")):
+        if any(k in u.lower() for k in ("csv", "export", "download", "journal")):
             try:
                 resp = context.request.get(u)
                 if resp.ok:
@@ -410,21 +474,12 @@ def fetch_range(start_date: str, end_date: str, headless: bool = True) -> str:
             with browser_page(headless=headless) as (page, context):
                 login(page, airid, password)
                 select_store(page)   # 複数店アカウント→下北沢を選ぶ
-                if _env("AIRREGI_DEBUG") or _BRINGUP:
-                    # 会計明細の在り処を探す。売上集計(salesList)画面のメニュー・CSV・
-                    # 日付欄を洗い出して、正しいレポート(会計明細/取引履歴)を特定する。
-                    try:
-                        page.goto(_env("AIRREGI_SALES_URL") or AIRREGI_SALES_URL,
-                                  wait_until="domcontentloaded")
-                        page.wait_for_timeout(2500)
-                        print("  ▼ salesList画面の構造（会計明細メニューを探す）:")
-                        discover(page)
-                    except Exception as _e:
-                        print(f"  （salesList構造の取得はスキップ: {_e}）")
+                if _env("AIRREGI_DEBUG"):
+                    discover(page)
                 try:
                     open_sales(page)
-                    set_date_range(page, start_date, end_date)
-                    return decode_csv(download_csv(page, context))
+                    return decode_csv(
+                        download_csv(page, context, start_date, end_date))
                 except Exception:
                     # 目印が未確定な段階での失敗は、画面構造を必ずログに残して
                     # 次の調整（URL/セレクタ確定）に使えるようにしてから投げ直す。
