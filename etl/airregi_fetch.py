@@ -317,39 +317,79 @@ PREP_TEXTS = ["ダウンロードの準備を開始する", "ダウンロード�
 DL_DONE_TEXTS = ["ダウンロードする"]
 
 
-def _open_download_menu(page) -> bool:
-    """取引履歴の右上「ダウンロードアイコン」を押して、CSV種別メニューを開く。"""
+def _journal_menu_visible(page) -> bool:
     try:
-        if page.get_by_text("ジャーナル履歴").first.is_visible():
-            return True
+        return page.get_by_text("ジャーナル履歴").first.is_visible()
     except Exception:
-        pass
-    cands = [_env("AIRREGI_DL_ICON_SEL"),
-             'button[aria-label*="ダウンロード"]', 'a[aria-label*="ダウンロード"]',
-             '[title*="ダウンロード"]', '[aria-label*="download" i]',
-             '[class*="download" i]', '[class*="Download"]',
-             'button:has(img)', 'a:has(img)', 'button:has(svg)', 'a:has(svg)']
-    for sel in cands:
+        return False
+
+
+def _open_download_menu(page) -> bool:
+    """取引履歴の右上「ダウンロードアイコン」を押して、CSV種別メニューを開く。
+
+    アイコンなので文字では当てられない。安全・短時間で当てるため:
+      ① まず狙いの効くセレクタ（aria-label/title/クラスに download/ダウンロード）
+      ② ダメなら「上部ツールバーのアイコン要素」だけを少数・短timeoutで試す
+    誤クリックで別メニューが出た場合は Esc で閉じてから次を試す（画面破壊防止）。
+    """
+    if _journal_menu_visible(page):
+        return True
+
+    # ① 狙いの効くセレクタ（速い・安全）
+    strong = [_env("AIRREGI_DL_ICON_SEL"),
+              'button[aria-label*="ダウンロード"]', 'a[aria-label*="ダウンロード"]',
+              '[title*="ダウンロード"]', '[aria-label*="download" i]',
+              '[title*="download" i]',
+              'button[class*="download" i]', 'a[class*="download" i]',
+              '[class*="Download"]', '[class*="csvDownload" i]', '[class*="dlIcon" i]']
+    for sel in strong:
         if not sel:
             continue
         try:
             loc = page.locator(sel)
-            for i in range(min(loc.count(), 12)):
+            for i in range(min(loc.count(), 6)):
                 el = loc.nth(i)
                 try:
                     if not el.is_visible():
                         continue
-                    el.click(timeout=3000)
+                    el.click(timeout=1500)
                 except Exception:
                     continue
-                page.wait_for_timeout(600)
-                try:
-                    if page.get_by_text("ジャーナル履歴").first.is_visible():
-                        return True
-                except Exception:
-                    continue
+                page.wait_for_timeout(500)
+                if _journal_menu_visible(page):
+                    return True
         except Exception:
             continue
+
+    # ② 上部ツールバーのアイコン（img/svgを含むクリック要素）を少数だけ試す。
+    #    画面上部(y<300)に限定し、誤クリックは Esc で復帰。総数も制限して暴走防止。
+    try:
+        icons = page.locator(
+            'button:has(img), a:has(img), button:has(svg), a:has(svg), '
+            '[role=button]:has(svg), img[src*="download" i], img[alt*="ダウンロード"]')
+        n = min(icons.count(), 14)
+    except Exception:
+        n = 0
+    for i in range(n):
+        el = icons.nth(i)
+        try:
+            if not el.is_visible():
+                continue
+            box = el.bounding_box()
+            if box and box.get("y", 999) > 320:   # 上部ツールバーだけに絞る
+                continue
+            el.click(timeout=1500)
+        except Exception:
+            continue
+        page.wait_for_timeout(450)
+        if _journal_menu_visible(page):
+            return True
+        # 誤クリックで別のポップオーバー等が出たら閉じる
+        try:
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(150)
+        except Exception:
+            pass
     return False
 
 
@@ -468,8 +508,14 @@ def fetch_range(start_date: str, end_date: str, headless: bool = True) -> str:
     airid = require_env("AIRREGI_ID", "Airレジ（AirID）のログインID")
     password = require_env("AIRREGI_PW", "Airレジ（AirID）のパスワード")
 
+    # 失敗時に長時間churnしないよう、Airレジは既定2回まで（環境変数で調整可）。
+    try:
+        max_try = max(1, int(_env("AIRREGI_RETRIES") or 2))
+    except Exception:
+        max_try = 2
+
     last_error: Exception | None = None
-    for attempt in range(1, RETRIES + 1):
+    for attempt in range(1, max_try + 1):
         try:
             with browser_page(headless=headless) as (page, context):
                 login(page, airid, password)
@@ -481,8 +527,7 @@ def fetch_range(start_date: str, end_date: str, headless: bool = True) -> str:
                     return decode_csv(
                         download_csv(page, context, start_date, end_date))
                 except Exception:
-                    # 目印が未確定な段階での失敗は、画面構造を必ずログに残して
-                    # 次の調整（URL/セレクタ確定）に使えるようにしてから投げ直す。
+                    # 失敗時は画面構造をログに残して次の調整に使えるようにする。
                     try:
                         print("  ⚠️ 会計明細/CSV取得で失敗。画面構造を洗い出します（調査用）:")
                         discover(page)
@@ -491,11 +536,11 @@ def fetch_range(start_date: str, end_date: str, headless: bool = True) -> str:
                     raise
         except Exception as e:
             last_error = e
-            if attempt < RETRIES:
+            if attempt < max_try:
                 wait = RETRY_WAIT_SEC * attempt
                 print(f"  {attempt}回目失敗（{e}）。{wait}秒待って再試行します...")
                 time.sleep(wait)
-    raise EtlError(f"AirレジのCSVを{RETRIES}回試しても取得できませんでした。\n{last_error}")
+    raise EtlError(f"AirレジのCSVを{max_try}回試しても取得できませんでした。\n{last_error}")
 
 
 def fetch(business_date: str, headless: bool = True) -> str:
