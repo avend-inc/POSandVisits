@@ -172,6 +172,7 @@ def run_smaregi_backfill(sb: Supabase, start: str, end: str, headless: bool,
         print("  ℹ️ SMAREGI_ID/PW 未設定のため スマレジ backfill はスキップ。")
         return
 
+    from datetime import date as _date, timedelta
     from . import smaregi_fetch, rows as rows_mod
     from .run_daily import SMAREGI_STORE_NAME
 
@@ -182,27 +183,45 @@ def run_smaregi_backfill(sb: Supabase, start: str, end: str, headless: bool,
     except Exception:
         pass
 
-    got = smaregi_fetch.fetch_range(start, end, user, pw, headless=headless)
-    payload: list[dict] = []
-    for iso in sorted(got.keys()):
-        day = got[iso]
-        payload.extend(rows_mod.smaregi_rows(day.get("info") or {},
-                                             day.get("categories") or [],
-                                             store_id, iso))
-    sb.delete("sales", {
-        "store_id": f"eq.{store_id}",
-        "pos_name": f"eq.{rows_mod.SMAREGI_POS}",
-        "and": f"(business_date.gte.{start},business_date.lte.{end})"})
-    if not payload:
-        print("  対象期間の売上は0でした。")
-        return
-    ins, _ = sb.insert_ignore_duplicates(
-        "sales", payload, on_conflict="store_id,pos_name,tx_id,line_no")
-    sdays = sorted({r["business_date"] for r in payload})
-    txn = len({(r["business_date"], r["tx_id"]) for r in payload})
-    ssum = sum(r["sales_in_tax"] for r in payload if r["line_no"] == 0)
-    print(f"  【{SMAREGI_STORE_NAME}】スマレジ売上 {sdays[0]}〜{sdays[-1]}"
-          f"（{txn}取引 / {int(ssum):,}円）→ 追加 {ins}行")
+    def _d(s):
+        y, m, d = map(int, s.split("-")); return _date(y, m, d)
+
+    def _month_end(d):
+        nm = _date(d.year + (d.month == 12), (d.month % 12) + 1, 1)
+        return nm - timedelta(days=1)
+
+    # スマレジは1日ずつAPIを叩くため、長期間は月ごとに「取得→即保存」する。
+    # こうすると途中で切れても月単位で結果が残り、再実行にも強い。
+    total_ins = 0
+    cur = _d(start); last = _d(end)
+    while cur <= last:
+        m_start = cur
+        m_end = min(_month_end(cur), last)
+        got = smaregi_fetch.fetch_range(m_start.isoformat(), m_end.isoformat(),
+                                        user, pw, headless=headless)
+        payload: list[dict] = []
+        for iso in sorted(got.keys()):
+            day = got[iso]
+            payload.extend(rows_mod.smaregi_rows(day.get("info") or {},
+                                                 day.get("categories") or [],
+                                                 store_id, iso))
+        sb.delete("sales", {
+            "store_id": f"eq.{store_id}",
+            "pos_name": f"eq.{rows_mod.SMAREGI_POS}",
+            "and": f"(business_date.gte.{m_start.isoformat()},"
+                   f"business_date.lte.{m_end.isoformat()})"})
+        if payload:
+            ins, _ = sb.insert_ignore_duplicates(
+                "sales", payload, on_conflict="store_id,pos_name,tx_id,line_no")
+            total_ins += ins
+            txn = len({(r["business_date"], r["tx_id"]) for r in payload})
+            ssum = sum(r["sales_in_tax"] for r in payload if r["line_no"] == 0)
+            print(f"  【{SMAREGI_STORE_NAME}】{m_start.isoformat()[:7]}: "
+                  f"{txn}取引 / {int(ssum):,}円 → 追加 {ins}行")
+        else:
+            print(f"  【{SMAREGI_STORE_NAME}】{m_start.isoformat()[:7]}: 売上0")
+        cur = m_end + timedelta(days=1)
+    print(f"  ✅ スマレジ backfill 完了（合計 追加 {total_ins}行）")
 
 
 def main() -> int:
