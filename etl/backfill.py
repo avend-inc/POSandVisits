@@ -193,35 +193,47 @@ def run_smaregi_backfill(sb: Supabase, start: str, end: str, headless: bool,
     # スマレジは1日ずつAPIを叩くため、長期間は月ごとに「取得→即保存」する。
     # こうすると途中で切れても月単位で結果が残り、再実行にも強い。
     total_ins = 0
+    failed_months: list[str] = []
     cur = _d(start); last = _d(end)
     while cur <= last:
         m_start = cur
         m_end = min(_month_end(cur), last)
-        got = smaregi_fetch.fetch_range(m_start.isoformat(), m_end.isoformat(),
-                                        user, pw, headless=headless)
-        payload: list[dict] = []
-        for iso in sorted(got.keys()):
-            day = got[iso]
-            payload.extend(rows_mod.smaregi_rows(day.get("info") or {},
-                                                 day.get("categories") or [],
-                                                 store_id, iso))
-        sb.delete("sales", {
-            "store_id": f"eq.{store_id}",
-            "pos_name": f"eq.{rows_mod.SMAREGI_POS}",
-            "and": f"(business_date.gte.{m_start.isoformat()},"
-                   f"business_date.lte.{m_end.isoformat()})"})
-        if payload:
-            ins, _ = sb.insert_ignore_duplicates(
-                "sales", payload, on_conflict="store_id,pos_name,tx_id,line_no")
-            total_ins += ins
-            txn = len({(r["business_date"], r["tx_id"]) for r in payload})
-            ssum = sum(r["sales_in_tax"] for r in payload if r["line_no"] == 0)
-            print(f"  【{SMAREGI_STORE_NAME}】{m_start.isoformat()[:7]}: "
-                  f"{txn}取引 / {int(ssum):,}円 → 追加 {ins}行")
-        else:
-            print(f"  【{SMAREGI_STORE_NAME}】{m_start.isoformat()[:7]}: 売上0")
+        ym = m_start.isoformat()[:7]
+        try:
+            got = smaregi_fetch.fetch_range(m_start.isoformat(), m_end.isoformat(),
+                                            user, pw, headless=headless)
+            payload: list[dict] = []
+            for iso in sorted(got.keys()):
+                day = got[iso]
+                payload.extend(rows_mod.smaregi_rows(day.get("info") or {},
+                                                     day.get("categories") or [],
+                                                     store_id, iso))
+            sb.delete("sales", {
+                "store_id": f"eq.{store_id}",
+                "pos_name": f"eq.{rows_mod.SMAREGI_POS}",
+                "and": f"(business_date.gte.{m_start.isoformat()},"
+                       f"business_date.lte.{m_end.isoformat()})"})
+            if payload:
+                ins, _ = sb.insert_ignore_duplicates(
+                    "sales", payload, on_conflict="store_id,pos_name,tx_id,line_no")
+                total_ins += ins
+                txn = len({(r["business_date"], r["tx_id"]) for r in payload})
+                ssum = sum(r["sales_in_tax"] for r in payload if r["line_no"] == 0)
+                print(f"  【{SMAREGI_STORE_NAME}】{ym}: "
+                      f"{txn}取引 / {int(ssum):,}円 → 追加 {ins}行")
+            else:
+                print(f"  【{SMAREGI_STORE_NAME}】{ym}: 売上0")
+        except Exception as e:
+            # 1か月がダメでも他の月は続ける（後で失敗月だけ流し直せる）。
+            failed_months.append(ym)
+            print(f"  【{SMAREGI_STORE_NAME}】{ym}: ❌ 取得失敗（スキップ）: "
+                  f"{type(e).__name__}: {e}")
         cur = m_end + timedelta(days=1)
-    print(f"  ✅ スマレジ backfill 完了（合計 追加 {total_ins}行）")
+    if failed_months:
+        print(f"  ⚠️ スマレジ backfill: 追加 {total_ins}行。"
+              f"失敗月（要リトライ）: {', '.join(failed_months)}")
+    else:
+        print(f"  ✅ スマレジ backfill 完了（合計 追加 {total_ins}行）")
 
 
 def main() -> int:
