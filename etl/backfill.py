@@ -162,6 +162,49 @@ def run_digitel_backfill(sb: Supabase, start: str, end: str,
                     print(f"  【{name}】デジテール売上 ❌ {type(e).__name__}: {e}")
 
 
+def run_smaregi_backfill(sb: Supabase, start: str, end: str, headless: bool,
+                         store_cache: dict) -> None:
+    """スマレジ（隠岐）の過去分。SMAREGI_ID/PW が無ければ何もしない。"""
+    import os
+    user = os.environ.get("SMAREGI_ID") or ""
+    pw = os.environ.get("SMAREGI_PW") or ""
+    if not user or not pw:
+        print("  ℹ️ SMAREGI_ID/PW 未設定のため スマレジ backfill はスキップ。")
+        return
+
+    from . import smaregi_fetch, rows as rows_mod
+    from .run_daily import SMAREGI_STORE_NAME
+
+    print("\n--- スマレジ（隠岐）売上 ---")
+    store_id = sb.get_or_create_store(SMAREGI_STORE_NAME, store_cache)
+    try:
+        sb.update_store(store_id, {"ownership": "FC"})
+    except Exception:
+        pass
+
+    got = smaregi_fetch.fetch_range(start, end, user, pw, headless=headless)
+    payload: list[dict] = []
+    for iso in sorted(got.keys()):
+        day = got[iso]
+        payload.extend(rows_mod.smaregi_rows(day.get("info") or {},
+                                             day.get("categories") or [],
+                                             store_id, iso))
+    sb.delete("sales", {
+        "store_id": f"eq.{store_id}",
+        "pos_name": f"eq.{rows_mod.SMAREGI_POS}",
+        "and": f"(business_date.gte.{start},business_date.lte.{end})"})
+    if not payload:
+        print("  対象期間の売上は0でした。")
+        return
+    ins, _ = sb.insert_ignore_duplicates(
+        "sales", payload, on_conflict="store_id,pos_name,tx_id,line_no")
+    sdays = sorted({r["business_date"] for r in payload})
+    txn = len({(r["business_date"], r["tx_id"]) for r in payload})
+    ssum = sum(r["sales_in_tax"] for r in payload if r["line_no"] == 0)
+    print(f"  【{SMAREGI_STORE_NAME}】スマレジ売上 {sdays[0]}〜{sdays[-1]}"
+          f"（{txn}取引 / {int(ssum):,}円）→ 追加 {ins}行")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="NOTIME 過去分の一括取り込み（backfill）"
@@ -170,7 +213,7 @@ def main() -> int:
                         help=f"開始日 YYYY-MM-DD（既定 {DEFAULT_FROM}）")
     parser.add_argument("--to", dest="date_to", default=None,
                         help="終了日 YYYY-MM-DD（既定は今日）")
-    parser.add_argument("--only", choices=["cashier", "digitel"],
+    parser.add_argument("--only", choices=["cashier", "digitel", "smaregi"],
                         help="片方だけ動かす")
     parser.add_argument("--headed", action="store_true",
                         help="ブラウザの画面を出して動かす")
@@ -200,19 +243,26 @@ def main() -> int:
         return 1
 
     failed = False
-    if args.only != "digitel":
+    if args.only in (None, "cashier"):
         try:
             run_cashier_backfill(sb, start, end, headless, store_cache)
         except Exception as e:
             failed = True
             print(f"  ❌ cashier backfill 失敗: {type(e).__name__}: {e}")
 
-    if args.only != "cashier":
+    if args.only in (None, "digitel"):
         try:
             run_digitel_backfill(sb, start, end, headless)
         except Exception as e:
             failed = True
             print(f"  ❌ デジテール backfill 失敗: {type(e).__name__}: {e}")
+
+    if args.only in (None, "smaregi"):
+        try:
+            run_smaregi_backfill(sb, start, end, headless, store_cache)
+        except Exception as e:
+            failed = True
+            print(f"  ❌ スマレジ backfill 失敗: {type(e).__name__}: {e}")
 
     print("\n" + "=" * 60)
     if failed:

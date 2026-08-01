@@ -367,6 +367,69 @@ def run_bundle_master(sb: Supabase, business_date: str, run_id: str,
         return StepResult("bundle_master", "failed", detail)
 
 
+# スマレジ店の表示名（SELFURUGIブランドFCとして扱う）。必要なら環境変数で上書き可。
+SMAREGI_STORE_NAME = os.environ.get("SMAREGI_STORE_NAME", "SELFURUGI隠岐店")
+
+
+def run_smaregi(sb: Supabase, business_date: str, run_id: str,
+                force: bool, headless: bool, store_cache: dict) -> list[StepResult]:
+    """スマレジ（隠岐）の売上を取り込む。SMAREGI_ID/PW が無ければ何もしない。"""
+    user = os.environ.get("SMAREGI_ID") or ""
+    pw = os.environ.get("SMAREGI_PW") or ""
+    if not user or not pw:
+        return []   # 未設定なら静かにスキップ
+
+    from . import smaregi_fetch, rows as rows_mod
+    started = datetime.now(JST).isoformat()
+    print("\n" + "=" * 60)
+    print(f"【3】スマレジ 売上  対象営業日: {business_date}")
+    print("=" * 60)
+    try:
+        store_id = sb.get_or_create_store(SMAREGI_STORE_NAME, store_cache)
+        try:
+            sb.update_store(store_id, {"ownership": "FC"})
+        except Exception:
+            pass
+        if not force and sb.already_succeeded("smaregi", business_date, store_id):
+            print("  すでに取り込み済みのためスキップ（--force で解除）。")
+            return [StepResult("smaregi", "rejected_duplicate", "取り込み済み")]
+
+        got = smaregi_fetch.fetch_range(business_date, business_date, user, pw,
+                                        headless=headless)
+        day = got.get(business_date) or {}
+        payload = rows_mod.smaregi_rows(day.get("info") or {},
+                                        day.get("categories") or [],
+                                        store_id, business_date)
+        # 同じ日のSMAREGI売上を消してから入れ直す
+        sb.delete("sales", {
+            "store_id": f"eq.{store_id}",
+            "pos_name": f"eq.{rows_mod.SMAREGI_POS}",
+            "business_date": f"eq.{business_date}"})
+        if not payload:
+            sb.log(run_id=run_id, source="smaregi", business_date=business_date,
+                   store_id=store_id, status="no_data", message="売上0",
+                   started_at=started)
+            print("  売上0（取り込むものなし）。")
+            return [StepResult("smaregi", "no_data", "売上0")]
+        ins, _ = sb.insert_ignore_duplicates(
+            "sales", payload, on_conflict="store_id,pos_name,tx_id,line_no")
+        txn = len({r["tx_id"] for r in payload})
+        ssum = sum(r["sales_in_tax"] for r in payload if r["line_no"] == 0)
+        print(f"  【{SMAREGI_STORE_NAME}】スマレジ売上 {txn}取引 / {int(ssum):,}円 → 追加 {ins}行")
+        sb.log(run_id=run_id, source="smaregi", business_date=business_date,
+               store_id=store_id, status="success", rows_fetched=len(payload),
+               rows_inserted=ins, message=f"{txn}取引 {int(ssum)}円", started_at=started)
+        return [StepResult("smaregi", "success", f"{txn}取引 {int(ssum):,}円", len(payload), ins)]
+    except Exception as e:
+        detail = f"{type(e).__name__}: {e}"
+        print(f"  ❌ スマレジ取り込み失敗: {detail}")
+        if not isinstance(e, EtlError):
+            traceback.print_exc()
+        sb.log(run_id=run_id, source="smaregi", business_date=business_date,
+               store_id=None, status="failed", message=detail[:2000], started_at=started)
+        return [StepResult("smaregi", "failed", detail)]
+
+
 # ============================================================
 # メイン
 # ============================================================
@@ -375,7 +438,7 @@ def main() -> int:
         description="NOTIME 日次ETL（cashier売上 / デジテール来店数 → Supabase）"
     )
     parser.add_argument("--date", help="対象の営業日 YYYY-MM-DD（省略時は前日）")
-    parser.add_argument("--only", choices=["cashier", "digitel", "pos", "bundle"],
+    parser.add_argument("--only", choices=["cashier", "digitel", "pos", "bundle", "smaregi"],
                         help="1種類だけ動かす（cashier / digitel / pos=Air/EZ接続 / bundle=バンドル名）")
     parser.add_argument("--force", action="store_true",
                         help="取り込み済みの日でも、もう一度取り込む")
@@ -422,6 +485,10 @@ def main() -> int:
         # Air/EZ等の「レジ接続」（store_pos）を巡回して取り込む。未登録なら何もしない。
         from .pos_live import run_live_pos
         results.extend(run_live_pos(sb, business_date, run_id, args.force, headless))
+    if args.only in (None, "smaregi"):
+        # スマレジ店（隠岐）。SMAREGI_ID/PW が無ければ何もしない。
+        results.extend(run_smaregi(sb, business_date, run_id, args.force,
+                                   headless, store_cache))
 
     # ---- まとめ ----
     icons = {"success": "✅", "no_data": "ℹ️",

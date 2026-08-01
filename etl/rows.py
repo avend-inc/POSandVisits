@@ -209,6 +209,7 @@ DIGITEL_SALES_MAP = {
 }
 # sales の pos_name。既存POS(cashier/SIPOS)と混ざらないよう別名にする。
 DIGITEL_SALES_POS = "DIGITEL"
+SMAREGI_POS = "SMAREGI"
 
 
 def digitel_sales_rows(csv_text: str, store_id: int,
@@ -382,4 +383,65 @@ def digitel_detail_rows(sales_csv: str, details_csv: str, store_id: int,
                 "is_child":      False,
                 "is_normal":     True,
             })
+    return rows
+
+
+def smaregi_rows(info: dict, categories: list, store_id: int, day: str) -> list[dict]:
+    """
+    スマレジの日次JSON（getSalesInfo / getSalesByCategory）→ sales行の一覧。
+
+    スマレジのこの画面は「1日の合計＋カテゴリ別」しか出ない（取引明細は無い）。そこで:
+      ・取引数(transactionCount) ぶんの擬似取引に、その日の税込/税抜合計を割り振る
+        （→ 取引数・客単価が正しく出る）。
+      ・カテゴリ別の売上/点数は先頭の擬似取引の明細行として持たせる
+        （→ カテゴリ別売上・販売点数・平均商品単価が出る）。
+    pos_name='SMAREGI'。来店客数はスマレジに無いので購入率の対象外（POS店扱い）。
+    """
+    info = info or {}
+    n = _to_int(info.get("transactionCount")) or 0
+    t_in = int(round(_to_float(info.get("total") or info.get("salesTotal")) or 0.0))
+    t_ex = int(round(_to_float(info.get("totalExcludTaxNum") or info.get("taxExclude")) or 0.0))
+    if t_ex <= 0 and t_in > 0:
+        rate = _to_float(info.get("taxRate")) or 10.0
+        t_ex = int(round(t_in / (1.0 + rate / 100.0)))
+    if n <= 0 or t_in <= 0:
+        return []
+
+    # 税込/税抜合計を取引数ぶんに割り振る（端数は先頭から1円ずつ）
+    bi, ri = divmod(t_in, n)
+    be, re = divmod(t_ex, n)
+    rows: list[dict] = []
+    for i in range(n):
+        rows.append({
+            "business_date": day, "store_id": store_id, "pos_name": SMAREGI_POS,
+            "tx_id": f"{day}-{i}", "line_no": 0, "ts": None,
+            "sales_ex_tax": float(be + (1 if i < re else 0)),
+            "sales_in_tax": float(bi + (1 if i < ri else 0)),
+            "tx_qty": None, "line_category": "（明細なし）",
+            "line_price": 0.0, "line_qty": 0.0, "line_amount": 0.0,
+            "bundle_code": "", "is_parent": False, "is_child": False, "is_normal": True,
+        })
+
+    # カテゴリ別を先頭取引(tx0)の明細行として足す（税抜金額に換算）
+    head_in = rows[0]["sales_in_tax"]
+    head_ex = rows[0]["sales_ex_tax"]
+    ln = 1
+    for c in (categories or []):
+        name = (str(c.get("categoryName") or "").strip() or "その他")
+        qty = _to_float(c.get("categoryCount")) or 0.0
+        c_in = _to_float(c.get("categoryTotal")) or 0.0     # 税込
+        if c_in <= 0 and qty <= 0:
+            continue
+        rate = _to_float(info.get("taxRate")) or 10.0
+        c_ex = c_in / (1.0 + rate / 100.0)                  # 税抜へ換算
+        rows.append({
+            "business_date": day, "store_id": store_id, "pos_name": SMAREGI_POS,
+            "tx_id": f"{day}-0", "line_no": ln, "ts": None,
+            "sales_ex_tax": head_ex, "sales_in_tax": head_in,   # tx0 と同じ（重複計上されない）
+            "tx_qty": None, "line_category": name,
+            "line_price": round(c_ex / qty, 2) if qty else 0.0,
+            "line_qty": float(qty), "line_amount": round(c_ex, 2),
+            "bundle_code": "", "is_parent": False, "is_child": False, "is_normal": True,
+        })
+        ln += 1
     return rows
