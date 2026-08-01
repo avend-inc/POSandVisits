@@ -196,16 +196,25 @@ function initStock(){
   loadMonth();
 }
 
-// KPIから当月の自動値（販売着数・レジ袋・クーポン・小物点数）
+// KPIから当月の自動値（すべて売上データから算出）
+//   it   = 販売点数（レジ袋・クーポンを除く。小物・詰め放題は含む）
+//   bag  = レジ袋点数 / coup = クーポン点数
+//   komono = 小物点数（小物系カテゴリの合計） / tsumeBags = 詰め放題の袋数（「詰め放題」カテゴリ点数）
+//   sales = 販売数（＝ it + レジ袋 + クーポン。スプシの「販売数」に相当）
+const KOMONO_CATS=["小物","ネックレス","指輪","ラグ","リング","その他小物"];
+function isTsume(c){return c.indexOf("詰め放題")>=0||c.indexOf("詰放題")>=0||c.indexOf("つめ放題")>=0;}
 function kpiOf(sid,ym){
   let it=0,bag=0,coup=0;
   (DATA.daily||[]).forEach(r=>{ if(r.s===sid&&ymOf(r.d)===ym){ it+=num(r.it); bag+=num(r.bagq); coup+=num(r.coup); }});
-  let komono=0;
+  let komono=0, tsumeBags=0;
   (DATA.cat||[]).forEach(r=>{ if(r.s===sid&&ymOf(r.d)===ym){
-    const c=(r.c||"").trim(); if(["小物","ネックレス","指輪","ラグ","リング","その他小物"].indexOf(c)>=0)komono+=num(r.q);
+    const c=(r.c||"").trim();
+    if(KOMONO_CATS.indexOf(c)>=0)komono+=num(r.q);
+    if(isTsume(c))tsumeBags+=num(r.q);
   }});
-  const soldGarment=Math.max(it-komono,0);   // 販売着数（服のみ）＝販売点数 − 小物点数
-  return {it, bag, coup, komono, soldGarment};
+  // 販売着数（服のみ）＝ 販売数 − レジ袋 − クーポン − 小物 − 詰め放題袋数 ＝ it − 小物 − 詰め放題袋
+  const soldGarment=Math.max(it-komono-tsumeBags,0);
+  return {it, bag, coup, komono, tsumeBags, sales:it+bag+coup, soldGarment};
 }
 
 // 実地棚卸の在庫（着数）＝ ブロック×服カテゴリの合計 ＋ 特例プラス − 特例マイナス
@@ -313,13 +322,16 @@ function renderBody(){
   rows.push(calcRow("合算棚金額",c.sumAmt,yen));
 
   rows.push(`<tr class="sec"><td colspan="2">④ 当月の減少 → 理論在庫</td></tr>`);
-  rows.push(calcRow("販売着数（服のみ・自動）",c.kpi.soldGarment,n));
-  rows.push(`<tr><td>　└ 参考：販売点数 / レジ袋 / クーポン / 小物点数</td><td class="sub">${n(c.kpi.it)} / ${n(c.kpi.bag)} / ${n(c.kpi.coup)} / ${n(c.kpi.komono)}</td></tr>`);
+  rows.push(calcRow("販売数（自動）",c.kpi.sales,n));
+  rows.push(calcRow("　− レジ袋（自動）",c.kpi.bag,n));
+  rows.push(calcRow("　− クーポン（自動）",c.kpi.coup,n));
+  rows.push(calcRow("　− 小物（自動）",c.kpi.komono,n));
+  rows.push(calcRow("　− 詰め放題 袋数（自動）",c.kpi.tsumeBags,n));
+  rows.push(calcRow("＝ 販売着数（服のみ）",c.kpi.soldGarment,n,"pos"));
   rows.push(inRow("発送数","shipping_qty",num(inv.shipping_qty)));
   rows.push(inRow("ロス","loss_qty",num(inv.loss_qty)));
   rows.push(inRow("キャンペーン(MEO用)","campaign_qty",num(inv.campaign_qty)));
-  rows.push(inRow("詰め放題（袋数）","tsume_bags",num(inv.tsume_bags)));
-  rows.push(inRow("詰め放題（着数）","tsume_qty",num(inv.tsume_qty)));
+  rows.push(inRow("詰め放題（着数・袋の中の枚数）","tsume_qty",num(inv.tsume_qty)));
   rows.push(calcRow("理論在庫（着数）",c.theoQ,n,"pos"));
   rows.push(calcRow("理論棚金額",c.theoAmt,yen));
 
@@ -405,7 +417,7 @@ function refreshCalcCells(c){
   // 簡便のため renderBody の計算部分だけ再構築せず、主要値をラベル一致で更新
   const map=[["前月棚金額","¥"+YEN(c.openAmt)],["入荷棚金額","¥"+YEN(c.recvAmt)],
     ["合算着数",NUM(c.sumQ)],["合算平均単価","¥"+YEN(c.avgP)],["合算棚金額","¥"+YEN(c.sumAmt)],
-    ["販売着数（服のみ・自動）",NUM(c.kpi.soldGarment)],["理論在庫（着数）",NUM(c.theoQ)],["理論棚金額","¥"+YEN(c.theoAmt)]];
+    ["＝ 販売着数（服のみ）",NUM(c.kpi.soldGarment)],["理論在庫（着数）",NUM(c.theoQ)],["理論棚金額","¥"+YEN(c.theoAmt)]];
   document.querySelectorAll("#calcTbody tr").forEach(tr=>{
     const k=tr.firstElementChild&&tr.firstElementChild.textContent.trim();
     const hit=map.find(m=>k&&k.indexOf(m[0])===0);
