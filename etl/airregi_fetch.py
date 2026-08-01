@@ -339,9 +339,19 @@ def fetch_range(start_date: str, end_date: str, headless: bool = True) -> str:
                 login(page, airid, password)
                 if _env("AIRREGI_DEBUG"):
                     discover(page)
-                open_sales(page)
-                set_date_range(page, start_date, end_date)
-                return decode_csv(download_csv(page, context))
+                try:
+                    open_sales(page)
+                    set_date_range(page, start_date, end_date)
+                    return decode_csv(download_csv(page, context))
+                except Exception:
+                    # 目印が未確定な段階での失敗は、画面構造を必ずログに残して
+                    # 次の調整（URL/セレクタ確定）に使えるようにしてから投げ直す。
+                    try:
+                        print("  ⚠️ 会計明細/CSV取得で失敗。画面構造を洗い出します（調査用）:")
+                        discover(page)
+                    except Exception:
+                        pass
+                    raise
         except Exception as e:
             last_error = e
             if attempt < RETRIES:
