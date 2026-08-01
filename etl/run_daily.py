@@ -588,7 +588,7 @@ def main() -> int:
     #  ・bundle_master（SALEの名称マスタ）
     #  ・レジ接続の各店（ezregi#N / airregi#N）… 1店のログイン不調で全店の
     #    ダッシュボード更新まで止めない。失敗は ingest_log と下の一覧に残る。
-    BEST_EFFORT = {"bundle_master"}
+    BEST_EFFORT = {"bundle_master", "airregi"}
 
     def _is_best_effort(r) -> bool:
         return r.name in BEST_EFFORT or "#" in r.name
