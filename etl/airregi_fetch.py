@@ -39,10 +39,11 @@ from .settings import (BROWSER_TIMEOUT_MS, EtlError, RETRIES, RETRY_WAIT_SEC,
 # ------------------------------------------------------------
 # バックオフィスのログイン画面（宣伝トップ https://airregi.jp/ ではない）。
 AIRREGI_LOGIN_URL = "https://airregi.jp/CLP/view/login/"
-# バックオフィスのトップ（ログイン後の起点。ここから会計明細メニューへ辿る）。
-AIRREGI_HOME_URL = "https://airregi.jp/CLP/"
-# 会計明細（取引履歴）画面。実URLは調査モードで確定して上書きする。
-AIRREGI_SALES_URL = "https://airregi.jp/CLP/view/salesList/"
+# バックオフィスのトップ（ログイン後の起点）。
+AIRREGI_HOME_URL = "https://airregi.jp/CLP/view/top/"
+# 会計データ（ジャーナル＝会計明細）画面。1明細1行のCSVはここから出す。
+#   ※ salesList は「売上集計」で列が違う（会計日なし）。会計明細は salesJournal。
+AIRREGI_SALES_URL = "https://airregi.jp/CLP/view/salesJournal/"
 
 # ログイン後の「利用する店舗を選択」画面で選ぶ店舗名（部分一致）。
 # このAirIDは複数店（SELFURUGI/吉祥寺/本郷/下北沢）を持つため、下北沢を選ぶ。
