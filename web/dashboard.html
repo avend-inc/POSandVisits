@@ -546,6 +546,12 @@ function draw(){
     const t=sumRowsForIds(state.from,state.to,ids);t._name=gl+" 合計";t._agg=true;t._sel=true;t._land=showLand?computeAutoLandingForIds(ids,fym):null;rowsC.push(t);
     document.getElementById("cmp-note").textContent=`「${gl}」の店舗（${state.from} 〜 ${state.to}）`;
   }
+  // 店舗（分類）の行を「対象期間の税込売上の高い順」に並べる。末尾の合計/総合は動かさない。
+  if(rowsC.length>1){
+    const totalRow=rowsC.pop();
+    rowsC.sort((a,b)=>(b.in||0)-(a.in||0));
+    rowsC.push(totalRow);
+  }
   drawCompare(rowsC,showLand);
 
   // ---- ② ランク帯別（グレード）構成比 上位3 ----
