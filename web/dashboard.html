@@ -434,7 +434,8 @@ function render(){
   document.getElementById("app").innerHTML=`
     <header>
       <h1>売上KPI管理 <span class="gbadge">${GROUP_LABEL}</span></h1>
-      <button class="themebtn" id="themebtn" style="margin-left:auto">◐ 表示切替</button>
+      <button class="themebtn" id="reportbtn" style="margin-left:auto">📊 レポート</button>
+      <button class="themebtn" id="themebtn" style="margin-left:8px">◐ 表示切替</button>
       ${SB?'<button class="themebtn" id="logoutbtn" style="margin-left:8px">ログアウト</button>':''}
     </header>
     <div class="sub" style="margin:2px 0 2px">
@@ -487,8 +488,94 @@ function render(){
   document.querySelectorAll(".chip[data-preset]").forEach(b=>b.onclick=()=>{
     const[f,t]=presetRange(b.dataset.preset);state.from=f;state.to=t;draw();});
   document.getElementById("themebtn").onclick=toggleTheme;
+  const rb=document.getElementById("reportbtn"); if(rb)rb.onclick=makeReport;
   if(SB){const lb=document.getElementById("logoutbtn");if(lb)lb.onclick=doLogout;}
   draw();
+}
+
+// ============================================================
+//  レポート出力（PowerPoint）
+//  Partners Lounge の「先月の売上」ページに相当する“データで作れる部分”だけを
+//  自動生成する：①平均売上（全店 ※福井/下北沢除く）＋前月比 ②売上上位5店
+//  ③全店売上一覧。対象月＝画面で選んでいる期間の「終了日の月」。
+//  好事例・販促・VMD等の読み物は手入力のため対象外。
+// ============================================================
+function prevYm(ym){let[y,m]=ym.split("-").map(Number);m--;if(m===0){m=12;y--;}return y+"-"+String(m).padStart(2,"0");}
+function storeMonthlyIn(ym){const m=new Map();for(const r of DATA.daily){if((r.d||"").slice(0,7)!==ym)continue;m.set(r.s,(m.get(r.s)||0)+(r.in||0));}return m;}
+function loadPptxLib(){
+  return new Promise((res,rej)=>{
+    if(window.PptxGenJS)return res();
+    const s=document.createElement("script");
+    s.src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js";
+    s.onload=()=>res(); s.onerror=()=>rej(new Error("pptxgenjs の読み込みに失敗"));
+    document.head.appendChild(s);
+  });
+}
+async function makeReport(){
+  const btn=document.getElementById("reportbtn"); const old=btn?btn.textContent:"";
+  try{
+    if(btn){btn.disabled=true;btn.textContent="⏳ 生成中…";}
+    const ym=(state.to||DATA._salesMax||DATA._max).slice(0,7);
+    const pym=prevYm(ym);
+    const cur=storeMonthlyIn(ym), prev=storeMonthlyIn(pym);
+    let rows=usableStores().map(s=>({name:s.name,cur:cur.get(s.id)||0,prev:prev.get(s.id)||0}))
+                           .filter(r=>r.cur>0||r.prev>0);
+    if(!rows.length){alert(ym+" の売上データがありません。対象期間を変更してください。");return;}
+    // 平均売上（福井／下北沢を除く。各月とも売上のある店の平均）
+    const EXC=["福井","下北沢"];
+    const inAvg=r=>!EXC.some(k=>r.name.indexOf(k)>=0);
+    const avgOf=key=>{const a=rows.filter(r=>inAvg(r)&&r[key]>0);return a.length?a.reduce((x,r)=>x+r[key],0)/a.length:0;};
+    const avgCur=avgOf("cur"), avgPrev=avgOf("prev");
+    const moM=avgPrev?(avgCur/avgPrev-1)*100:null;
+    const sorted=rows.slice().sort((a,b)=>b.cur-a.cur);
+    const top=sorted.slice(0,5);
+
+    await loadPptxLib();
+    const P=new PptxGenJS(); P.defineLayout({name:"W",width:13.333,height:7.5}); P.layout="W";
+    const NAVY="1F2A44",MUT="6B7280",UP="1E7F4F",DN="C0392B",LINE="E5E7EB",ICE="CADCFC";
+    const man=v=>Math.round(v/10000).toLocaleString("ja-JP")+"万円";
+    const yen=v=>"¥"+Math.round(v).toLocaleString("ja-JP");
+    const [yy,mm]=ym.split("-"); const M=+mm;
+    const isCurMonth=(ym===(DATA._salesMax||"").slice(0,7));
+    const th=t=>({text:t,options:{bold:true,color:"FFFFFF",fill:{color:NAVY}}});
+    const thR=t=>({text:t,options:{bold:true,color:"FFFFFF",fill:{color:NAVY},align:"right"}});
+
+    // --- Slide 1: 表紙
+    let s=P.addSlide(); s.background={color:NAVY};
+    s.addText("Partners Lounge",{x:0.9,y:2.5,w:11.5,h:1.0,fontSize:44,bold:true,color:"FFFFFF"});
+    s.addText("AVEND ｜ 売上レポート",{x:0.9,y:3.6,w:11.5,h:0.6,fontSize:22,color:ICE});
+    s.addText("DATA "+yy+"."+mm,{x:0.9,y:4.25,w:11.5,h:0.5,fontSize:16,color:ICE});
+
+    // --- Slide 2: 先月の売上
+    s=P.addSlide(); s.background={color:"FFFFFF"};
+    s.addText(M+"月の売上 ｜ 振り返り",{x:0.6,y:0.45,w:12.1,h:0.7,fontSize:28,bold:true,color:NAVY});
+    if(isCurMonth)s.addText("※ 当月は月途中までの集計",{x:0.6,y:1.05,w:6,h:0.3,fontSize:11,color:MUT});
+    s.addText("平均売上（全店 ※福井／下北沢除く）",{x:0.6,y:1.55,w:6.0,h:0.4,fontSize:13,color:MUT});
+    s.addText(man(avgCur),{x:0.55,y:1.95,w:6.0,h:1.2,fontSize:54,bold:true,color:NAVY});
+    if(moM!=null)s.addText("前月比 "+(moM>=0?"+":"")+moM.toFixed(1)+"%",{x:0.6,y:3.15,w:6,h:0.5,fontSize:20,bold:true,color:moM>=0?UP:DN});
+    s.addText("売上上位5店舗（"+M+"月実績）",{x:6.9,y:1.5,w:5.8,h:0.4,fontSize:15,bold:true,color:NAVY});
+    const t5=[[th("RANK"),th("店舗名"),thR("売上")]].concat(
+      top.map((r,i)=>[{text:String(i+1).padStart(2,"0"),options:{bold:true,color:DN}},{text:r.name},{text:man(r.cur),options:{align:"right"}}]));
+    s.addTable(t5,{x:6.9,y:1.95,w:5.8,colW:[1.1,3.2,1.5],fontSize:14,rowH:0.55,valign:"middle",border:{pt:0.5,color:LINE}});
+    s.addText("※ 純売上（税込）",{x:6.9,y:5.5,w:5.8,h:0.3,fontSize:10,color:MUT});
+
+    // --- Slide 3: 全店売上一覧（2列）
+    s=P.addSlide(); s.background={color:"FFFFFF"};
+    s.addText(M+"月 全店売上一覧",{x:0.6,y:0.45,w:12.1,h:0.6,fontSize:24,bold:true,color:NAVY});
+    const mk=list=>[[th("#"),th("店舗名"),thR("売上"),thR("前月比")]].concat(list.map((r,i)=>{
+      const d=r.prev?(r.cur/r.prev-1)*100:null;
+      return [{text:r._rank},{text:r.name},{text:yen(r.cur),options:{align:"right"}},
+        {text:d==null?"—":(d>=0?"+":"")+d.toFixed(0)+"%",options:{align:"right",color:d==null?MUT:(d>=0?UP:DN)}}];
+    }));
+    sorted.forEach((r,i)=>r._rank=String(i+1));
+    const half=Math.ceil(sorted.length/2);
+    s.addTable(mk(sorted.slice(0,half)),{x:0.5,y:1.15,w:6.1,colW:[0.5,3.3,1.5,0.8],fontSize:10,rowH:0.3,valign:"middle",border:{pt:0.5,color:LINE}});
+    s.addTable(mk(sorted.slice(half)),{x:6.85,y:1.15,w:6.1,colW:[0.5,3.3,1.5,0.8],fontSize:10,rowH:0.3,valign:"middle",border:{pt:0.5,color:LINE}});
+    s.addText("純売上（税込）／前月比は前月の同店比。データのある店のみ。",{x:0.5,y:7.0,w:12.3,h:0.3,fontSize:9,color:MUT});
+
+    await P.writeFile({fileName:"AVEND_売上レポート_"+yy+mm+".pptx"});
+  }catch(e){ alert("レポート出力に失敗しました：\n"+((e&&e.message)||e)); }
+  finally{ if(btn){btn.disabled=false;btn.textContent=old;} }
 }
 
 function draw(){
