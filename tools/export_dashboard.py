@@ -224,9 +224,11 @@ def build_data(sb: Supabase) -> dict:
 
     daily_rows = [
         {"d": d, "s": sid,
-         # 税込/税抜売上からレジ袋・クーポンぶんを差し引く（マイナスにはしない）
-         "in": round(max(v["in"] - v["bag_in"], 0)),
-         "ex": round(max(v["ex"] - v["bag_ex"], 0)),
+         # 税込/税抜売上は「伝票合計そのまま」＝POSの純売上（レジ袋・小物・クーポン後の
+         # 実売上を含む）。ロイヤリティ計算に使うため、POSの純売上と1円まで一致させる。
+         # （レジ袋・クーポンの内訳は下の bag/coup で別途参照できる）
+         "in": round(v["in"]),
+         "ex": round(v["ex"]),
          "tx": v["tx"], "it": round(v["it"]),
          "v": v["v"],
          "bag": round(v["reji_in"]), "bagq": round(v["bag_q"]),
@@ -247,6 +249,26 @@ def build_data(sb: Supabase) -> dict:
         {"d": d, "s": sid, "c": c, "p": p, "a": round(v["a"]), "q": round(v["q"])}
         for (d, sid, c, p), v in sorted(catprice.items())
     ]
+
+    # --- 診断: 店舗×月の税込売上(純売上) サマリー（ロイヤリティ照合用） ---
+    #   POSの純売上と1円まで一致すべき。直近4か月ぶんを stdout に出す。
+    try:
+        msum: dict[tuple, float] = {}
+        for r in daily_rows:
+            k = (r["s"], r["d"][:7])
+            msum[k] = msum.get(k, 0.0) + r["in"]
+        months = sorted({m for (_, m) in msum})[-4:]
+        if months:
+            print("\n=== 店舗別 税込売上(純売上) 直近{}か月（ロイヤリティ照合用）===".format(len(months)))
+            print("  店舗 | " + " | ".join(months))
+            for s in stores:
+                sid = s["id"]
+                vals = [msum.get((sid, m), 0.0) for m in months]
+                if any(v for v in vals):
+                    nm = name_by_id.get(sid, str(sid))
+                    print("  " + nm + " | " + " | ".join("{:,}".format(int(round(v))) for v in vals))
+    except Exception as _e:
+        print("  （売上サマリーの出力に失敗: {}）".format(_e))
 
     return {
         "generated_at": datetime.now(JST).isoformat(timespec="seconds"),
