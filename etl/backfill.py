@@ -320,6 +320,31 @@ def run_sipos_backfill(sb: Supabase, start: str, end: str,
     if not conns:
         print("  ℹ️ SIPOS(ezレジ)接続が未登録のためスキップ。")
         return
+
+    # 同じテナント（同一ホスト）に複数の接続があると、購買情報明細は「全店ぶん」を返すため
+    # 同じCSVを何度も落とすことになる（重複＝時間の無駄）。ホスト単位で1接続に集約する。
+    from urllib.parse import urlparse as _urlparse
+
+    def _host(u: str) -> str:
+        u = (u or "").strip()
+        if "://" not in u:
+            u = "https://" + u
+        return (_urlparse(u).netloc or "").lower()
+
+    seen_hosts: set[str] = set()
+    uniq: list = []
+    for c in conns:
+        h = _host(c.get("url"))
+        # ログインPWが復号できている接続を優先。ホスト単位で最初の1件だけ使う。
+        if h and h in seen_hosts:
+            continue
+        if h:
+            seen_hosts.add(h)
+        uniq.append(c)
+    if len(uniq) != len(conns):
+        print(f"  テナント集約: {len(conns)}接続 → {len(uniq)}テナント（同一ホストは1回のみ取得）")
+    conns = uniq
+
     # 動作確認用：POS_LIMIT=N で先頭N接続だけ、POS_ONLY_STORE=文字 でurl/pos_name一致だけ。
     import os as _os
     only = (_os.environ.get("POS_ONLY_STORE") or "").strip()
@@ -374,34 +399,27 @@ def run_sipos_backfill(sb: Supabase, start: str, end: str,
                 df_in = si_clean.normalize_si_datetime(df_in)
                 common = adapters.adapt_ezregi(df_in, c["pos_name"] or "SIPOS")
 
-                # 店の対応付け（手動インポートと同じ：生の店舗名ベース）。
-                if c.get("store_id"):
-                    common["store"] = ""
-                    fixed = int(c["store_id"])
-                    store_id_of = lambda name, _s=fixed: _s
+                # 店の対応付け：購買情報明細は必ず「全店ぶん」が入っているので、接続の
+                # store_id は使わず“CSVの店舗名で振り分ける”（手動インポートと同じ）。
+                #   ※ 接続=1店に固定すると、テナント全店の売上が1店に丸ごと入る誤りになる。
+                # adapt_ezregi と同じ規則で残した行から店名を作り、ラベルずれの起きない
+                # 「位置対応」で割り当てる（reindexだとラベル不一致でNaN混入・誤割当が起きる）。
+                kept = df_in[df_in["店舗名"].fillna("").astype(str).str.strip() != ""]
+                names = si_clean.si_store_names(kept["店舗名"]).astype(str)
+                if len(names) == len(common):
+                    common["store"] = names.to_numpy()
                 else:
-                    # adapt_ezregi は fillna('')後に店舗名が空でない行だけを残す。まったく
-                    # 同じ規則で残した行から店名を作り、ラベルずれの起きない「位置対応」で
-                    # 割り当てる（reindexだとラベル不一致でNaN(float)が混じり、誤店舗割当や
-                    # 集計クラッシュの原因になっていた）。
-                    kept = df_in[df_in["店舗名"].fillna("").astype(str).str.strip() != ""]
-                    names = si_clean.si_store_names(kept["店舗名"]).astype(str)
-                    if len(names) == len(common):
-                        common["store"] = names.to_numpy()
-                    else:
-                        # 想定外の行数ずれ。安全側でラベル対応＋欠損は捨てる。
-                        print(f"  【{label}】{ym}: ⚠️ 行数不一致(kept={len(names)}/common={len(common)})"
-                              "→ ラベル対応にフォールバック")
-                        common["store"] = si_clean.si_store_names(df_in["店舗名"]).reindex(common.index)
-                    store_id_of = lambda name: sb.get_or_create_store(name, store_cache)
+                    print(f"  【{label}】{ym}: ⚠️ 行数不一致(kept={len(names)}/common={len(common)})"
+                          "→ ラベル対応にフォールバック")
+                    common["store"] = si_clean.si_store_names(df_in["店舗名"]).reindex(common.index)
+                store_id_of = lambda name: sb.get_or_create_store(name, store_cache)
 
                 common = common[common["date"].notna()].copy()
                 common = common[(common["date"] >= m_start) & (common["date"] <= m_end)].copy()
                 # 店名が空/NaNの行は捨てる（誤店舗への割当・集計時のjoin失敗を防ぐ）。
-                if not c.get("store_id"):
-                    common = common[common["store"].notna()].copy()
-                    common["store"] = common["store"].astype(str)
-                    common = common[~common["store"].isin(["", "nan", "None"])].copy()
+                common = common[common["store"].notna()].copy()
+                common["store"] = common["store"].astype(str)
+                common = common[~common["store"].isin(["", "nan", "None"])].copy()
                 if len(common) == 0:
                     print(f"  【{label}】{ym}: 期間内の明細0件。")
                     continue
