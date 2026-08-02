@@ -95,7 +95,7 @@ def run_cashier_conn_backfill(sb: Supabase, start: str, end: str,
         try:
             csv_text = cashier_fetch.fetch_range_creds(
                 c["login_id"] or "", c["login_pw"] or "", start, end,
-                headless=headless, trade_url=c.get("url"))
+                headless=headless)  # cashierは正規の取引一覧URL(既定)を使う
             df = rows_mod.parse_cashier_csv(csv_text, business_date=None)
             if len(df) == 0:
                 print(f"  【{label}】対象期間の明細0行。")
