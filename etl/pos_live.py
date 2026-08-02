@@ -104,6 +104,41 @@ def run_live_pos(sb, business_date: str, run_id: str,
         print("  レジ接続（Air/EZ）が未登録です。管理画面『レジ接続』で登録してください。")
         return []
 
+    # SIPOS(ezregi)は購買情報明細が「テナント全店ぶん」を返し、店舗名で振り分ける。
+    # 同一テナント（同一ホスト）に複数接続があると同じ全店CSVを何度も落として時間の無駄
+    # （＝日次のタイムアウト要因）になるので、ezregi はホスト単位で1接続に集約する。
+    # airregi は1接続=1店（全店CSVではない）ため集約しない。
+    from urllib.parse import urlparse as _urlparse
+
+    def _host(u: str) -> str:
+        u = (u or "").strip()
+        if "://" not in u:
+            u = "https://" + u
+        return (_urlparse(u).netloc or "").lower()
+
+    # PW復号済みの接続を優先して残す（同一ホストで最初の1件が未復号だと取得できないため）。
+    ez_by_host: dict[str, dict] = {}
+    others: list = []
+    order: list = []
+    for c in conns:
+        if c["pos_type"] != "ezregi":
+            others.append(c)
+            order.append(("other", len(others) - 1))
+            continue
+        h = _host(c.get("url")) or f"__id{c['id']}"
+        prev = ez_by_host.get(h)
+        if prev is None:
+            ez_by_host[h] = c
+            order.append(("ez", h))
+        elif not prev.get("login_pw") and c.get("login_pw"):
+            ez_by_host[h] = c  # PW復号できる方に差し替え
+    deduped: list = []
+    for kind, key in order:
+        deduped.append(others[key] if kind == "other" else ez_by_host[key])
+    if len(deduped) != len(conns):
+        print(f"  SIPOSテナント集約: {len(conns)}接続 → {len(deduped)}（同一ホストは1回のみ取得）")
+    conns = deduped
+
     # 接続の状態サマリ（PWは中身を出さず有無だけ）。復号できたPWが0なら設定漏れ/RPC未作成。
     import os as _os0
     n_pw_ok = sum(1 for c in conns if c.get("login_pw"))
