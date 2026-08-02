@@ -68,6 +68,57 @@ def run_cashier_backfill(sb: Supabase, start: str, end: str,
     print(f"  Supabaseへ保存: 新規 {inserted}行 / 既存で無視 {duplicate}行")
 
 
+def run_cashier_conn_backfill(sb: Supabase, start: str, end: str,
+                              headless: bool, store_cache: dict) -> None:
+    """『レジ接続』に登録された cashier アカウント（直営Secret以外。例: 天王台）の過去分を
+    直営と同じ方式（ログイン→検索→CSV出力(明細)）で一括取り込みする。接続ごとに
+    url/id/pw でログインし、店舗名で振り分け（接続にstore_idがあればその店に固定）。"""
+    from . import cashier_fetch, pos_sources, rows as rows_mod
+
+    try:
+        conns = [c for c in pos_sources.load_connections(sb, only_active=True)
+                 if c["pos_type"] == "cashier"]
+    except Exception as e:
+        print(f"  ℹ️ cashier接続の取得に失敗（スキップ）: {e}")
+        return
+    if not conns:
+        return
+    print("\n" + "=" * 60)
+    print(f"【1b】cashier(レジ接続) 売上明細  期間: {start} 〜 {end}  接続{len(conns)}件")
+    print("=" * 60)
+
+    for c in conns:
+        label = f'cashier#{c["id"]}'
+        if not c.get("login_pw"):
+            print(f"  ⚠️ {label}: パスワード未復号のためスキップ。")
+            continue
+        try:
+            csv_text = cashier_fetch.fetch_range_creds(
+                c["login_id"] or "", c["login_pw"] or "", start, end,
+                headless=headless, trade_url=c.get("url"))
+            df = rows_mod.parse_cashier_csv(csv_text, business_date=None)
+            if len(df) == 0:
+                print(f"  【{label}】対象期間の明細0行。")
+                continue
+            if c.get("store_id"):
+                fixed = int(c["store_id"])
+                store_id_of = lambda name, _s=fixed: _s
+            else:
+                store_id_of = lambda name: sb.get_or_create_store(name, store_cache)
+            payload = rows_mod.cashier_rows(df, store_id_of)
+            inserted, duplicate = sb.insert_ignore_duplicates(
+                "sales", payload, on_conflict="store_id,pos_name,tx_id,line_no")
+            stores = sorted(df["store"].astype(str).unique().tolist())
+            dates = sorted(df["date"].unique().tolist())
+            txn = len({r["tx_id"] for r in payload})
+            ssum = sum(r["sales_in_tax"] for r in payload if r["line_no"] == 0)
+            print(f"  【{label}】{dates[0]}〜{dates[-1]}（{len(dates)}日） "
+                  f"{txn}取引 / {int(ssum):,}円 → 追加 {inserted}行"
+                  f"（店舗: {', '.join(stores[:10])}）")
+        except Exception as e:
+            print(f"  【{label}】❌ 取得/保存に失敗（スキップ）: {type(e).__name__}: {e}")
+
+
 def run_digitel_backfill(sb: Supabase, start: str, end: str,
                          headless: bool) -> None:
     """
@@ -528,6 +579,11 @@ def main() -> int:
         except Exception as e:
             failed = True
             print(f"  ❌ cashier backfill 失敗: {type(e).__name__}: {e}")
+        try:
+            run_cashier_conn_backfill(sb, start, end, headless, store_cache)
+        except Exception as e:
+            failed = True
+            print(f"  ❌ cashier(レジ接続) backfill 失敗: {type(e).__name__}: {e}")
 
     if args.only in (None, "digitel"):
         try:
