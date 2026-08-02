@@ -511,71 +511,404 @@ function loadPptxLib(){
     document.head.appendChild(s);
   });
 }
+// ========================= レポート（Partners Lounge 向け 分析） =========================
+// すべてダッシュボードの実データ（DATA）から計算する。数字の捏造はしない。
+// 価格帯（税抜単価）の区分。古着・アパレルを想定した固定バンド。
+const RPT_BANDS=[
+  {lo:0,     hi:1000,     label:"〜¥999"},
+  {lo:1000,  hi:2000,     label:"¥1,000〜1,999"},
+  {lo:2000,  hi:3000,     label:"¥2,000〜2,999"},
+  {lo:3000,  hi:5000,     label:"¥3,000〜4,999"},
+  {lo:5000,  hi:8000,     label:"¥5,000〜7,999"},
+  {lo:8000,  hi:12000,    label:"¥8,000〜11,999"},
+  {lo:12000, hi:Infinity, label:"¥12,000〜"},
+];
+function rptBandIdx(p){ for(let i=0;i<RPT_BANDS.length;i++){ if(p>=RPT_BANDS[i].lo&&p<RPT_BANDS[i].hi)return i; } return RPT_BANDS.length-1; }
+// 対象月の自動選択：売上のある最新月。最新日が5日以下（月初だけ）なら前月を対象にする。
+function rptPickYm(){
+  const smax=DATA._salesMax||DATA._max; const ym=smax.slice(0,7);
+  const dom=+smax.slice(8,10);
+  return dom<=5 ? prevYm(ym) : ym;
+}
+// 店舗idの集合を述語にしてカテゴリ集計（DATA.cat）
+function rptCatAgg(from,to,pred){
+  const m=new Map();
+  for(const r of (DATA.cat||[])){ if(!pred(r.s))continue; if(r.d<from||r.d>to)continue;
+    let c=m.get(r.c); if(!c){c={c:r.c,a:0,q:0};m.set(r.c,c);} c.a+=r.a||0; c.q+=r.q||0; }
+  return [...m.values()];
+}
+// 店舗idの集合を述語にして価格帯（税抜単価）別に集計（DATA.catp）→ バンドごとの売上・点数
+function rptBandAgg(from,to,pred){
+  const bands=RPT_BANDS.map(b=>({label:b.label,a:0,q:0})); let ta=0,tq=0;
+  for(const r of (DATA.catp||[])){ if(!pred(r.s))continue; if(r.d<from||r.d>to)continue;
+    const i=rptBandIdx(r.p||0); bands[i].a+=r.a||0; bands[i].q+=r.q||0; ta+=r.a||0; tq+=r.q||0; }
+  return {bands,ta,tq};
+}
+// 合計値（sumRows の結果）→ 主要KPI
+function rptKpi(p){
+  return {
+    in:p.in, ex:p.ex, tx:p.tx, it:p.it,
+    aov:p.tx>0?p.in/p.tx:null,          // 客単価（税込）
+    upt:p.tx>0?p.it/p.tx:null,          // 平均購入点数
+    aup:p.it>0?p.ex/p.it:null,          // 平均商品単価（税抜）
+    pr :(p.hasV&&p.v>0)?(p.txv/p.v*100):null, // 購入率（デジテール店のみ）
+  };
+}
+// 2要素の中点（Shapley）分解： 積 A×B の増減を A要因/B要因に厳密配分（合計＝Δ(A×B)）
+function rptDecomp(aC,bC,aP,bP){
+  return { a:(aC-aP)*(bC+bP)/2, b:(bC-bP)*(aC+aP)/2, total:aC*bC-aP*bP };
+}
 async function makeReport(){
   const btn=document.getElementById("reportbtn"); const old=btn?btn.textContent:"";
   try{
     if(btn){btn.disabled=true;btn.textContent="⏳ 生成中…";}
-    const ym=(state.to||DATA._salesMax||DATA._max).slice(0,7);
-    const pym=prevYm(ym);
-    const cur=storeMonthlyIn(ym), prev=storeMonthlyIn(pym);
-    let rows=usableStores().map(s=>({name:s.name,cur:cur.get(s.id)||0,prev:prev.get(s.id)||0}))
-                           .filter(r=>r.cur>0||r.prev>0);
-    if(!rows.length){alert(ym+" の売上データがありません。対象期間を変更してください。");return;}
-    // 平均売上（福井／下北沢を除く。各月とも売上のある店の平均）
-    const EXC=["福井","下北沢"];
-    const inAvg=r=>!EXC.some(k=>r.name.indexOf(k)>=0);
-    const avgOf=key=>{const a=rows.filter(r=>inAvg(r)&&r[key]>0);return a.length?a.reduce((x,r)=>x+r[key],0)/a.length:0;};
-    const avgCur=avgOf("cur"), avgPrev=avgOf("prev");
-    const moM=avgPrev?(avgCur/avgPrev-1)*100:null;
-    const sorted=rows.slice().sort((a,b)=>b.cur-a.cur);
+    const ym=rptPickYm(), pym=prevYm(ym);
+    const [cf,ct]=monthSpan(ym), [pf,pt]=monthSpan(pym);
+    const [yy,mm]=ym.split("-"); const MO=+mm;
+    const isCurMonth=(ym===(DATA._salesMax||"").slice(0,7));
+
+    // ---- 店舗別（当月／前月）----
+    const EXC=["福井","下北沢"];  // 平均から除外（イベント/特殊店）
+    const inAvg=name=>!EXC.some(k=>name.indexOf(k)>=0);
+    let srows=usableStores().map(s=>{
+      const c=sumRows(rowsIn(cf,ct,s.id)), p=sumRows(rowsIn(pf,pt,s.id));
+      return {id:s.id,name:s.name,cls:classOf(s.id),brand:brandOf(s.id),own:ownOf(s.id),c,p};
+    }).filter(r=>r.c.in>0||r.p.in>0);
+    if(!srows.length){alert(ym+" の売上データがありません。");return;}
+
+    // ---- 全店集計・KPI ----
+    const totC=sumRows(rowsIn(cf,ct,"all")), totP=sumRows(rowsIn(pf,pt,"all"));
+    const kC=rptKpi(totC), kP=rptKpi(totP);
+    const openN=srows.filter(r=>r.c.in>0).length;                 // 当月営業店舗数
+    const inMoM=totP.in>0?(totC.in/totP.in-1)*100:null;
+    // 平均店舗売上（福井・下北沢除く・売上のある店）
+    const avgOf=(key)=>{const a=srows.filter(r=>inAvg(r.name)&&r[key].in>0);return a.length?a.reduce((x,r)=>x+r[key].in,0)/a.length:0;};
+    const avgC=avgOf("c"), avgP=avgOf("p"), avgMoM=avgP>0?(avgC/avgP-1)*100:null;
+    const sorted=srows.slice().sort((a,b)=>b.c.in-a.c.in);
     const top=sorted.slice(0,5);
+
+    // ---- 売上分解（全店 MoM）----
+    // 売上=取引数×客単価 → .a=取引数要因 / .b=客単価要因 / total=Δin
+    const dTx =rptDecomp(totC.tx,kC.aov||0, totP.tx,kP.aov||0);
+    // 客単価(税抜)=平均点数×商品単価 の分解
+    const exAovC=totC.tx>0?totC.ex/totC.tx:0, exAovP=totP.tx>0?totP.ex/totP.tx:0;
+    const dAov=rptDecomp(kC.upt||0,kC.aup||0, kP.upt||0,kP.aup||0);
 
     await loadPptxLib();
     const P=new PptxGenJS(); P.defineLayout({name:"W",width:13.333,height:7.5}); P.layout="W";
-    const NAVY="1F2A44",MUT="6B7280",UP="1E7F4F",DN="C0392B",LINE="E5E7EB",ICE="CADCFC";
-    const man=v=>Math.round(v/10000).toLocaleString("ja-JP")+"万円";
-    const yen=v=>"¥"+Math.round(v).toLocaleString("ja-JP");
-    const [yy,mm]=ym.split("-"); const M=+mm;
-    const isCurMonth=(ym===(DATA._salesMax||"").slice(0,7));
-    const th=t=>({text:t,options:{bold:true,color:"FFFFFF",fill:{color:NAVY}}});
+    const NAVY="1F2A44",INK="222A35",MUT="6B7280",UP="1E7F4F",DN="C0392B",LINE="E5E7EB",ICE="CADCFC",
+          BG="F5F7FB",ACC="2E5AAC",GOLD="B8860B";
+    const man=v=>(v<0?"-":"")+Math.round(Math.abs(v)/10000).toLocaleString("ja-JP")+"万円";
+    const yen=v=>(v<0?"-¥":"¥")+Math.round(Math.abs(v)).toLocaleString("ja-JP");
+    const sp=v=>(v>=0?"+":"")+v.toFixed(1)+"%";       // 符号付き％
+    const sy=v=>(v>=0?"+":"−")+"¥"+Math.round(Math.abs(v)).toLocaleString("ja-JP");
+    const th =t=>({text:t,options:{bold:true,color:"FFFFFF",fill:{color:NAVY}}});
     const thR=t=>({text:t,options:{bold:true,color:"FFFFFF",fill:{color:NAVY},align:"right"}});
+    const clr=v=>v==null?MUT:(v>=0?UP:DN);
+    // 見出し＋帯（各コンテンツスライド共通）
+    const head=(s,title,sub)=>{
+      s.addShape(P.ShapeType.rect,{x:0,y:0,w:13.333,h:1.15,fill:{color:NAVY}});
+      s.addShape(P.ShapeType.rect,{x:0,y:1.15,w:13.333,h:0.06,fill:{color:GOLD}});
+      s.addText(title,{x:0.6,y:0.18,w:11.0,h:0.7,fontSize:26,bold:true,color:"FFFFFF"});
+      if(sub)s.addText(sub,{x:0.62,y:0.82,w:12.0,h:0.3,fontSize:12,color:ICE});
+    };
+    const foot=(s,n)=>{ s.addText("AVEND ｜ Partners Lounge",{x:0.6,y:7.12,w:6,h:0.3,fontSize:9,color:MUT});
+      s.addText(yy+"."+mm+"　"+n,{x:9.9,y:7.12,w:2.83,h:0.3,fontSize:9,color:MUT,align:"right"}); };
+    let PGN=0; const pg=()=>String(++PGN).padStart(2,"0");
+    let s;
 
-    // --- Slide 1: 表紙
-    let s=P.addSlide(); s.background={color:NAVY};
-    s.addText("Partners Lounge",{x:0.9,y:2.5,w:11.5,h:1.0,fontSize:44,bold:true,color:"FFFFFF"});
-    s.addText("AVEND ｜ 売上レポート",{x:0.9,y:3.6,w:11.5,h:0.6,fontSize:22,color:ICE});
-    s.addText("DATA "+yy+"."+mm,{x:0.9,y:4.25,w:11.5,h:0.5,fontSize:16,color:ICE});
+    // ================= Slide 1: 表紙 =================
+    s=P.addSlide(); s.background={color:NAVY};
+    s.addShape(P.ShapeType.rect,{x:0,y:5.55,w:13.333,h:0.05,fill:{color:GOLD}});
+    s.addText("Partners Lounge",{x:0.9,y:2.15,w:11.5,h:1.0,fontSize:46,bold:true,color:"FFFFFF"});
+    s.addText(MO+"月度 売上レポート ｜ 全店パフォーマンス分析",{x:0.9,y:3.35,w:11.5,h:0.6,fontSize:22,color:ICE});
+    s.addText([{text:"対象期間 ",options:{color:MUT}},{text:cf+" 〜 "+(isCurMonth?(DATA._salesMax||ct):ct),options:{color:"FFFFFF",bold:true}}],
+      {x:0.9,y:4.15,w:11.5,h:0.4,fontSize:14});
+    s.addText("AVEND FRANCHISE",{x:0.9,y:5.75,w:11.5,h:0.4,fontSize:13,bold:true,color:GOLD,charSpacing:2});
+    if(isCurMonth)s.addText("※ 当月は月途中までの集計値を含みます",{x:0.9,y:6.2,w:11.5,h:0.3,fontSize:11,color:MUT});
 
-    // --- Slide 2: 先月の売上
-    s=P.addSlide(); s.background={color:"FFFFFF"};
-    s.addText(M+"月の売上 ｜ 振り返り",{x:0.6,y:0.45,w:12.1,h:0.7,fontSize:28,bold:true,color:NAVY});
-    if(isCurMonth)s.addText("※ 当月は月途中までの集計",{x:0.6,y:1.05,w:6,h:0.3,fontSize:11,color:MUT});
-    s.addText("平均売上（全店 ※福井／下北沢除く）",{x:0.6,y:1.55,w:6.0,h:0.4,fontSize:13,color:MUT});
-    s.addText(man(avgCur),{x:0.55,y:1.95,w:6.0,h:1.2,fontSize:54,bold:true,color:NAVY});
-    if(moM!=null)s.addText("前月比 "+(moM>=0?"+":"")+moM.toFixed(1)+"%",{x:0.6,y:3.15,w:6,h:0.5,fontSize:20,bold:true,color:moM>=0?UP:DN});
-    s.addText("売上上位5店舗（"+M+"月実績）",{x:6.9,y:1.5,w:5.8,h:0.4,fontSize:15,bold:true,color:NAVY});
-    const t5=[[th("RANK"),th("店舗名"),thR("売上")]].concat(
-      top.map((r,i)=>[{text:String(i+1).padStart(2,"0"),options:{bold:true,color:DN}},{text:r.name},{text:man(r.cur),options:{align:"right"}}]));
-    s.addTable(t5,{x:6.9,y:1.95,w:5.8,colW:[1.1,3.2,1.5],fontSize:14,rowH:0.55,valign:"middle",border:{pt:0.5,color:LINE}});
-    s.addText("※ 純売上（税込）",{x:6.9,y:5.5,w:5.8,h:0.3,fontSize:10,color:MUT});
+    // ================= Slide 2: エグゼクティブ・サマリー =================
+    s=P.addSlide(); s.background={color:BG}; head(s,"エグゼクティブ・サマリー",MO+"月 全店の総括");
+    // 大数字カード（3枚）
+    const card=(x,label,val,sub,subc)=>{
+      s.addShape(P.ShapeType.rect,{x,y:1.5,w:3.9,h:1.85,fill:{color:"FFFFFF"},line:{color:LINE,pt:1},shadow:{type:"outer",blur:6,offset:2,color:"D9DEE8",opacity:0.6}});
+      s.addText(label,{x:x+0.25,y:1.68,w:3.5,h:0.35,fontSize:12,color:MUT});
+      s.addText(val,{x:x+0.2,y:2.02,w:3.55,h:0.85,fontSize:33,bold:true,color:NAVY});
+      if(sub)s.addText(sub,{x:x+0.25,y:2.9,w:3.5,h:0.35,fontSize:14,bold:true,color:subc});
+    };
+    card(0.6, "全店 合計売上（税込）", man(totC.in), inMoM==null?"前月比 —":"前月比 "+sp(inMoM), clr(inMoM));
+    card(4.72,"平均店舗売上 ※福井/下北沢除", man(avgC), avgMoM==null?"前月比 —":"前月比 "+sp(avgMoM), clr(avgMoM));
+    card(8.84,"当月 営業店舗数", openN+" 店", "前月 "+srows.filter(r=>r.p.in>0).length+" 店", MUT);
+    // 全店KPI 帯
+    s.addText("全店 主要KPI（前月比）",{x:0.6,y:3.6,w:8,h:0.35,fontSize:14,bold:true,color:NAVY});
+    const kpiCell=(label,cur,prev,fmt)=>{ const d=(prev!=null&&prev!==0&&cur!=null)?(cur/prev-1)*100:null;
+      return [{text:label,options:{color:MUT,fontSize:11,align:"center"}},
+              {text:cur==null?"—":fmt(cur),options:{bold:true,fontSize:17,color:NAVY,align:"center"}},
+              {text:d==null?"—":sp(d),options:{fontSize:11,bold:true,color:clr(d),align:"center"}}]; };
+    const kcols=[
+      kpiCell("客単価（税込）",kC.aov,kP.aov,v=>yen(v)),
+      kpiCell("平均購入点数",kC.upt,kP.upt,v=>v.toFixed(2)+"点"),
+      kpiCell("商品単価（税抜）",kC.aup,kP.aup,v=>yen(v)),
+      kpiCell("購入率※ﾃﾞｼﾞﾃｰﾙ店",kC.pr,kP.pr,v=>v.toFixed(1)+"%"),
+    ];
+    // 4列×3行のKPIグリッド
+    const krow=r=>kcols.map(c=>({text:c[r].text,options:{...c[r].options,fill:{color:"FFFFFF"}}}));
+    s.addTable([krow(0),krow(1),krow(2)],{x:0.6,y:4.0,w:12.13,colW:[3.03,3.03,3.03,3.04],rowH:[0.35,0.55,0.35],valign:"middle",border:{pt:1,color:LINE}});
+    // 所見（自動生成）
+    const takeaways=[];
+    if(inMoM!=null)takeaways.push("全店売上は前月比 "+sp(inMoM)+"（"+man(totC.in)+"）。"+(Math.abs(dTx.a)>=Math.abs(dTx.b)?"取引数（客数）":"客単価")+"要因が主な変動ドライバー。");
+    { const gm=rptGroupRows(cf,ct,pf,pt).filter(g=>g.p.in>0).sort((a,b)=>((b.c.in/b.p.in)-(a.c.in/a.p.in)));
+      if(gm.length)takeaways.push("グループ別では「"+gm[0].cls+"」が前月比 "+sp((gm[0].c.in/gm[0].p.in-1)*100)+"と最も伸長。"); }
+    { const ca=rptCatAgg(cf,ct,()=>true).sort((a,b)=>b.a-a.a);
+      if(ca.length)takeaways.push("売れ筋カテゴリ首位は「"+ca[0].c+"」（明細のある店の売上構成で最大）。"); }
+    if(top.length)takeaways.push("売上トップは "+top[0].name+"（"+man(top[0].c.in)+"）。上位店のKPIは後段で分析。");
+    s.addText("ポイント",{x:0.6,y:5.75,w:6,h:0.3,fontSize:13,bold:true,color:GOLD});
+    s.addText(takeaways.map(t=>({text:t,options:{bullet:{code:"25AA"},color:INK,fontSize:12.5,paraSpaceAfter:6}})),
+      {x:0.6,y:6.05,w:12.13,h:1.0});
+    foot(s,pg());
 
-    // --- Slide 3: 全店売上一覧（2列）
-    s=P.addSlide(); s.background={color:"FFFFFF"};
-    s.addText(M+"月 全店売上一覧",{x:0.6,y:0.45,w:12.1,h:0.6,fontSize:24,bold:true,color:NAVY});
-    const mk=list=>[[th("#"),th("店舗名"),thR("売上"),thR("前月比")]].concat(list.map((r,i)=>{
-      const d=r.prev?(r.cur/r.prev-1)*100:null;
-      return [{text:r._rank},{text:r.name},{text:yen(r.cur),options:{align:"right"}},
-        {text:d==null?"—":(d>=0?"+":"")+d.toFixed(0)+"%",options:{align:"right",color:d==null?MUT:(d>=0?UP:DN)}}];
+    // ================= Slide 3: 売上構造の分解 =================
+    s=P.addSlide(); s.background={color:BG}; head(s,"売上構造の分解 ｜ 前月比の要因","売上 ＝ 取引数 × 客単価、客単価(税抜) ＝ 購入点数 × 商品単価");
+    // Panel A: 売上 = 取引数 × 客単価
+    s.addText("① 売上の増減（取引数 × 客単価）",{x:0.6,y:1.45,w:6,h:0.35,fontSize:14,bold:true,color:NAVY});
+    const decoTbl=(rows2)=>[[th("要因"),thR("前月"),thR("当月"),thR("売上への寄与")]].concat(rows2);
+    const rA=[
+      [{text:"取引数（客数）"},{text:NUM(totP.tx)+"件",options:{align:"right"}},{text:NUM(totC.tx)+"件",options:{align:"right"}},{text:sy(dTx.a),options:{align:"right",bold:true,color:clr(dTx.a)}}],
+      [{text:"客単価（税込）"},{text:yen(kP.aov||0),options:{align:"right"}},{text:yen(kC.aov||0),options:{align:"right"}},{text:sy(dTx.b),options:{align:"right",bold:true,color:clr(dTx.b)}}],
+      [{text:"売上 合計",options:{bold:true,fill:{color:ICE}}},{text:man(totP.in),options:{align:"right",bold:true,fill:{color:ICE}}},{text:man(totC.in),options:{align:"right",bold:true,fill:{color:ICE}}},{text:sy(dTx.total),options:{align:"right",bold:true,color:clr(dTx.total),fill:{color:ICE}}}],
+    ];
+    s.addTable(decoTbl(rA),{x:0.6,y:1.85,w:6.0,colW:[1.9,1.35,1.35,1.4],fontSize:11.5,rowH:0.5,valign:"middle",border:{pt:0.5,color:LINE},fill:{color:"FFFFFF"}});
+    // Panel B: 客単価(税抜) = 購入点数 × 商品単価
+    s.addText("② 客単価(税抜)の増減（点数 × 単価）",{x:6.9,y:1.45,w:6,h:0.35,fontSize:14,bold:true,color:NAVY});
+    const rB=[
+      [{text:"平均購入点数"},{text:(kP.upt||0).toFixed(2)+"点",options:{align:"right"}},{text:(kC.upt||0).toFixed(2)+"点",options:{align:"right"}},{text:sy(dAov.a),options:{align:"right",bold:true,color:clr(dAov.a)}}],
+      [{text:"商品単価（税抜）"},{text:yen(kP.aup||0),options:{align:"right"}},{text:yen(kC.aup||0),options:{align:"right"}},{text:sy(dAov.b),options:{align:"right",bold:true,color:clr(dAov.b)}}],
+      [{text:"客単価(税抜) 合計",options:{bold:true,fill:{color:ICE}}},{text:yen(exAovP),options:{align:"right",bold:true,fill:{color:ICE}}},{text:yen(exAovC),options:{align:"right",bold:true,fill:{color:ICE}}},{text:sy(dAov.total),options:{align:"right",bold:true,color:clr(dAov.total),fill:{color:ICE}}}],
+    ];
+    s.addTable([[th("要因"),thR("前月"),thR("当月"),thR("客単価への寄与")]].concat(rB),{x:6.9,y:1.85,w:6.0,colW:[1.9,1.35,1.35,1.4],fontSize:11.5,rowH:0.5,valign:"middle",border:{pt:0.5,color:LINE},fill:{color:"FFFFFF"}});
+    // 読み解き
+    const strong=(a,b,la,lb)=>Math.abs(a)>=Math.abs(b)?la:lb;
+    const notes3=[];
+    if(inMoM!=null){
+      const sh=dTx.total!==0?Math.abs(dTx.a)/(Math.abs(dTx.a)+Math.abs(dTx.b))*100:50;
+      notes3.push("全店売上の前月差 "+sy(dTx.total)+" は、"+strong(dTx.a,dTx.b,"取引数（来店・買上客数）","客単価")+"の寄与が中心（取引数要因 "+sy(dTx.a)+"／客単価要因 "+sy(dTx.b)+"）。");
+      notes3.push("客単価の動きは "+strong(dAov.a,dAov.b,"1回あたりの購入点数","商品1点あたりの単価")+"が主因。"+(dAov.a>=0?"セット・複数買い":"買上点数の低下")+"と"+(dAov.b>=0?"単価帯の上昇":"単価帯の低下")+"の両面から見る。");
+    }
+    notes3.push("打ち手の方向性：取引数は「集客×購入率」、客単価は「点数（提案・セット）×単価（品揃え・グレード）」に分けて店舗ごとに強化余地を特定する。");
+    s.addText("読み解き",{x:0.6,y:4.35,w:6,h:0.3,fontSize:13,bold:true,color:GOLD});
+    s.addText(notes3.map(t=>({text:t,options:{bullet:{code:"25AA"},color:INK,fontSize:12.5,paraSpaceAfter:7}})),{x:0.6,y:4.7,w:12.13,h:2.2});
+    foot(s,pg());
+
+    // ================= Slide 4: グループ別サマリー（分類）=================
+    s=P.addSlide(); s.background={color:BG}; head(s,"グループ別サマリー ｜ 分類（直営／FC）","直営・SELFURUGI FC・NOTIME FC ごとの規模とKPI");
+    const grp=rptGroupRows(cf,ct,pf,pt).filter(g=>g.n>0);
+    const gHead=[th("グループ"),thR("店舗数"),thR("合計売上"),thR("平均売上"),thR("前月比"),thR("客単価"),thR("購入点数")];
+    const gBody=grp.map(g=>{ const k=rptKpi(g.c); const mm2=g.p.in>0?(g.c.in/g.p.in-1)*100:null;
+      return [{text:g.cls,options:{bold:true}},{text:g.n+"店",options:{align:"right"}},{text:man(g.c.in),options:{align:"right"}},
+        {text:man(g.n?g.c.in/g.n:0),options:{align:"right"}},{text:mm2==null?"—":sp(mm2),options:{align:"right",color:clr(mm2),bold:true}},
+        {text:k.aov==null?"—":yen(k.aov),options:{align:"right"}},{text:k.upt==null?"—":k.upt.toFixed(2)+"点",options:{align:"right"}}]; });
+    // 総合行
+    const kAll=rptKpi(totC);
+    gBody.push([{text:"全店 合計",options:{bold:true,fill:{color:ICE}}},{text:openN+"店",options:{align:"right",bold:true,fill:{color:ICE}}},
+      {text:man(totC.in),options:{align:"right",bold:true,fill:{color:ICE}}},{text:man(openN?totC.in/openN:0),options:{align:"right",bold:true,fill:{color:ICE}}},
+      {text:inMoM==null?"—":sp(inMoM),options:{align:"right",bold:true,color:clr(inMoM),fill:{color:ICE}}},
+      {text:kAll.aov==null?"—":yen(kAll.aov),options:{align:"right",bold:true,fill:{color:ICE}}},{text:kAll.upt==null?"—":kAll.upt.toFixed(2)+"点",options:{align:"right",bold:true,fill:{color:ICE}}}]);
+    s.addTable([gHead].concat(gBody),{x:0.6,y:1.5,w:12.13,colW:[3.13,1.3,2.0,2.0,1.4,1.3,1.0],fontSize:12.5,rowH:0.6,valign:"middle",border:{pt:0.5,color:LINE},fill:{color:"FFFFFF"}});
+    // 売上構成比（横棒）
+    s.addText("グループ別 売上構成比",{x:0.6,y:4.7,w:6,h:0.3,fontSize:13,bold:true,color:NAVY});
+    let bx=0.6, bw=12.13; let cum=0; const gcolors=[ACC,GOLD,"5B8C5A","9B59B6","E67E22"];
+    grp.forEach((g,i)=>{ const frac=totC.in>0?g.c.in/totC.in:0; const w=bw*frac; if(w<=0)return;
+      s.addShape(P.ShapeType.rect,{x:bx,y:5.05,w:Math.max(w,0.02),h:0.55,fill:{color:gcolors[i%gcolors.length]}});
+      if(frac>=0.08)s.addText(g.cls+"\n"+(frac*100).toFixed(0)+"%",{x:bx,y:5.05,w:w,h:0.55,fontSize:9,color:"FFFFFF",align:"center",valign:"middle",bold:true});
+      bx+=w; cum+=frac; });
+    s.addText("平均売上は各グループの営業店舗平均（除外店なし）。客単価＝税込／購入点数＝1取引あたり。",{x:0.6,y:5.85,w:12.13,h:0.3,fontSize:10,color:MUT});
+    foot(s,pg());
+
+    // ================= Slide 5: 売上規模別セグメント =================
+    s=P.addSlide(); s.background={color:BG}; head(s,"売上規模別セグメント ｜ 店舗の階層","当月売上でS/A/B/Cの4階層に分け、階層ごとの特徴を把握");
+    const tiers=rptTiers(sorted.filter(r=>r.c.in>0));
+    const tHead=[th("階層"),th("売上レンジ"),thR("店舗数"),thR("合計売上"),thR("平均売上"),thR("客単価"),thR("購入点数"),thR("売上構成比")];
+    const tBody=tiers.map(t=>{ const k=rptKpi(t.sum); const frac=totC.in>0?t.sum.in/totC.in:0;
+      return [{text:t.label,options:{bold:true,color:t.color}},{text:t.range,options:{fontSize:10}},{text:t.rows.length+"店",options:{align:"right"}},
+        {text:man(t.sum.in),options:{align:"right"}},{text:man(t.rows.length?t.sum.in/t.rows.length:0),options:{align:"right"}},
+        {text:k.aov==null?"—":yen(k.aov),options:{align:"right"}},{text:k.upt==null?"—":k.upt.toFixed(2)+"点",options:{align:"right"}},
+        {text:(frac*100).toFixed(1)+"%",options:{align:"right"}}]; });
+    s.addTable([tHead].concat(tBody),{x:0.6,y:1.5,w:12.13,colW:[1.5,2.6,1.3,1.9,1.9,1.3,1.3,1.33],fontSize:12,rowH:0.6,valign:"middle",border:{pt:0.5,color:LINE},fill:{color:"FFFFFF"}});
+    // 所見
+    const segNotes=[];
+    const topTier=tiers.find(t=>t.rows.length), lowTier=[...tiers].reverse().find(t=>t.rows.length);
+    if(topTier&&lowTier&&topTier!==lowTier){
+      const kt=rptKpi(topTier.sum), kl=rptKpi(lowTier.sum);
+      if(kt.aov&&kl.aov)segNotes.push("上位階層（"+topTier.label+"）と下位階層（"+lowTier.label+"）の客単価差は "+yen(kt.aov-kl.aov)+"（"+(kl.aov?((kt.aov/kl.aov-1)*100).toFixed(0):"—")+"%）。上位店の単価・点数の作り方が横展開の手がかり。");
+    }
+    const share2080=(()=>{ let acc=0,n=0; const tt=totC.in; for(const r of sorted){acc+=r.c.in;n++; if(acc>=tt*0.8)break;} return {n,pct:openN?n/openN*100:0}; })();
+    segNotes.push("売上の80%を上位 "+share2080.n+" 店（全体の "+share2080.pct.toFixed(0)+"%）が占める。中位・下位層の底上げが全体売上の伸びしろ。");
+    segNotes.push("下位階層は「集客（取引数）」か「客単価」のどちらが弱いかを個店で診断し、上位店のパターンを移植する。");
+    s.addText("所見",{x:0.6,y:4.45,w:6,h:0.3,fontSize:13,bold:true,color:GOLD});
+    s.addText(segNotes.map(t=>({text:t,options:{bullet:{code:"25AA"},color:INK,fontSize:12.5,paraSpaceAfter:7}})),{x:0.6,y:4.8,w:12.13,h:2.0});
+    foot(s,pg());
+
+    // ================= Slide 6: 上位店舗 KPI評価 & 示唆 =================
+    s=P.addSlide(); s.background={color:BG}; head(s,"上位店舗の KPI評価 & 示唆 ｜ 何が良かったか","売上トップ5を全店平均と比較。強みのKPIから成功要因を読み解く");
+    const tHead2=[th("順位"),th("店舗名"),thR("売上"),thR("前月比"),thR("客単価 vs全店"),thR("購入点数 vs全店"),thR("商品単価 vs全店")];
+    const rel=(v,base)=>v==null||base==null||base===0?null:(v/base-1)*100;
+    const relCell=(v,base,fmt)=>{ const d=rel(v,base);
+      return {text:(v==null?"—":fmt(v))+(d==null?"":"  ("+sp(d)+")"),options:{align:"right",fontSize:11,color:d==null?INK:(Math.abs(d)<3?INK:(d>0?UP:DN))}}; };
+    const tBody2=top.map((r,i)=>{ const k=rptKpi(r.c); const mm2=r.p.in>0?(r.c.in/r.p.in-1)*100:null;
+      return [{text:String(i+1),options:{bold:true,color:GOLD,align:"center"}},{text:r.name,options:{bold:true}},
+        {text:man(r.c.in),options:{align:"right",bold:true}},{text:mm2==null?"—":sp(mm2),options:{align:"right",color:clr(mm2)}},
+        relCell(k.aov,kC.aov,yen),relCell(k.upt,kC.upt,v=>v.toFixed(2)+"点"),relCell(k.aup,kC.aup,yen)]; });
+    s.addTable([tHead2].concat(tBody2),{x:0.6,y:1.45,w:12.13,colW:[0.9,3.0,1.7,1.3,1.85,1.85,1.53],fontSize:11.5,rowH:0.55,valign:"middle",border:{pt:0.5,color:LINE},fill:{color:"FFFFFF"}});
+    // 各店の示唆（自動生成）
+    s.addText("成功要因の示唆",{x:0.6,y:4.35,w:6,h:0.3,fontSize:13,bold:true,color:GOLD});
+    const ins=top.slice(0,4).map(r=>rptStoreInsight(r,kC,cf,ct));
+    s.addText(ins.map(t=>({text:t,options:{bullet:{code:"25AA"},color:INK,fontSize:12,paraSpaceAfter:6}})),{x:0.6,y:4.7,w:12.13,h:2.2});
+    foot(s,pg());
+
+    // ================= Slide 7〜: グループ別 カテゴリ×価格帯 =================
+    for(const g of grp){
+      const pred=(sid)=>g.ids.has(sid);
+      const cats=rptCatAgg(cf,ct,pred).sort((a,b)=>b.a-a.a);
+      const catsP=rptCatAgg(pf,pt,pred);
+      const {bands,ta}=rptBandAgg(cf,ct,pred);
+      if(!cats.length && ta<=0) continue;   // 明細データが無いグループはスキップ
+      s=P.addSlide(); s.background={color:BG};
+      head(s,"カテゴリ×価格帯 ｜ "+g.cls,"何が売れて、いくらの価格帯か（明細のある店舗の集計）");
+      // 左：売れ筋カテゴリ
+      s.addText("売れ筋カテゴリ TOP5",{x:0.6,y:1.4,w:6,h:0.3,fontSize:14,bold:true,color:NAVY});
+      const catTot=cats.reduce((x,c)=>x+c.a,0)||1;
+      const pMap=new Map(catsP.map(c=>[c.c,c.a]));
+      const cHead=[th("#"),th("カテゴリ"),thR("売上"),thR("構成比"),thR("前月比")];
+      const cBody=cats.slice(0,5).map((c,i)=>{ const pv=pMap.get(c.c)||0; const d=pv>0?(c.a/pv-1)*100:null;
+        return [{text:String(i+1),options:{align:"center",color:GOLD,bold:true}},{text:c.c},{text:man(c.a),options:{align:"right"}},
+          {text:(c.a/catTot*100).toFixed(1)+"%",options:{align:"right"}},{text:d==null?"—":sp(d),options:{align:"right",color:clr(d),fontSize:10}}]; });
+      if(!cBody.length)cBody.push([{text:"—",options:{colspan:5,align:"center",color:MUT}}]);
+      s.addTable([cHead].concat(cBody),{x:0.6,y:1.75,w:6.0,colW:[0.6,2.4,1.4,1.0,0.6],fontSize:11,rowH:0.5,valign:"middle",border:{pt:0.5,color:LINE},fill:{color:"FFFFFF"}});
+      // 右：価格帯（税抜単価）分布
+      s.addText("価格帯（税抜単価）別 売上構成",{x:6.9,y:1.4,w:6,h:0.3,fontSize:14,bold:true,color:NAVY});
+      const bMax=Math.max(...bands.map(b=>b.a),1);
+      let byv=1.8; const bandRows=bands.filter(b=>b.a>0);
+      (bandRows.length?bandRows:bands.slice(0,1)).forEach(b=>{
+        const frac=ta>0?b.a/ta:0; const w=5.6*(b.a/bMax);
+        s.addText(b.label,{x:6.9,y:byv,w:1.75,h:0.32,fontSize:10,color:INK,valign:"middle"});
+        s.addShape(P.ShapeType.rect,{x:8.7,y:byv+0.03,w:Math.max(w,0.03),h:0.26,fill:{color:ACC}});
+        s.addText((frac*100).toFixed(0)+"%",{x:8.7+Math.max(w,0.03)+0.05,y:byv,w:1.2,h:0.32,fontSize:9,color:MUT,valign:"middle"});
+        byv+=0.42;
+      });
+      // 下：グループの総括
+      const topCat=cats[0], topBand=[...bands].sort((a,b)=>b.a-a.a)[0];
+      const gnotes=[];
+      if(topCat)gnotes.push("売上の柱は「"+topCat.c+"」（構成比 "+(topCat.a/catTot*100).toFixed(0)+"%）。上位カテゴリへの在庫・陳列の集中が効く。");
+      if(topBand&&topBand.a>0)gnotes.push("価格帯は "+topBand.label+" が中心（この帯で売上の "+(ta>0?(topBand.a/ta*100).toFixed(0):"—")+"%）。主力帯の品揃えを厚くしつつ、上位帯の育成で客単価を押し上げる。");
+      const gk=rptKpi(g.c);
+      gnotes.push("グループKPI：客単価 "+(gk.aov?yen(gk.aov):"—")+"／購入点数 "+(gk.upt?gk.upt.toFixed(2)+"点":"—")+"／商品単価 "+(gk.aup?yen(gk.aup):"—")+"。");
+      s.addText(gnotes.map(t=>({text:t,options:{bullet:{code:"25AA"},color:INK,fontSize:12,paraSpaceAfter:6}})),{x:0.6,y:5.35,w:12.13,h:1.5});
+      foot(s,pg());
+    }
+
+    // ================= Slide: 全店売上一覧（2列）=================
+    s=P.addSlide(); s.background={color:"FFFFFF"}; head(s,MO+"月 全店売上一覧","純売上（税込）／前月比は前月の同店比");
+    const mk=list=>[[th("#"),th("店舗名"),thR("売上"),thR("前月比")]].concat(list.map(r=>{
+      const d=r.p.in?(r.c.in/r.p.in-1)*100:null;
+      return [{text:r._rank},{text:r.name,options:{fontSize:10}},{text:yen(r.c.in),options:{align:"right"}},
+        {text:d==null?"—":sp(d),options:{align:"right",color:clr(d)}}];
     }));
     sorted.forEach((r,i)=>r._rank=String(i+1));
     const half=Math.ceil(sorted.length/2);
-    s.addTable(mk(sorted.slice(0,half)),{x:0.5,y:1.15,w:6.1,colW:[0.5,3.3,1.5,0.8],fontSize:10,rowH:0.3,valign:"middle",border:{pt:0.5,color:LINE}});
-    s.addTable(mk(sorted.slice(half)),{x:6.85,y:1.15,w:6.1,colW:[0.5,3.3,1.5,0.8],fontSize:10,rowH:0.3,valign:"middle",border:{pt:0.5,color:LINE}});
-    s.addText("純売上（税込）／前月比は前月の同店比。データのある店のみ。",{x:0.5,y:7.0,w:12.3,h:0.3,fontSize:9,color:MUT});
+    s.addTable(mk(sorted.slice(0,half)),{x:0.5,y:1.4,w:6.1,colW:[0.5,3.3,1.5,0.8],fontSize:10,rowH:0.3,valign:"middle",border:{pt:0.5,color:LINE}});
+    s.addTable(mk(sorted.slice(half)),{x:6.85,y:1.4,w:6.1,colW:[0.5,3.3,1.5,0.8],fontSize:10,rowH:0.3,valign:"middle",border:{pt:0.5,color:LINE}});
+    foot(s,pg());
 
-    await P.writeFile({fileName:"AVEND_売上レポート_"+yy+mm+".pptx"});
+    // ================= Slide: アクション提言 =================
+    s=P.addSlide(); s.background={color:NAVY};
+    s.addShape(P.ShapeType.rect,{x:0,y:1.15,w:13.333,h:0.06,fill:{color:GOLD}});
+    s.addText("全体売上を上げるための提言",{x:0.6,y:0.35,w:12,h:0.7,fontSize:28,bold:true,color:"FFFFFF"});
+    const actions=rptActions({top,kC,dTx,dAov,grp,tiers,cf,ct,inMoM});
+    const aCards=actions.slice(0,4);
+    const AX=[0.6,6.9], AY=[1.6,4.35];
+    aCards.forEach((a,i)=>{ const x=AX[i%2], y=AY[Math.floor(i/2)];
+      s.addShape(P.ShapeType.rect,{x,y,w:5.83,h:2.5,fill:{color:"27324B"},line:{color:"3C4A66",pt:1}});
+      s.addShape(P.ShapeType.rect,{x,y,w:0.12,h:2.5,fill:{color:GOLD}});
+      s.addText(a.t,{x:x+0.3,y:y+0.2,w:5.4,h:0.5,fontSize:16,bold:true,color:GOLD});
+      s.addText(a.b.map(t=>({text:t,options:{bullet:{code:"2022"},color:ICE,fontSize:12,paraSpaceAfter:5}})),{x:x+0.3,y:y+0.78,w:5.4,h:1.6});
+    });
+    s.addText("数値はダッシュボードの実績データに基づく自動集計。次回に向け、各店で1つKPIを選び具体目標を設定する。",{x:0.6,y:7.0,w:12.13,h:0.3,fontSize:10,color:MUT});
+
+    await P.writeFile({fileName:"AVEND_PartnersLounge_"+yy+mm+".pptx"});
   }catch(e){ alert("レポート出力に失敗しました：\n"+((e&&e.message)||e)); }
   finally{ if(btn){btn.disabled=false;btn.textContent=old;} }
+}
+// グループ（分類）ごとの当月/前月集計を返す。ids は所属店舗idの集合。
+function rptGroupRows(cf,ct,pf,pt){
+  return classesInData().map(cls=>{
+    const members=usableStores().filter(s=>classOf(s.id)===cls);
+    const ids=new Set(members.map(s=>s.id));
+    const c=sumRowsForIds(cf,ct,ids), p=sumRowsForIds(pf,pt,ids);
+    const n=members.filter(s=>{const x=sumRows(rowsIn(cf,ct,s.id));return x.in>0;}).length;
+    return {cls,ids,members,n,c,p};
+  });
+}
+// 売上規模で S/A/B/C の4階層に分ける（同数に近い分位＋レンジ表示）
+function rptTiers(rows){
+  const defs=[{label:"S（大型）",color:"B8860B"},{label:"A（中大）",color:"2E5AAC"},{label:"B（中小）",color:"5B8C5A"},{label:"C（小型）",color:"6B7280"}];
+  const n=rows.length; const out=defs.map(d=>({...d,rows:[],sum:{in:0,ex:0,tx:0,txv:0,it:0,v:0,hasV:false}}));
+  if(!n)return out.map(t=>({...t,range:"—"}));
+  const per=Math.ceil(n/4);
+  rows.forEach((r,i)=>{ const t=out[Math.min(3,Math.floor(i/per))];
+    t.rows.push(r); ["in","ex","tx","txv","it","v"].forEach(k=>t.sum[k]+=r.c[k]||0); if(r.c.hasV)t.sum.hasV=true; });
+  return out.map(t=>{ if(!t.rows.length)return {...t,range:"—"};
+    const hi=t.rows[0].c.in, lo=t.rows[t.rows.length-1].c.in;
+    return {...t,range:(Math.round(lo/10000).toLocaleString("ja-JP"))+"〜"+(Math.round(hi/10000).toLocaleString("ja-JP"))+"万円"}; });
+}
+// 上位店の示唆（強みKPIから成功要因を推定）
+function rptStoreInsight(r,kAll,cf,ct){
+  const k=rptKpi(r.c); const parts=[];
+  const rel=(v,b)=>v==null||b==null||b===0?null:(v/b-1)*100;
+  const rAov=rel(k.aov,kAll.aov), rUpt=rel(k.upt,kAll.upt), rAup=rel(k.aup,kAll.aup), rPr=k.pr!=null&&kAll.pr!=null?(k.pr-kAll.pr):null;
+  const cand=[];
+  if(rAup!=null&&rAup>=6)cand.push(["商品単価が全店比 "+(rAup>=0?"+":"")+rAup.toFixed(0)+"%","高単価・良質な品揃え（グレードの高い商材）が客単価を押し上げ"]);
+  if(rUpt!=null&&rUpt>=6)cand.push(["購入点数が全店比 "+(rUpt>=0?"+":"")+rUpt.toFixed(0)+"%","セット・複数買いの提案力（関連販売）が効いている"]);
+  if(rPr!=null&&rPr>=1.5)cand.push(["購入率が全店比 +"+rPr.toFixed(1)+"pt","入店客の購買転換が高い（接客・動線・品揃えの鮮度）"]);
+  if(rAov!=null&&rAov>=6&&!cand.length)cand.push(["客単価が全店比 "+(rAov>=0?"+":"")+rAov.toFixed(0)+"%","1点単価と買上点数のバランスが良い"]);
+  // 強みが平均並みでも、規模が大きい店は集客ドライバーとして評価
+  if(!cand.length&&rUpt!=null&&rUpt>=3)cand.push(["購入点数が全店比 +"+rUpt.toFixed(0)+"%","複数買いの提案が寄与"]);
+  // カテゴリの強み
+  let catTxt="";
+  const cats=rptCatAgg(cf,ct,sid=>String(sid)===String(r.id)).sort((a,b)=>b.a-a.a);
+  if(cats.length){const tot=cats.reduce((x,c)=>x+c.a,0)||1;catTxt="主力は「"+cats[0].c+"」（"+(cats[0].a/tot*100).toFixed(0)+"%）。";}
+  const lead=cand.length?cand[0][0]+" → "+cand[0][1]+"。":"売上規模・取引数（集客）で牽引。";
+  return r.name+"（"+man_(r.c.in)+"）：" + lead + catTxt;
+}
+function man_(v){return Math.round(v/10000).toLocaleString("ja-JP")+"万円";}
+// アクション提言（データから方向性を自動生成）
+function rptActions(ctx){
+  const {top,kC,dTx,dAov,grp,tiers}=ctx;
+  const out=[];
+  // 1. 上位店の勝ちパターン横展開
+  const t0=top&&top[0];
+  out.push({t:"① 上位店の勝ちパターンを横展開",b:[
+    t0?("トップ "+t0.name+" の強み（単価/点数/購入率）を分解し、勝ち筋を標準化"):"上位店のKPIを分解し標準化",
+    "中位・下位店に『客単価』か『取引数』のどちらを伸ばすか個店目標を設定",
+    "好調カテゴリ・価格帯の品揃えを他店にも展開"]});
+  // 2. 客単価 or 取引数のテコ入れ（弱い方）
+  const focus=Math.abs(dTx.a)>=Math.abs(dTx.b)?"客単価":"取引数（集客・購入率）";
+  out.push({t:"② "+focus+"のテコ入れ",b:[
+    (dAov.a<0?"買上点数が低下 → セット販売・関連提案を強化":"買上点数の伸びを維持 → 提案の型を横展開"),
+    (dAov.b<0?"商品単価が低下 → 上位グレード/価格帯の品揃えを拡充":"単価帯の上昇を維持 → 高単価帯の在庫を厚く"),
+    "購入率（デジテール店）を指標に、入店→購買の転換を接客で改善"]});
+  // 3. 中位・下位層の底上げ
+  const lowT=[...(tiers||[])].reverse().find(t=>t.rows&&t.rows.length);
+  out.push({t:"③ 中位・下位層の底上げ",b:[
+    (lowT?("下位階層 "+lowT.rows.length+"店に重点支援。上位店の単価・点数の作り方を移植"):"下位層に重点支援"),
+    "売上構成の大半を占める主力価格帯の品揃え欠品を防ぐ",
+    "月次で1店1KPIの改善目標を設定し、Partners Loungeで進捗共有"]});
+  // 4. カテゴリ×価格帯の最適化
+  const bestGrp=(grp||[]).slice().sort((a,b)=>b.c.in-a.c.in)[0];
+  out.push({t:"④ カテゴリ×価格帯の最適化",b:[
+    "売れ筋カテゴリへ在庫・陳列を集中、死に筋は絞る",
+    "主力価格帯を厚くしつつ、一段上の価格帯を計画的に育成し客単価を向上",
+    (bestGrp?("最大グループ「"+bestGrp.cls+"」の成功構成を他グループの参考に"):"グループ間で成功構成を共有")]});
+  return out;
 }
 
 function draw(){
