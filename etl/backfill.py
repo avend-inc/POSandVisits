@@ -338,6 +338,19 @@ def run_sipos_backfill(sb: Supabase, start: str, end: str,
             stale_pos.add(c["pos_name"])
     pos_list = ",".join(sorted(stale_pos))
 
+    # 全接続を対象にする通常実行では、窓内の旧SIPOS(自動)行を先に全店ぶん一掃する。
+    #   → 過去の誤集計・店舗混線（改名前後の別名に総額が重複コピーされた等）を確実に除去。
+    #   ※ POS_LIMIT / POS_ONLY_STORE で絞った動作確認時は、他店を消さないよう一掃しない。
+    if not only and not (lim.isdigit() and int(lim) > 0):
+        try:
+            for pn in sorted({p for p in stale_pos if p != "Si"}):
+                sb.delete("sales", {
+                    "pos_name": f"eq.{pn}",
+                    "and": f"(business_date.gte.{start},business_date.lte.{end})"})
+            print(f"  🧹 窓内の旧SIPOS(自動)行を一掃しました（{start}〜{end}）。")
+        except Exception as e:
+            print(f"  ⚠️ 旧SIPOS行の一掃に失敗: {type(e).__name__}: {e}")
+
     total_ins = 0
     for c in conns:
         label = f'ezregi#{c["id"]}'
@@ -363,15 +376,32 @@ def run_sipos_backfill(sb: Supabase, start: str, end: str,
 
                 # 店の対応付け（手動インポートと同じ：生の店舗名ベース）。
                 if c.get("store_id"):
-                    common["store"] = None
+                    common["store"] = ""
                     fixed = int(c["store_id"])
                     store_id_of = lambda name, _s=fixed: _s
                 else:
-                    common["store"] = si_clean.si_store_names(df_in["店舗名"]).reindex(common.index)
+                    # adapt_ezregi は fillna('')後に店舗名が空でない行だけを残す。まったく
+                    # 同じ規則で残した行から店名を作り、ラベルずれの起きない「位置対応」で
+                    # 割り当てる（reindexだとラベル不一致でNaN(float)が混じり、誤店舗割当や
+                    # 集計クラッシュの原因になっていた）。
+                    kept = df_in[df_in["店舗名"].fillna("").astype(str).str.strip() != ""]
+                    names = si_clean.si_store_names(kept["店舗名"]).astype(str)
+                    if len(names) == len(common):
+                        common["store"] = names.to_numpy()
+                    else:
+                        # 想定外の行数ずれ。安全側でラベル対応＋欠損は捨てる。
+                        print(f"  【{label}】{ym}: ⚠️ 行数不一致(kept={len(names)}/common={len(common)})"
+                              "→ ラベル対応にフォールバック")
+                        common["store"] = si_clean.si_store_names(df_in["店舗名"]).reindex(common.index)
                     store_id_of = lambda name: sb.get_or_create_store(name, store_cache)
 
                 common = common[common["date"].notna()].copy()
                 common = common[(common["date"] >= m_start) & (common["date"] <= m_end)].copy()
+                # 店名が空/NaNの行は捨てる（誤店舗への割当・集計時のjoin失敗を防ぐ）。
+                if not c.get("store_id"):
+                    common = common[common["store"].notna()].copy()
+                    common["store"] = common["store"].astype(str)
+                    common = common[~common["store"].isin(["", "nan", "None"])].copy()
                 if len(common) == 0:
                     print(f"  【{label}】{ym}: 期間内の明細0件。")
                     continue
@@ -390,7 +420,8 @@ def run_sipos_backfill(sb: Supabase, start: str, end: str,
                 total_ins += ins
                 txn = len({(r["store_id"], r["tx_id"]) for r in payload})
                 ssum = sum(r["sales_in_tax"] for r in payload if r["line_no"] == 0)
-                stores = sorted({r for r in common["store"].astype(str).unique() if r and r != "None"})
+                stores = sorted({str(r) for r in common["store"].tolist()
+                                 if str(r) not in ("", "nan", "None")})
                 print(f"  【{label}】{ym}: {txn}取引 / {int(ssum):,}円 → 追加 {ins}行"
                       f"（店舗: {', '.join(stores[:12])}）")
             except Exception as e:

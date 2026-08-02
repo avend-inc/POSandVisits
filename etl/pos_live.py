@@ -61,7 +61,17 @@ def _to_common(csv_text: str, pos_type: str, pos_name: str) -> pd.DataFrame:
         df_in = _read_si_table(csv_text)
         df_in = si_clean.normalize_si_datetime(df_in)
         common = adapters.adapt_ezregi(df_in, pos_name)
-        common["store"] = si_clean.si_store_names(df_in["店舗名"]).reindex(common.index)
+        # adapt_ezregi と同じ規則（fillna('')後に店舗名が空でない行）で残した行から店名を
+        # 作り、位置対応で割り当てる（reindexのラベルずれによるNaN混入・誤店舗割当を防ぐ）。
+        kept = df_in[df_in["店舗名"].fillna("").astype(str).str.strip() != ""]
+        names = si_clean.si_store_names(kept["店舗名"]).astype(str)
+        if len(names) == len(common):
+            common["store"] = names.to_numpy()
+        else:
+            common["store"] = si_clean.si_store_names(df_in["店舗名"]).reindex(common.index)
+        common = common[common["store"].notna()].copy()
+        common["store"] = common["store"].astype(str)
+        common = common[~common["store"].isin(["", "nan", "None"])].copy()
         return common
     if pos_type == "airregi":
         df = pd.read_csv(io.StringIO(csv_text), dtype=str)
