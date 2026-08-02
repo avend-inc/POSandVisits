@@ -270,6 +270,47 @@ def build_data(sb: Supabase) -> dict:
     except Exception as _e:
         print("  （売上サマリーの出力に失敗: {}）".format(_e))
 
+    # --- 診断2: 同一伝票が複数店舗に割り当てられていないか（店舗混線の検知） ---
+    try:
+        tx_store: dict[tuple, set] = {}
+        for r in sales:
+            k = (r.get("pos_name") or "", r["tx_id"])
+            tx_store.setdefault(k, set()).add(r["store_id"])
+        multi = [(k, v) for k, v in tx_store.items() if len(v) > 1]
+        print("\n=== 診断: 複数店舗に重複した伝票（混線検知）: {}件 ===".format(len(multi)))
+        for (k, v) in multi[:12]:
+            names = ", ".join(name_by_id.get(x, str(x)) for x in sorted(v))
+            print("  伝票 pos={} tx_id={} → 店舗[{}]".format(k[0], k[1], names))
+    except Exception as _e:
+        print("  （混線検知に失敗: {}）".format(_e))
+
+    # --- 診断3: 対象2店の7月内訳（pos_name別 伝票数・純売上） ---
+    try:
+        TARGET = {"SELFURUGI本店", "SELFURUGI鎌ヶ谷店"}
+        id_by_name = {v: k for k, v in name_by_id.items()}
+        tgt_ids = {id_by_name[n] for n in TARGET if n in id_by_name}
+        agg: dict[tuple, dict] = {}
+        seen_tx = set()
+        for r in sales:
+            if r["store_id"] not in tgt_ids:
+                continue
+            if not str(r["business_date"]).startswith("2026-07"):
+                continue
+            pn = r.get("pos_name") or ""
+            key = (r["store_id"], pn)
+            a = agg.setdefault(key, {"in": 0.0, "tx": set()})
+            txk = (r["store_id"], pn, r["tx_id"])
+            if txk not in seen_tx:
+                seen_tx.add(txk)
+                a["in"] += _num(r["sales_in_tax"])
+                a["tx"].add(r["tx_id"])
+        print("\n=== 診断: 対象店の7月内訳（pos_name別）===")
+        for (sid, pn), a in sorted(agg.items()):
+            print("  {} / pos={} : 純売上 {:,} / 伝票 {}件".format(
+                name_by_id.get(sid, sid), pn, int(round(a["in"])), len(a["tx"])))
+    except Exception as _e:
+        print("  （対象店内訳の出力に失敗: {}）".format(_e))
+
     return {
         "generated_at": datetime.now(JST).isoformat(timespec="seconds"),
         "stores": [{"id": s["id"], "name": name_by_id.get(s["id"], str(s["id"])),
