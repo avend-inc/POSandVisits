@@ -558,6 +558,35 @@ function rptKpi(p){
 function rptDecomp(aC,bC,aP,bP){
   return { a:(aC-aP)*(bC+bP)/2, b:(bC-bP)*(aC+aP)/2, total:aC*bC-aP*bP };
 }
+// 各店の初回売上月（YYYY-MM）＝OPEN月。売上が初めて立った月で判定（データ駆動）。
+let _rptFirstYm=null;
+function rptFirstYm(sid){
+  if(!_rptFirstYm){ _rptFirstYm=new Map();
+    for(const r of DATA.daily){ if(!((r.in||0)>0||(r.tx||0)>0))continue;
+      const ym=(r.d||"").slice(0,7), cur=_rptFirstYm.get(r.s);
+      if(!cur||ym<cur)_rptFirstYm.set(r.s,ym); } }
+  return _rptFirstYm.get(sid)||null;
+}
+// 平均・全体KPIの対象店（その月がOPEN月の店は初月ゆえ除外、下北沢は恒久除外）
+// データ先頭月は「本当のOPEN月」と区別できないためOPEN扱いにしない（誤除外を防ぐ）。
+function rptEligIds(ym){
+  const [f,t]=monthSpan(ym), ids=new Set();
+  const startYm=(DATA._min||"").slice(0,7);
+  for(const s of usableStores()){
+    if((s.name||"").indexOf("下北沢")>=0)continue;
+    if(rptFirstYm(s.id)===ym && ym>startYm)continue;   // その月がOPEN月（かつデータ先頭月でない）→除外
+    if(DATA.daily.some(r=>r.s===s.id&&r.d>=f&&r.d<=t&&((r.in||0)>0)))ids.add(s.id);
+  }
+  return ids;
+}
+// 対象店の月次 店舗売上（平均・中央値・店舗数）
+function rptAvgMed(ym){
+  const [f,t]=monthSpan(ym), ids=rptEligIds(ym);
+  const vals=[...ids].map(id=>{let x=0;for(const r of DATA.daily){if(r.s===id&&r.d>=f&&r.d<=t)x+=r.in||0;}return x;}).filter(v=>v>0).sort((a,b)=>a-b);
+  const n=vals.length, avg=n?vals.reduce((a,b)=>a+b,0)/n:0;
+  const med=n?(n%2?vals[(n-1)/2]:(vals[n/2-1]+vals[n/2])/2):0;
+  return {avg,med,n};
+}
 async function makeReport(){
   const btn=document.getElementById("reportbtn"); const old=btn?btn.textContent:"";
   try{
@@ -567,32 +596,37 @@ async function makeReport(){
     const [yy,mm]=ym.split("-"); const MO=+mm;
     const isCurMonth=(ym===(DATA._salesMax||"").slice(0,7));
 
-    // ---- 店舗別（当月／前月）----
-    const EXC=["福井","下北沢"];  // 平均から除外（イベント/特殊店）
-    const inAvg=name=>!EXC.some(k=>name.indexOf(k)>=0);
+    // ---- 店舗別（当月／前月・全店）----
     let srows=usableStores().map(s=>{
       const c=sumRows(rowsIn(cf,ct,s.id)), p=sumRows(rowsIn(pf,pt,s.id));
       return {id:s.id,name:s.name,cls:classOf(s.id),brand:brandOf(s.id),own:ownOf(s.id),c,p};
     }).filter(r=>r.c.in>0||r.p.in>0);
     if(!srows.length){alert(ym+" の売上データがありません。");return;}
 
-    // ---- 全店集計・KPI ----
+    // ---- 全店（規模・構成比・ランキング用。全営業店を含む）----
     const totC=sumRows(rowsIn(cf,ct,"all")), totP=sumRows(rowsIn(pf,pt,"all"));
-    const kC=rptKpi(totC), kP=rptKpi(totP);
-    const openN=srows.filter(r=>r.c.in>0).length;                 // 当月営業店舗数
+    const openN=srows.filter(r=>r.c.in>0).length, prevN=srows.filter(r=>r.p.in>0).length;
     const inMoM=totP.in>0?(totC.in/totP.in-1)*100:null;
-    // 平均店舗売上（福井・下北沢除く・売上のある店）
-    const avgOf=(key)=>{const a=srows.filter(r=>inAvg(r.name)&&r[key].in>0);return a.length?a.reduce((x,r)=>x+r[key].in,0)/a.length:0;};
-    const avgC=avgOf("c"), avgP=avgOf("p"), avgMoM=avgP>0?(avgC/avgP-1)*100:null;
     const sorted=srows.slice().sort((a,b)=>b.c.in-a.c.in);
     const top=sorted.slice(0,5);
 
-    // ---- 売上分解（全店 MoM）----
-    // 売上=取引数×客単価 → .a=取引数要因 / .b=客単価要因 / total=Δin
-    const dTx =rptDecomp(totC.tx,kC.aov||0, totP.tx,kP.aov||0);
+    // ---- 対象店（平均・全体KPIの基準）：各月ともOPEN月の店＋下北沢を除く ----
+    const ppym=prevYm(pym);
+    const monAgg=[ppym,pym,ym].map(m=>{const ids=rptEligIds(m);const [mf,mt]=monthSpan(m);const agg=sumRowsForIds(mf,mt,ids);return {m,ids,agg,k:rptKpi(agg)};});
+    const totEC=monAgg[2].agg, totEP=monAgg[1].agg, kC=monAgg[2].k, kP=monAgg[1].k;  // 「全体（除外後）」基準
+    const amC=rptAvgMed(ym), amP=rptAvgMed(pym);
+    const avgC=amC.avg, avgP=amP.avg, avgMoM=avgP>0?(avgC/avgP-1)*100:null;
+    const medMoM=amP.med>0?(amC.med/amP.med-1)*100:null;
+
+    // ---- 売上分解（同一店＝既存店ベース。両月とも対象の店だけで比較し、店舗数変動の混入を排除）----
+    const interIds=new Set([...monAgg[2].ids].filter(id=>monAgg[1].ids.has(id)));
+    const totEC2=sumRowsForIds(cf,ct,interIds), totEP2=sumRowsForIds(pf,pt,interIds);
+    const kC2=rptKpi(totEC2), kP2=rptKpi(totEP2);
+    // 売上=取引数×客単価 → .a=取引数要因 / .b=客単価要因 / total=Δ売上
+    const dTx =rptDecomp(totEC2.tx,kC2.aov||0, totEP2.tx,kP2.aov||0);
     // 客単価(税抜)=平均点数×商品単価 の分解
-    const exAovC=totC.tx>0?totC.ex/totC.tx:0, exAovP=totP.tx>0?totP.ex/totP.tx:0;
-    const dAov=rptDecomp(kC.upt||0,kC.aup||0, kP.upt||0,kP.aup||0);
+    const exAovC=totEC2.tx>0?totEC2.ex/totEC2.tx:0, exAovP=totEP2.tx>0?totEP2.ex/totEP2.tx:0;
+    const dAov=rptDecomp(kC2.upt||0,kC2.aup||0, kP2.upt||0,kP2.aup||0);
 
     await loadPptxLib();
     const P=new PptxGenJS(); P.defineLayout({name:"W",width:13.333,height:7.5}); P.layout="W";
@@ -628,75 +662,77 @@ async function makeReport(){
     if(isCurMonth)s.addText("※ 当月は月途中までの集計値を含みます",{x:0.9,y:6.2,w:11.5,h:0.3,fontSize:11,color:MUT});
 
     // ================= Slide 2: エグゼクティブ・サマリー =================
-    s=P.addSlide(); s.background={color:BG}; head(s,"エグゼクティブ・サマリー",MO+"月 全店の総括");
+    s=P.addSlide(); s.background={color:BG}; head(s,"エグゼクティブ・サマリー",MO+"月 全店の総括（平均・KPIは今月OPEN店／下北沢を除く）");
     // 大数字カード（3枚）
     const card=(x,label,val,sub,subc)=>{
-      s.addShape(P.ShapeType.rect,{x,y:1.5,w:3.9,h:1.85,fill:{color:"FFFFFF"},line:{color:LINE,pt:1},shadow:{type:"outer",blur:6,offset:2,color:"D9DEE8",opacity:0.6}});
-      s.addText(label,{x:x+0.25,y:1.68,w:3.5,h:0.35,fontSize:12,color:MUT});
-      s.addText(val,{x:x+0.2,y:2.02,w:3.55,h:0.85,fontSize:33,bold:true,color:NAVY});
-      if(sub)s.addText(sub,{x:x+0.25,y:2.9,w:3.5,h:0.35,fontSize:14,bold:true,color:subc});
+      s.addShape(P.ShapeType.rect,{x,y:1.42,w:3.9,h:1.7,fill:{color:"FFFFFF"},line:{color:LINE,pt:1},shadow:{type:"outer",blur:6,offset:2,color:"D9DEE8",opacity:0.6}});
+      s.addText(label,{x:x+0.25,y:1.55,w:3.5,h:0.5,fontSize:11.5,color:MUT,valign:"top"});
+      s.addText(val,{x:x+0.2,y:2.02,w:3.55,h:0.72,fontSize:30,bold:true,color:NAVY});
+      if(sub)s.addText(sub,{x:x+0.25,y:2.74,w:3.5,h:0.32,fontSize:13,bold:true,color:subc});
     };
-    card(0.6, "全店 合計売上（税込）", man(totC.in), inMoM==null?"前月比 —":"前月比 "+sp(inMoM), clr(inMoM));
-    card(4.72,"平均店舗売上 ※福井/下北沢除", man(avgC), avgMoM==null?"前月比 —":"前月比 "+sp(avgMoM), clr(avgMoM));
-    card(8.84,"当月 営業店舗数", openN+" 店", "前月 "+srows.filter(r=>r.p.in>0).length+" 店", MUT);
-    // 全店KPI 帯
-    s.addText("全店 主要KPI（前月比）",{x:0.6,y:3.6,w:8,h:0.35,fontSize:14,bold:true,color:NAVY});
-    const kpiCell=(label,cur,prev,fmt)=>{ const d=(prev!=null&&prev!==0&&cur!=null)?(cur/prev-1)*100:null;
-      return [{text:label,options:{color:MUT,fontSize:11,align:"center"}},
-              {text:cur==null?"—":fmt(cur),options:{bold:true,fontSize:17,color:NAVY,align:"center"}},
-              {text:d==null?"—":sp(d),options:{fontSize:11,bold:true,color:clr(d),align:"center"}}]; };
-    const kcols=[
-      kpiCell("客単価（税込）",kC.aov,kP.aov,v=>yen(v)),
-      kpiCell("平均購入点数",kC.upt,kP.upt,v=>v.toFixed(2)+"点"),
-      kpiCell("商品単価（税抜）",kC.aup,kP.aup,v=>yen(v)),
-      kpiCell("購入率※ﾃﾞｼﾞﾃｰﾙ店",kC.pr,kP.pr,v=>v.toFixed(1)+"%"),
-    ];
-    // 4列×3行のKPIグリッド
-    const krow=r=>kcols.map(c=>({text:c[r].text,options:{...c[r].options,fill:{color:"FFFFFF"}}}));
-    s.addTable([krow(0),krow(1),krow(2)],{x:0.6,y:4.0,w:12.13,colW:[3.03,3.03,3.03,3.04],rowH:[0.35,0.55,0.35],valign:"middle",border:{pt:1,color:LINE}});
+    card(0.6, "平均店舗売上（対象店）", man(avgC), avgMoM==null?"前月比 —":"前月比 "+sp(avgMoM), clr(avgMoM));
+    card(4.72,"中央値 店舗売上（対象店）", man(amC.med), medMoM==null?"前月比 —":"前月比 "+sp(medMoM), clr(medMoM));
+    card(8.84,"当月 営業店舗数", openN+" 店", "前月 "+prevN+" 店（対象 "+amC.n+"店）", MUT);
+    // 主要KPI 直近3ヶ月の推移
+    s.addText("主要KPIの推移（直近3ヶ月 ／ 対象店ベース）",{x:0.6,y:3.28,w:9,h:0.35,fontSize:14,bold:true,color:NAVY});
+    const mlbl=m=>(+m.split("-")[1])+"月";
+    const trow=(label,pick,fmt,isRate)=>{ const vals=monAgg.map(x=>pick(x.k)); const cur=vals[2],prev=vals[1];
+      let dtxt,dcol;
+      if(isRate){ const d=(cur!=null&&prev!=null)?(cur-prev):null; dtxt=d==null?"—":(d>=0?"+":"−")+Math.abs(d).toFixed(1)+"pt"; dcol=clr(d); }
+      else { const d=(cur!=null&&prev!=null&&prev!==0)?(cur/prev-1)*100:null; dtxt=d==null?"—":sp(d); dcol=clr(d); }
+      return [{text:label},...vals.map((v,i)=>({text:v==null?"—":fmt(v),options:{align:"right",bold:i===2}})),{text:dtxt,options:{align:"right",bold:true,color:dcol}}]; };
+    s.addTable([
+      [th("指標"),thR(mlbl(monAgg[0].m)),thR(mlbl(monAgg[1].m)),thR(mlbl(monAgg[2].m)),thR("前月差")],
+      trow("客単価（税込）",k=>k.aov,v=>yen(v),false),
+      trow("平均購入点数",k=>k.upt,v=>v.toFixed(2)+"点",false),
+      trow("商品単価（税抜）",k=>k.aup,v=>yen(v),false),
+      trow("購入率 ※ﾃﾞｼﾞﾃｰﾙ店",k=>k.pr,v=>v.toFixed(1)+"%",true),
+    ],{x:0.6,y:3.62,w:12.13,colW:[2.93,2.3,2.3,2.3,2.3],fontSize:11.5,rowH:0.44,valign:"middle",border:{pt:0.5,color:LINE},fill:{color:"FFFFFF"}});
+    s.addText("※ 購入率は割合のため前月差は『ポイント(pt)』で表示。",{x:0.6,y:5.62,w:9,h:0.28,fontSize:10,color:MUT});
     // 所見（自動生成）
     const takeaways=[];
-    if(inMoM!=null)takeaways.push("全店売上は前月比 "+sp(inMoM)+"（"+man(totC.in)+"）。"+(Math.abs(dTx.a)>=Math.abs(dTx.b)?"取引数（客数）":"客単価")+"要因が主な変動ドライバー。");
+    takeaways.push("平均店舗売上は "+man(avgC)+"（前月比 "+(avgMoM==null?"—":sp(avgMoM))+"）、中央値 "+man(amC.med)+"。※今月OPEN店・下北沢は除外。");
+    { const c0=monAgg[0].k.aov, c2=kC.aov; const av3=(c0&&c2)?sp((c2/c0-1)*100):"—";
+      takeaways.push("前月比の変動は "+(Math.abs(dTx.a)>=Math.abs(dTx.b)?"取引数（客数）":"客単価")+"要因が中心。客単価は直近3ヶ月で "+av3+"。"); }
     { const gm=rptGroupRows(cf,ct,pf,pt).filter(g=>g.p.in>0).sort((a,b)=>((b.c.in/b.p.in)-(a.c.in/a.p.in)));
       if(gm.length)takeaways.push("グループ別では「"+gm[0].cls+"」が前月比 "+sp((gm[0].c.in/gm[0].p.in-1)*100)+"と最も伸長。"); }
     { const ca=rptCatAgg(cf,ct,()=>true).sort((a,b)=>b.a-a.a);
-      if(ca.length)takeaways.push("売れ筋カテゴリ首位は「"+ca[0].c+"」（明細のある店の売上構成で最大）。"); }
-    if(top.length)takeaways.push("売上トップは "+top[0].name+"（"+man(top[0].c.in)+"）。上位店のKPIは後段で分析。");
-    s.addText("ポイント",{x:0.6,y:5.75,w:6,h:0.3,fontSize:13,bold:true,color:GOLD});
-    s.addText(takeaways.map(t=>({text:t,options:{bullet:{code:"25AA"},color:INK,fontSize:12.5,paraSpaceAfter:6}})),
-      {x:0.6,y:6.05,w:12.13,h:1.0});
+      if(ca.length)takeaways.push("売れ筋カテゴリ首位は「"+ca[0].c+"」（明細のある店の売上構成）。"); }
+    s.addText("ポイント",{x:0.6,y:5.9,w:6,h:0.3,fontSize:13,bold:true,color:GOLD});
+    s.addText(takeaways.slice(0,4).map(t=>({text:t,options:{bullet:{code:"25AA"},color:INK,fontSize:10.8,paraSpaceAfter:4}})),
+      {x:0.6,y:6.18,w:12.13,h:0.95});
     foot(s,pg());
 
     // ================= Slide 3: 売上構造の分解 =================
-    s=P.addSlide(); s.background={color:BG}; head(s,"売上構造の分解 ｜ 前月比の要因","売上 ＝ 取引数 × 客単価、客単価(税抜) ＝ 購入点数 × 商品単価");
-    // Panel A: 売上 = 取引数 × 客単価
-    s.addText("① 売上の増減（取引数 × 客単価）",{x:0.6,y:1.45,w:6,h:0.35,fontSize:14,bold:true,color:NAVY});
+    s=P.addSlide(); s.background={color:BG}; head(s,"売上構造の分解 ｜ 前月比の要因","客単価 ＝ 購入点数 × 商品単価、取引数 × 客単価 の視点で『何が効いたか』を分解（既存店・同一店ベース）");
+    // Panel A: 取引数 × 客単価（客数と単価、どちらが動いたか）
+    s.addText("① 取引数 × 客単価（客数か単価か）",{x:0.6,y:1.45,w:6,h:0.35,fontSize:14,bold:true,color:NAVY});
     const decoTbl=(rows2)=>[[th("要因"),thR("前月"),thR("当月"),thR("売上への寄与")]].concat(rows2);
     const rA=[
-      [{text:"取引数（客数）"},{text:NUM(totP.tx)+"件",options:{align:"right"}},{text:NUM(totC.tx)+"件",options:{align:"right"}},{text:sy(dTx.a),options:{align:"right",bold:true,color:clr(dTx.a)}}],
-      [{text:"客単価（税込）"},{text:yen(kP.aov||0),options:{align:"right"}},{text:yen(kC.aov||0),options:{align:"right"}},{text:sy(dTx.b),options:{align:"right",bold:true,color:clr(dTx.b)}}],
-      [{text:"売上 合計",options:{bold:true,fill:{color:ICE}}},{text:man(totP.in),options:{align:"right",bold:true,fill:{color:ICE}}},{text:man(totC.in),options:{align:"right",bold:true,fill:{color:ICE}}},{text:sy(dTx.total),options:{align:"right",bold:true,color:clr(dTx.total),fill:{color:ICE}}}],
+      [{text:"取引数（客数）"},{text:NUM(totEP2.tx)+"件",options:{align:"right"}},{text:NUM(totEC2.tx)+"件",options:{align:"right"}},{text:sy(dTx.a),options:{align:"right",bold:true,color:clr(dTx.a)}}],
+      [{text:"客単価（税込）"},{text:yen(kP2.aov||0),options:{align:"right"}},{text:yen(kC2.aov||0),options:{align:"right"}},{text:sy(dTx.b),options:{align:"right",bold:true,color:clr(dTx.b)}}],
+      [{text:"前月差（合計）",options:{bold:true,fill:{color:ICE}}},{text:"",options:{fill:{color:ICE}}},{text:"",options:{fill:{color:ICE}}},{text:sy(dTx.total),options:{align:"right",bold:true,color:clr(dTx.total),fill:{color:ICE}}}],
     ];
     s.addTable(decoTbl(rA),{x:0.6,y:1.85,w:6.0,colW:[1.9,1.35,1.35,1.4],fontSize:11.5,rowH:0.5,valign:"middle",border:{pt:0.5,color:LINE},fill:{color:"FFFFFF"}});
     // Panel B: 客単価(税抜) = 購入点数 × 商品単価
-    s.addText("② 客単価(税抜)の増減（点数 × 単価）",{x:6.9,y:1.45,w:6,h:0.35,fontSize:14,bold:true,color:NAVY});
+    s.addText("② 客単価(税抜) ＝ 購入点数 × 商品単価",{x:6.9,y:1.45,w:6,h:0.35,fontSize:14,bold:true,color:NAVY});
     const rB=[
-      [{text:"平均購入点数"},{text:(kP.upt||0).toFixed(2)+"点",options:{align:"right"}},{text:(kC.upt||0).toFixed(2)+"点",options:{align:"right"}},{text:sy(dAov.a),options:{align:"right",bold:true,color:clr(dAov.a)}}],
-      [{text:"商品単価（税抜）"},{text:yen(kP.aup||0),options:{align:"right"}},{text:yen(kC.aup||0),options:{align:"right"}},{text:sy(dAov.b),options:{align:"right",bold:true,color:clr(dAov.b)}}],
+      [{text:"平均購入点数"},{text:(kP2.upt||0).toFixed(2)+"点",options:{align:"right"}},{text:(kC2.upt||0).toFixed(2)+"点",options:{align:"right"}},{text:sy(dAov.a),options:{align:"right",bold:true,color:clr(dAov.a)}}],
+      [{text:"商品単価（税抜）"},{text:yen(kP2.aup||0),options:{align:"right"}},{text:yen(kC2.aup||0),options:{align:"right"}},{text:sy(dAov.b),options:{align:"right",bold:true,color:clr(dAov.b)}}],
       [{text:"客単価(税抜) 合計",options:{bold:true,fill:{color:ICE}}},{text:yen(exAovP),options:{align:"right",bold:true,fill:{color:ICE}}},{text:yen(exAovC),options:{align:"right",bold:true,fill:{color:ICE}}},{text:sy(dAov.total),options:{align:"right",bold:true,color:clr(dAov.total),fill:{color:ICE}}}],
     ];
     s.addTable([[th("要因"),thR("前月"),thR("当月"),thR("客単価への寄与")]].concat(rB),{x:6.9,y:1.85,w:6.0,colW:[1.9,1.35,1.35,1.4],fontSize:11.5,rowH:0.5,valign:"middle",border:{pt:0.5,color:LINE},fill:{color:"FFFFFF"}});
     // 読み解き
     const strong=(a,b,la,lb)=>Math.abs(a)>=Math.abs(b)?la:lb;
     const notes3=[];
-    if(inMoM!=null){
-      const sh=dTx.total!==0?Math.abs(dTx.a)/(Math.abs(dTx.a)+Math.abs(dTx.b))*100:50;
-      notes3.push("全店売上の前月差 "+sy(dTx.total)+" は、"+strong(dTx.a,dTx.b,"取引数（来店・買上客数）","客単価")+"の寄与が中心（取引数要因 "+sy(dTx.a)+"／客単価要因 "+sy(dTx.b)+"）。");
-      notes3.push("客単価の動きは "+strong(dAov.a,dAov.b,"1回あたりの購入点数","商品1点あたりの単価")+"が主因。"+(dAov.a>=0?"セット・複数買い":"買上点数の低下")+"と"+(dAov.b>=0?"単価帯の上昇":"単価帯の低下")+"の両面から見る。");
+    if(totEP2.in>0){
+      notes3.push("既存店の売上前月差は、"+strong(dTx.a,dTx.b,"取引数（来店・買上客数）","客単価")+"の寄与が中心（取引数要因 "+sy(dTx.a)+"／客単価要因 "+sy(dTx.b)+"）。まず伸ばすべきは"+strong(dTx.a,dTx.b,"集客・購入率","客単価")+"。");
+      notes3.push("客単価の動きは "+strong(dAov.a,dAov.b,"1回あたりの購入点数","商品1点あたりの単価")+"が主因（点数 "+sy(dAov.a)+"／単価 "+sy(dAov.b)+"）。"+(dAov.a>=0?"セット・複数買い":"買上点数の低下")+"と"+(dAov.b>=0?"単価帯の上昇":"単価帯の低下")+"の両面で見る。");
     }
     notes3.push("打ち手の方向性：取引数は「集客×購入率」、客単価は「点数（提案・セット）×単価（品揃え・グレード）」に分けて店舗ごとに強化余地を特定する。");
     s.addText("読み解き",{x:0.6,y:4.35,w:6,h:0.3,fontSize:13,bold:true,color:GOLD});
     s.addText(notes3.map(t=>({text:t,options:{bullet:{code:"25AA"},color:INK,fontSize:12.5,paraSpaceAfter:7}})),{x:0.6,y:4.7,w:12.13,h:2.2});
+    s.addText("※ 既存店＝両月とも営業（今月OPEN店・下北沢を除く）で比較。金額は前月比の寄与（要因分解）。",{x:0.6,y:6.95,w:12.13,h:0.28,fontSize:9.5,color:MUT});
     foot(s,pg());
 
     // ================= Slide 4: グループ別サマリー（分類）=================
