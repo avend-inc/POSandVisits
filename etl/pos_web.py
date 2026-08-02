@@ -477,39 +477,65 @@ def _fetch_sipos(page, context, url: str, d0: str, d1: str, label: str) -> bytes
         raise EtlError(f"{label}: 売上報告書の「CSVダウンロード」ボタンが見つかりませんでした。")
     page.wait_for_timeout(1200)   # モーダルの描画待ち
 
-    # 4) 期間（開始日/終了日 = YYYY/MM/DD）をモーダルに設定。
+    # 4-6) ダウンロードフォームを直接操作する。実DOMで確定した仕様：
+    #   form[action*="dailySalesReport/download"] (POST) に
+    #     download_start_at / download_end_at (text, YYYY/MM/DD)
+    #     custom-check-purchase (checkbox) ＋ hidden_custom-check-purchase=on
+    #   がある。ボタン文言探しは不安定なので、値を名前で確実にセットして form を submit する。
     start_v = d0.replace("-", "/")
     end_v = d1.replace("-", "/")
-    print(f"  {label}: ダウンロード期間を {start_v} 〜 {end_v} に設定します")
-    _sipos_set_datetime(page, "開始日", start_v)
-    _sipos_set_datetime(page, "終了日", end_v)
-
-    # 5) 『購買情報明細』にチェック（他はそのままでもZIP内から明細だけ拾う）。
-    if not _sipos_check_option(page, "購買情報明細"):
-        # 表記ゆれ（購入情報明細）にも対応。
-        _sipos_check_option(page, "購入情報明細")
-    if debug:
-        dump_controls(page, f"{label}_sipos_download_modal")
-
-    # 6) モーダル内の『ダウンロード』を押す。まず明示的に（timeout付きで）押し、
-    #    ダメなら共通のモーダル確定ヘルパにフォールバックする。
-    print(f"  {label}: ダウンロードボタンを押します")
-    clicked = False
-    for sel in (".modal.show button:has-text('ダウンロード')",
-                ".modal.in button:has-text('ダウンロード')",
-                ".modal.show .btn-primary",
-                "button:has-text('ダウンロードする')",
-                "button:has-text('ダウンロード')"):
-        try:
-            loc = page.locator(sel).first
-            if loc.count() and loc.is_visible():
-                loc.click(timeout=5_000)
-                clicked = True
-                break
-        except Exception:
-            continue
-    if not clicked:
-        _confirm_download_modal(page)
+    print(f"  {label}: ダウンロード期間を {start_v} 〜 {end_v} に設定し、購買情報明細で送信します")
+    ok = False
+    try:
+        ok = bool(page.evaluate(
+            r"""([s, e]) => {
+              const forms = [...document.querySelectorAll('form')];
+              const f = forms.find(x => (x.getAttribute('action')||'')
+                          .includes('dailySalesReport/download'));
+              if (!f) return false;
+              const setv = (name, val) => {
+                const el = f.querySelector('[name="'+name+'"]');
+                if (el) { el.value = val;
+                  el.dispatchEvent(new Event('input',{bubbles:true}));
+                  el.dispatchEvent(new Event('change',{bubbles:true})); }
+              };
+              setv('download_start_at', s);
+              setv('download_end_at', e);
+              // 購買情報明細だけON、他の集計はOFFにする（ZIPを最小に）。
+              const cbmap = {'custom-check-purchase':true, 'custom-check-sales':false,
+                'custom-check-category':false, 'custom-check-singleitems':false,
+                'custom-check-times':false};
+              for (const [nm, on] of Object.entries(cbmap)) {
+                const cb = f.querySelector('input[type=checkbox][name="'+nm+'"]');
+                if (cb && cb.checked !== on) cb.click();
+                const hid = f.querySelector('[name="hidden_'+nm+'"]');
+                if (hid) hid.value = on ? 'on' : '';
+              }
+              f.submit();
+              return true;
+            }""", [start_v, end_v]))
+    except Exception as e:
+        print(f"  {label}: フォーム送信に失敗（{e}）。ボタンクリックへフォールバック。")
+    if not ok:
+        # フォールバック：期間・チェックをUI操作し、ダウンロードボタンを押す。
+        _sipos_set_datetime(page, "開始日", start_v)
+        _sipos_set_datetime(page, "終了日", end_v)
+        if not _sipos_check_option(page, "購買情報明細"):
+            _sipos_check_option(page, "購入情報明細")
+        if debug:
+            dump_controls(page, f"{label}_sipos_download_modal")
+        clicked = False
+        for sel in (".modal.show button:has-text('ダウンロード')",
+                    ".modal.in button:has-text('ダウンロード')",
+                    ".modal.show .btn-primary"):
+            try:
+                loc = page.locator(sel).first
+                if loc.count() and loc.is_visible():
+                    loc.click(timeout=5_000); clicked = True; break
+            except Exception:
+                continue
+        if not clicked:
+            _confirm_download_modal(page)
 
     deadline = time.time() + 120
     while not downloads and time.time() < deadline:
