@@ -386,6 +386,20 @@ def run_sipos_backfill(sb: Supabase, start: str, end: str,
             except Exception as e:
                 print(f"  【{label}】{ym}: ❌ 取得/保存に失敗（スキップ）: "
                       f"{type(e).__name__}: {e}")
+
+    # 旧「取引照会」から取得した行を全期間から掃除する（ユーザー要望）。
+    #   取引照会は明細が無く line_category='（明細なし）' で入っている。購買情報明細
+    #   （新・正）は実カテゴリ名が入るので、pos=SIPOS かつ （明細なし） が旧取引照会の
+    #   目印になる（digitelの明細なしは pos_name が別なので巻き込まない）。
+    try:
+        for pn in sorted({c.get("pos_name") or "SIPOS" for c in conns} | {"SIPOS"}):
+            sb.delete("sales", {
+                "pos_name": f"eq.{pn}",
+                "line_category": 'in.("（明細なし）","明細なし")'})
+        print("  🧹 旧・取引照会データ（明細なし）を削除しました。")
+    except Exception as e:
+        print(f"  ⚠️ 旧・取引照会データの削除に失敗: {type(e).__name__}: {e}")
+
     print(f"  ✅ SIPOS backfill 完了（合計 追加 {total_ins}行）")
 
 
