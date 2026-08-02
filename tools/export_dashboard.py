@@ -224,9 +224,11 @@ def build_data(sb: Supabase) -> dict:
 
     daily_rows = [
         {"d": d, "s": sid,
-         # 税込/税抜売上からレジ袋・クーポンぶんを差し引く（マイナスにはしない）
-         "in": round(max(v["in"] - v["bag_in"], 0)),
-         "ex": round(max(v["ex"] - v["bag_ex"], 0)),
+         # 税込/税抜売上は「伝票合計そのまま」＝POSの純売上（レジ袋・小物・クーポン後の
+         # 実売上を含む）。ロイヤリティ計算に使うため、POSの純売上と1円まで一致させる。
+         # （レジ袋・クーポンの内訳は下の bag/coup で別途参照できる）
+         "in": round(v["in"]),
+         "ex": round(v["ex"]),
          "tx": v["tx"], "it": round(v["it"]),
          "v": v["v"],
          "bag": round(v["reji_in"]), "bagq": round(v["bag_q"]),
@@ -247,6 +249,62 @@ def build_data(sb: Supabase) -> dict:
         {"d": d, "s": sid, "c": c, "p": p, "a": round(v["a"]), "q": round(v["q"])}
         for (d, sid, c, p), v in sorted(catprice.items())
     ]
+
+    # --- 診断: 店舗×月の税込売上(純売上) サマリー（ロイヤリティ照合用） ---
+    #   POSの純売上と1円まで一致すべき。直近4か月ぶんを stdout に出す。
+    try:
+        msum: dict[tuple, float] = {}
+        for r in daily_rows:
+            k = (r["s"], r["d"][:7])
+            msum[k] = msum.get(k, 0.0) + r["in"]
+        months = sorted({m for (_, m) in msum})[-4:]
+        if months:
+            print("\n=== 店舗別 税込売上(純売上) 直近{}か月（ロイヤリティ照合用）===".format(len(months)))
+            print("  店舗 | " + " | ".join(months))
+            for s in stores:
+                sid = s["id"]
+                vals = [msum.get((sid, m), 0.0) for m in months]
+                if any(v for v in vals):
+                    nm = name_by_id.get(sid, str(sid))
+                    print("  " + nm + " | " + " | ".join("{:,}".format(int(round(v))) for v in vals))
+    except Exception as _e:
+        print("  （売上サマリーの出力に失敗: {}）".format(_e))
+
+    # --- 診断2: SIPOS系店舗の「店舗×月×pos_name」内訳（二重計上チェック＆照合用） ---
+    #   ねらい：同じ店・同じ月に pos=SIPOS と pos=Si が両方あると二重計上になる。
+    #   作り直し後は各(店,月)が1つのposだけになり、純売上が売上報告書に一致するはず。
+    try:
+        POS_KEEP = {"SIPOS", "Si"}
+        agg: dict[tuple, dict] = {}      # (sid, ym, pos) -> {in, tx}
+        seen_tx = set()
+        for r in sales:
+            pn = r.get("pos_name") or ""
+            if pn not in POS_KEEP:
+                continue
+            ym = str(r["business_date"])[:7]
+            key = (r["store_id"], ym, pn)
+            a = agg.setdefault(key, {"in": 0.0, "tx": set()})
+            txk = (r["store_id"], pn, r["tx_id"])
+            if txk not in seen_tx:
+                seen_tx.add(txk)
+                a["in"] += _num(r["sales_in_tax"])
+                a["tx"].add(r["tx_id"])
+        # 店舗×月ごとに、存在するposを並べる（複数なら⚠️二重計上の疑い）。
+        by_sm: dict[tuple, list] = {}
+        for (sid, ym, pn), a in agg.items():
+            by_sm.setdefault((sid, ym), []).append((pn, a))
+        recent = sorted({ym for (_, ym) in by_sm})[-4:]
+        print("\n=== 診断: SIPOS系 店舗×月×pos 内訳（直近{}か月・照合用）===".format(len(recent)))
+        for (sid, ym) in sorted(by_sm, key=lambda k: (name_by_id.get(k[0], ""), k[1])):
+            if ym not in recent:
+                continue
+            parts = by_sm[(sid, ym)]
+            warn = " ⚠️二重計上の疑い(pos複数)" if len(parts) > 1 else ""
+            detail = " / ".join("pos={} 純売上{:,}/伝票{}件".format(
+                pn, int(round(a["in"])), len(a["tx"])) for pn, a in sorted(parts))
+            print("  {} {} : {}{}".format(name_by_id.get(sid, sid), ym, detail, warn))
+    except Exception as _e:
+        print("  （SIPOS内訳の出力に失敗: {}）".format(_e))
 
     return {
         "generated_at": datetime.now(JST).isoformat(timespec="seconds"),

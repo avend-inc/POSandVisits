@@ -8,7 +8,7 @@
 #    slug: 調べる店舗スラッグ（既定 notime_masakicho＝伊予松前）
 #    account: notime（既定）／ selfurugi
 # ============================================================
-name: デジテール売上CSVの調査
+name: 調査プローブ（デジテール／スマレジ）
 
 on:
   workflow_dispatch:
@@ -23,6 +23,12 @@ on:
         default: "notime"
         type: choice
         options: [notime, selfurugi]
+      mode:
+        description: "detail=デジテール明細DL / summary=デジテール合計 / smaregi=スマレジ調査"
+        required: false
+        default: "detail"
+        type: choice
+        options: [detail, summary, smaregi]
 
 concurrency:
   group: notime-daily-etl
@@ -38,6 +44,8 @@ jobs:
       DIGITAIL_PW: ${{ secrets.DIGITAIL_PW }}
       DIGITAIL_SF_ID: ${{ secrets.DIGITAIL_SF_ID }}
       DIGITAIL_SF_PW: ${{ secrets.DIGITAIL_SF_PW }}
+      SMAREGI_ID: ${{ secrets.SMAREGI_ID }}
+      SMAREGI_PW: ${{ secrets.SMAREGI_PW }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -53,7 +61,13 @@ jobs:
         run: |
           ARGS="--slug ${{ inputs.slug }}"
           if [ "${{ inputs.account }}" = "selfurugi" ]; then ARGS="$ARGS --sf"; fi
-          python -m tools.digitel_sales_probe $ARGS
+          if [ "${{ inputs.mode }}" = "smaregi" ]; then
+            python -m tools.smaregi_probe
+          elif [ "${{ inputs.mode }}" = "summary" ]; then
+            python -m tools.digitel_sales_probe $ARGS
+          else
+            python -m tools.digitel_detail_probe $ARGS
+          fi
       - name: 調査用ファイルを保存
         if: always()
         uses: actions/upload-artifact@v4

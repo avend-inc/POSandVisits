@@ -29,9 +29,13 @@ on:
         type: choice
         options: [ezregi, cashier, airregi]
       pos_name:
-        description: "pos_name（sales.pos_name に入る識別名）"
+        description: "pos_name（sales.pos_name に入る識別名。Airレジは AirREGI）"
         required: false
         default: "Si"
+      store:
+        description: "紐づけ先の店舗名（Airレジ等の単一店CSV用。例: 下北沢）。ezregi/cashierは空でOK"
+        required: false
+        default: ""
       ownership:
         description: "取り込んだ店舗の区分を一括設定"
         required: false
@@ -76,6 +80,7 @@ jobs:
       - name: 取り込み実行
         run: |
           ARGS="--bucket '${{ inputs.bucket }}' --path '${{ inputs.path }}' --adapter '${{ inputs.adapter }}' --pos-name '${{ inputs.pos_name }}'"
+          if [ -n "${{ inputs.store }}" ]; then ARGS="$ARGS --store '${{ inputs.store }}'"; fi
           if [ -n "${{ inputs.ownership }}" ]; then ARGS="$ARGS --ownership '${{ inputs.ownership }}'"; fi
           if [ "${{ inputs.export }}" = "true" ]; then ARGS="$ARGS --export"; fi
           echo "python -m tools.import_pos_csv $ARGS"

@@ -18,8 +18,10 @@
 """
 from __future__ import annotations
 
+import io
 import re
 import time
+import zipfile
 
 from .browser import browser_page, dump_page
 from .settings import (
@@ -140,6 +142,55 @@ def fetch_sales_csv(context, slug: str, start: str, end: str) -> str:
     return text
 
 
+def fetch_sales_detail(context, slug: str, start: str, end: str) -> dict[str, str]:
+    """
+    デジテールの“売上明細（商品別）”を取る。会計データ→売上データダウンロードの
+    実体エンドポイントを直接叩く（ZIPが返る）。
+
+      GET /{slug}/accounting/download/file?from=..&to=..&includeSales=1
+          &includeSalesDetails=1  （他フラグは0）
+
+    ZIP内:
+      sales_*.csv         … 取引単位（id,type,balance,tax_*,discount,createdOn,paymentType…）
+      sales_details_*.csv … 商品明細（transactionId,name,price,taxRate,taxInclusionType,
+                             quantity,createdOn,discount,genre,subgenre…）
+
+    戻り値: {"sales": <取引CSV文字列>, "details": <明細CSV文字列>}
+      （どちらか無ければそのキーは空文字）
+    """
+    url = f"{DIGITEL_BASE_URL}/{slug}/accounting/download/file"
+    resp = context.request.get(
+        url,
+        params={
+            "from": start, "to": end,
+            "includeSales": "1", "includeSalesDetails": "1",
+            "includeAggregated": "0", "includeByGenre": "0",
+            "includeDailyPriceList": "0", "includeDailySingleItemsPriceList": "0",
+        },
+        timeout=90_000,
+    )
+    if not resp.ok:
+        raise EtlError(f"売上明細ZIPの取得に失敗しました（HTTP {resp.status}） URL: {url}")
+
+    body = resp.body()
+    if body[:2] != b"PK":
+        raise EtlError(
+            "ZIPではないものが返ってきました（ログイン切れ／仕様変更の可能性）。\n"
+            f"  先頭: {body[:80]!r}"
+        )
+
+    out = {"sales": "", "details": ""}
+    with zipfile.ZipFile(io.BytesIO(body)) as zf:
+        for name in zf.namelist():
+            base = name.rsplit("/", 1)[-1]
+            text = zf.read(name).decode("utf-8-sig", errors="replace")
+            if base.startswith("sales_details"):
+                out["details"] = text
+            elif base.startswith("sales_"):
+                out["sales"] = text
+    return out
+
+
 def fetch(slugs: dict[str, str], start: str, end: str,
           headless: bool = True) -> dict[str, str]:
     """
@@ -222,11 +273,18 @@ def fetch_all(start: str, end: str, headless: bool = True,
                         csv = fetch_store_csv(context, slug, start, end)
                         info = {"slug": slug, "csv": csv}
                         if slug in sales_slugs:
+                            # 商品明細（カテゴリ・数量つき）を優先で取る。取れないときだけ
+                            # 従来の日次合計サマリーにフォールバックする。
                             try:
-                                info["sales_csv"] = fetch_sales_csv(context, slug, start, end)
-                                print(f"  【{store_name}】売上CSVも取得OK（{slug}）")
+                                info["sales_detail"] = fetch_sales_detail(context, slug, start, end)
+                                print(f"  【{store_name}】売上明細（商品別）も取得OK（{slug}）")
                             except Exception as e:
-                                print(f"  【{store_name}】売上CSV ❌ {e}")
+                                print(f"  【{store_name}】売上明細 ❌ {e}（サマリーで代替します）")
+                                try:
+                                    info["sales_csv"] = fetch_sales_csv(context, slug, start, end)
+                                    print(f"  【{store_name}】売上CSV(合計)も取得OK（{slug}）")
+                                except Exception as e2:
+                                    print(f"  【{store_name}】売上CSV ❌ {e2}")
                         results[store_name] = info
                         print(f"  【{store_name}】CSV取得OK（{slug}）")
                     except Exception as e:

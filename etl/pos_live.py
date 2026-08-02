@@ -47,13 +47,32 @@ def _read_si_table(text: str) -> pd.DataFrame:
 
 def _to_common(csv_text: str, pos_type: str, pos_name: str) -> pd.DataFrame:
     if pos_type == "ezregi":
-        # SIPOSは2形式ある：取引照会CSV（取引日付/合計金額…＝1取引1行）と、
-        # 【Si】DB明細CSV（店舗コード/商品分類名…）。見出しで判定して振り分ける。
+        # SIPOSの正は「売上報告書→購買情報明細（purchaseDetailsList）」＝Si明細と同形式
+        # （店舗コード/商品分類名/税込売価…）。カテゴリ別も出せ、売上・客数・点数が
+        # 売上報告書に一致する。旧「取引照会CSV（取引日付…1取引1行・明細なし）」は
+        # 保険として見出しで判定して振り分ける（通常は明細側を通る）。
         head = (csv_text or "")[:2000]
         if "取引日付" in head and ("合計金額" in head or "レシートNo" in head and "合計点数" in head):
             df = pd.read_csv(io.StringIO(csv_text), dtype=str)
             return adapters.adapt_ezregi_tran(df, pos_name)
-        return adapters.adapt_ezregi(_read_si_table(csv_text), pos_name)
+        # 購買情報明細（Si明細形式）。店名は生の店舗名ベース（ブランド名を残す）で
+        # そろえる＝手動インポート(import_pos_csv)と完全に同じにして store_id を一致させる。
+        from . import si_clean
+        df_in = _read_si_table(csv_text)
+        df_in = si_clean.normalize_si_datetime(df_in)
+        common = adapters.adapt_ezregi(df_in, pos_name)
+        # adapt_ezregi と同じ規則（fillna('')後に店舗名が空でない行）で残した行から店名を
+        # 作り、位置対応で割り当てる（reindexのラベルずれによるNaN混入・誤店舗割当を防ぐ）。
+        kept = df_in[df_in["店舗名"].fillna("").astype(str).str.strip() != ""]
+        names = si_clean.si_store_names(kept["店舗名"]).astype(str)
+        if len(names) == len(common):
+            common["store"] = names.to_numpy()
+        else:
+            common["store"] = si_clean.si_store_names(df_in["店舗名"]).reindex(common.index)
+        common = common[common["store"].notna()].copy()
+        common["store"] = common["store"].astype(str)
+        common = common[~common["store"].isin(["", "nan", "None"])].copy()
+        return common
     if pos_type == "airregi":
         df = pd.read_csv(io.StringIO(csv_text), dtype=str)
         return adapters.adapt_airregi(df, pos_name, pos_name)
@@ -177,16 +196,16 @@ def run_live_pos(sb, business_date: str, run_id: str,
             #  ・store_id 無し（1アカウントで複数店＝Si等）→ 店舗名で振り分け。
             #    その際は歴史データと同じ命名（ブランド名を残し、改名だけ最新へ）にそろえる。
             csv_stores = [s for s in common["store"].astype(str).str.strip().unique() if s]
-            if c.get("store_id"):
+            # SIPOS(ezregi)の購買情報明細は必ず「全店ぶん」が入るため、接続に store_id が
+            # 設定されていても“CSVの店舗名で振り分ける”（接続=1店に固定すると、テナント全店の
+            # 売上が1店に丸ごと入る誤りになる）。それ以外(store_id固定運用のPOS)は従来どおり。
+            if c.get("store_id") and c["pos_type"] != "ezregi":
                 if len(csv_stores) > 1:
                     print(f"  ⚠️ {label}: 1アカウントに複数店舗（{', '.join(csv_stores[:10])}）。"
                           "今は接続の店舗にまとめて記録します（正しく分けるには接続のstore_idを空にしてください）。")
                 fixed = int(c["store_id"])
                 store_id_of = lambda name, _sid=fixed: _sid       # 接続=1店に固定
             else:
-                if c["pos_type"] == "ezregi":
-                    from .si_clean import si_store_names
-                    common["store"] = si_store_names(common["store"])
                 store_id_of = lambda name: sb.get_or_create_store(name, cache)  # CSV店舗名で振り分け
 
             payload = rows_mod.cashier_rows(common, store_id_of)

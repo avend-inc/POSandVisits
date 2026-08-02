@@ -5,6 +5,24 @@
 
 ---
 
+## 🔄 会社アカウントへ移設（2026-07-31）
+- リポジトリを個人(`shonakano-jpg/POSandVisits`)から会社Org **`avend-inc/POSandVisits`** へ移設。
+  Public・Pages有効・`gh-pages`から配信。公開URLは **`https://avend-inc.github.io/POSandVisits/`**。
+- **稼働確認済み**: 日次ETL(`daily-etl.yml`)は会社側でスケジュール実行・手動実行とも成功。
+  Secrets(6つ＋任意のSF/ANON)は会社リポジトリに登録済みで動作している。
+  Pagesデプロイ(`pages-build-deployment`)も `gh-pages` から成功。
+- **データ元はGitHubに依存しない**: ダッシュボードはSupabase(`rwfcsanmqvkxiuwdeddv`)の
+  `dashboard/config.json` を読む作り。アカウント移設で表示は影響を受けない。
+
+## ⏳ 未実行（Shoさんのユーザー作業）— デジテール売上取り込み（2026-07-31）
+- 最新コミットで「POSが無くデジテールにしか売上が無い店（伊予松前）」の売上取り込みを実装。
+  **`sql/016_digitel_sales.sql` をSupabase SQL Editorで1回実行が必要**（`stores.digitel_sales`列を
+  追加し伊予松前だけtrueにする）。実行するまで取り込みは起きない（コードは列が無くても落ちない）。
+- 実行後、日次ETLか backfill(`only=digitel`)を1回回せば伊予松前の売上が `sales` に入る
+  （pos_name='DIGITEL'、日次合計を取引数ぶんに展開）。→ 取引数・客単価・購入率が出る。
+
+---
+
 ## ✅ 売上ダッシュボード（2026-07-26）
 - `web/dashboard.html`（依存なしの自作SVG）＋ `tools/export_dashboard.py`（集計＋配信）。
 - 指標: 税込/税抜売上・来店客数・購入率・客単価・平均購入数・平均商品単価・取引数・
@@ -40,7 +58,10 @@
   新バケットでも同じ＝CDNではなくSupabaseの配信仕様）。→ HTMLの配信は諦めた。
 - 代わりに **GitHub Pages** で配信。`gh-pages` ブランチの `index.html` をGitHubが直接配信。
   - リポジトリを Public 化し、Settings→Pages→Deploy from a branch→`gh-pages`/`(root)` で有効化。
-  - 公開URL: `https://shonakano-jpg.github.io/POSandVisits/`（noindex入り）
+  - 公開URL: `https://avend-inc.github.io/POSandVisits/`（noindex入り）
+    ※ 2026-07-31 に個人アカウント(shonakano-jpg)から会社Org(avend-inc)へ移設。
+      リポジトリはPublic・Pages有効・`gh-pages`から配信、で会社側でも稼働確認済み。
+      旧URL `https://shonakano-jpg.github.io/POSandVisits/` は使わない。
   - `index.html` は `web/dashboard.html` を元に生成（PUBLIC_DATA_URL=Supabaseの data.json）。
   - **data.json は Supabase の `dashboard` バケット**（毎日のETLが更新）を fetch で読む。
     JSONは fetch().json() で読むので Content-Type は問題にならない（CORSはSupabaseが許可）。

@@ -130,50 +130,58 @@ AIRREGI_CATEGORY_MAP = {
 
 
 def adapt_airregi(df: pd.DataFrame, pos_name: str, store: str) -> pd.DataFrame:
-    """Airレジ 会計明細CSV → 共通スキーマ。読み込みは encoding='cp932'。"""
+    """Airレジ「ジャーナル履歴(CSV)」→ 共通スキーマ。読み込みは encoding='cp932'。
+
+    【実CSVで確定した仕様 2026-08】取引履歴→ダウンロード→ジャーナル履歴(CSV)。
+      ・1明細1行。取引Noで伝票がまとまる（ヘッダ列は全行に入っている＝繰り返し）。
+      ・列: 取引No / 取引日 / 取引時間 / 来店日 / 来店時間 / 店舗名 / 取引種別 /
+            商品名 / 商品単価 / 商品数 / 商品合計金額 / 個別割引・割増合計金額 /
+            小計数 / 小計 / 外税額 / 合計 / 内消費税 …
+      ・「小計」= 伝票の税抜合計 / 「合計」= 税込（どちらも明細行に繰り返し）。
+      ・NOTIMEは古着のため商品名がカテゴリ相当（Tシャツ/キャップ/ディズニー等）。
+        → line_category に商品名を使う（既知名は AIRREGI_CATEGORY_MAP で正規化）。
+      ・カテゴリー名・人数の列は無い（この書式には含まれない）。
+    """
     df = df.copy()
+    df.columns = [str(c).strip() for c in df.columns]
 
-    # ⚠️【重要】複数商品の取引では、2行目以降のヘッダ列が空欄になる形式。
-    #   取引Noは全行に入っているので、それでグループ化して前方補完する。
-    #   これをやらないと明細の37%が日付なしで捨てられる（実データで確認済み）。
-    HEADER_COLS = ["会計日", "会計時間", "来店日", "来店時間",
-                   "合計", "小計", "内消費税", "商品点数", "人数"]
-    for c in HEADER_COLS:
-        if c in df.columns:
-            df[c] = df[c].replace("", pd.NA)
-            df[c] = df.groupby("取引No")[c].ffill()
+    # 「会計」以外（返品・取消・入出金など）は売上から除外する。
+    if "取引種別" in df.columns:
+        df = df[df["取引種別"].astype(str).str.strip() == "会計"]
     df = df.fillna("")
+    if len(df) == 0:
+        return pd.DataFrame(columns=COMMON_COLUMNS)
 
-    out = pd.DataFrame()
+    out = pd.DataFrame(index=df.index)
 
-    out["date"] = pd.to_datetime(df["会計日"]).dt.strftime("%Y-%m-%d")
+    out["date"] = pd.to_datetime(df["取引日"], errors="coerce").dt.strftime("%Y-%m-%d")
     out["ts"] = pd.to_datetime(
-        df["会計日"].astype(str) + " " + df["会計時間"].astype(str), errors="coerce"
+        df["取引日"].astype(str) + " " + df["取引時間"].astype(str), errors="coerce"
     ).dt.strftime("%Y-%m-%d %H:%M:%S")
     out["ts"] = out["ts"].fillna(out["date"] + " 00:00:00")
     out["tx_id"] = pos_name + ":" + df["取引No"].astype(str)
     out["pos_name"] = pos_name
     out["store"] = store
 
-    # 伝票ヘッダ（明細行に繰り返される）
-    # 小計=税抜 / 合計=税込。丸め差があるので、税抜は小計をそのまま信頼する。
+    # 伝票ヘッダ（明細行に繰り返される）。小計=税抜 / 合計=税込。
     out["sales_ex_tax"] = _num(df["小計"])
     out["sales_in_tax"] = _num(df["合計"])
-    out["tx_qty"] = _num(df["商品点数"])
+    out["tx_qty"] = _num(df["小計数"])   # 伝票の購入点数
 
-    # 明細
-    raw_cat = df["カテゴリー名"].astype(str).str.strip('"')
-    out["line_category"] = raw_cat.map(lambda c: AIRREGI_CATEGORY_MAP.get(c, "小物"))
-    out["line_price"] = _num(df["価格"])          # 税抜単価
-    out["line_qty"] = _num(df["注文数量"])
-    # 明細金額 = 価格×数量 + 個別割引（割引はマイナス値で入る）
-    out["line_amount"] = _num(df["価格"]) * _num(df["注文数量"]) + _num(df["個別割引/割増合計額"])
+    # 明細（NOTIMEは商品名＝カテゴリ相当）
+    raw_cat = df["商品名"].astype(str).str.strip().str.strip('"')
+    out["line_category"] = raw_cat.map(
+        lambda c: AIRREGI_CATEGORY_MAP.get(c, c if c else "その他"))
+    out["line_price"] = _num(df["商品単価"])          # 税抜単価
+    out["line_qty"] = _num(df["商品数"])
+    out["line_amount"] = _num(df["商品合計金額"])
 
-    # まとめ買い割引(バンドル)は未使用 → 全て通常明細
+    # まとめ買い割引(バンドル)は使わない → 全て通常明細
     out["bundle_code"] = ""
     out["is_parent"] = False
     out["is_child"] = False
     out["is_normal"] = True
+    out = out[out["date"].notna()]
     return out[COMMON_COLUMNS]
 
 

@@ -83,6 +83,9 @@ def main() -> int:
     ap.add_argument("--path", required=True)
     ap.add_argument("--adapter", default="ezregi", choices=["ezregi", "cashier", "airregi"])
     ap.add_argument("--pos-name", default="Si")
+    ap.add_argument("--store", default="",
+                    help="単一店POS(airregi等)を紐づける店舗名（例: 下北沢）。"
+                         "省略時は pos-name を店名に使う。cashier/ezregi はCSVの店舗名を使うため無視。")
     ap.add_argument("--ownership", default="", choices=["", "直営", "FC"])
     ap.add_argument("--export", action="store_true")
     args = ap.parse_args()
@@ -106,7 +109,10 @@ def main() -> int:
         common = adapters.adapt_cashier(df_in, args.pos_name)
     else:  # airregi
         df_in = pd.read_csv(StringIO(text), dtype=str)
-        common = adapters.adapt_airregi(df_in, args.pos_name, args.pos_name)
+        # Airレジは1アカウント=1店（下北沢）なのでCSVに店舗名列が無い。
+        # --store で紐づけ先の店名を指定する（例: 下北沢 → 別名で NOTIME下北沢店 に寄る）。
+        store_name = args.store.strip() or args.pos_name
+        common = adapters.adapt_airregi(df_in, args.pos_name, store_name)
 
     common = common[common["date"].notna()].copy()
     if len(common) == 0:

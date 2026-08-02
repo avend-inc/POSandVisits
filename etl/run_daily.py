@@ -262,11 +262,20 @@ def run_digitel(sb: Supabase, business_date: str, run_id: str,
                                           f"来店 {visitors}人",
                                           len(payload), affected, 0))
 
-                # 売上もデジテールから取る店（伊予松前など）は、売上もsalesへ入れる
+                # 売上もデジテールから取る店（伊予松前など）は、売上もsalesへ入れる。
+                # 商品明細(sales_detail)があればカテゴリ付きで、無ければ日次合計で。
+                detail = info.get("sales_detail")
                 scsv = info.get("sales_csv")
-                if scsv:
+                if (detail and detail.get("details")) or scsv:
                     try:
-                        spay = rows_mod.digitel_sales_rows(scsv, store_id, business_date)
+                        if detail and detail.get("details"):
+                            spay = rows_mod.digitel_detail_rows(
+                                detail.get("sales", ""), detail["details"],
+                                store_id, business_date)
+                            kind = "明細"
+                        else:
+                            spay = rows_mod.digitel_sales_rows(scsv, store_id, business_date)
+                            kind = "合計"
                         # 同じ日のDIGITEL売上を消してから入れ直す（回数が変わっても整合）
                         sb.delete("sales", {
                             "store_id": f"eq.{store_id}",
@@ -276,8 +285,10 @@ def run_digitel(sb: Supabase, business_date: str, run_id: str,
                             ins, _ = sb.insert_ignore_duplicates(
                                 "sales", spay,
                                 on_conflict="store_id,pos_name,tx_id,line_no")
-                            sales_sum = sum(r["sales_in_tax"] for r in spay)
-                            print(f"  【{name}】デジテール売上 {len(spay)}取引 / "
+                            txn = len({r["tx_id"] for r in spay})
+                            sales_sum = sum(
+                                r["sales_in_tax"] for r in spay if r["line_no"] == 0)
+                            print(f"  【{name}】デジテール売上({kind}) {txn}取引 / "
                                   f"{int(sales_sum):,}円 → 追加 {ins}行")
                     except Exception as e:
                         print(f"  【{name}】デジテール売上 ❌ {type(e).__name__}: {e}")
@@ -356,6 +367,143 @@ def run_bundle_master(sb: Supabase, business_date: str, run_id: str,
         return StepResult("bundle_master", "failed", detail)
 
 
+# スマレジ店の表示名（SELFURUGIブランドFCとして扱う）。必要なら環境変数で上書き可。
+SMAREGI_STORE_NAME = os.environ.get("SMAREGI_STORE_NAME", "SELFURUGI隠岐店")
+
+
+def run_smaregi(sb: Supabase, business_date: str, run_id: str,
+                force: bool, headless: bool, store_cache: dict) -> list[StepResult]:
+    """スマレジ（隠岐）の売上を取り込む。SMAREGI_ID/PW が無ければ何もしない。"""
+    user = os.environ.get("SMAREGI_ID") or ""
+    pw = os.environ.get("SMAREGI_PW") or ""
+    if not user or not pw:
+        return []   # 未設定なら静かにスキップ
+
+    from . import smaregi_fetch, rows as rows_mod
+    started = datetime.now(JST).isoformat()
+    print("\n" + "=" * 60)
+    print(f"【3】スマレジ 売上  対象営業日: {business_date}")
+    print("=" * 60)
+    try:
+        store_id = sb.get_or_create_store(SMAREGI_STORE_NAME, store_cache)
+        try:
+            sb.update_store(store_id, {"ownership": "FC"})
+        except Exception:
+            pass
+        if not force and sb.already_succeeded("smaregi", business_date, store_id):
+            print("  すでに取り込み済みのためスキップ（--force で解除）。")
+            return [StepResult("smaregi", "rejected_duplicate", "取り込み済み")]
+
+        got = smaregi_fetch.fetch_range(business_date, business_date, user, pw,
+                                        headless=headless)
+        day = got.get(business_date) or {}
+        payload = rows_mod.smaregi_rows(day.get("info") or {},
+                                        day.get("categories") or [],
+                                        store_id, business_date)
+        # 同じ日のSMAREGI売上を消してから入れ直す
+        sb.delete("sales", {
+            "store_id": f"eq.{store_id}",
+            "pos_name": f"eq.{rows_mod.SMAREGI_POS}",
+            "business_date": f"eq.{business_date}"})
+        if not payload:
+            sb.log(run_id=run_id, source="smaregi", business_date=business_date,
+                   store_id=store_id, status="no_data", message="売上0",
+                   started_at=started)
+            print("  売上0（取り込むものなし）。")
+            return [StepResult("smaregi", "no_data", "売上0")]
+        ins, _ = sb.insert_ignore_duplicates(
+            "sales", payload, on_conflict="store_id,pos_name,tx_id,line_no")
+        txn = len({r["tx_id"] for r in payload})
+        ssum = sum(r["sales_in_tax"] for r in payload if r["line_no"] == 0)
+        print(f"  【{SMAREGI_STORE_NAME}】スマレジ売上 {txn}取引 / {int(ssum):,}円 → 追加 {ins}行")
+        sb.log(run_id=run_id, source="smaregi", business_date=business_date,
+               store_id=store_id, status="success", rows_fetched=len(payload),
+               rows_inserted=ins, message=f"{txn}取引 {int(ssum)}円", started_at=started)
+        return [StepResult("smaregi", "success", f"{txn}取引 {int(ssum):,}円", len(payload), ins)]
+    except Exception as e:
+        detail = f"{type(e).__name__}: {e}"
+        print(f"  ❌ スマレジ取り込み失敗: {detail}")
+        if not isinstance(e, EtlError):
+            traceback.print_exc()
+        sb.log(run_id=run_id, source="smaregi", business_date=business_date,
+               store_id=None, status="failed", message=detail[:2000], started_at=started)
+        return [StepResult("smaregi", "failed", detail)]
+
+
+# Airレジ店（下北沢の2つ目のレジ）。表示名は下北沢に寄せる（別名で NOTIME下北沢店）。
+AIRREGI_STORE_NAME = os.environ.get("AIRREGI_STORE_NAME", "下北沢")
+# sales.pos_name。SIPOS分と混ざらないよう別名（config.py の name="AirREGI" と一致）。
+AIRREGI_POS = os.environ.get("AIRREGI_POS_NAME", "AirREGI")
+
+
+def run_airregi(sb: Supabase, business_date: str, run_id: str,
+                force: bool, headless: bool, store_cache: dict) -> list[StepResult]:
+    """Airレジ（下北沢）の会計明細を取り込む。AIRREGI_ID/PW が無ければ何もしない。
+
+    下北沢は「Airレジ＋SIPOS」の2レジ。Airレジ分を pos_name=AirREGI として
+    同じ店（NOTIME下北沢店）に合算する。変換は adapters.adapt_airregi（列確定済み）。
+    """
+    airid = os.environ.get("AIRREGI_ID") or ""
+    pw = os.environ.get("AIRREGI_PW") or ""
+    if not airid or not pw:
+        return []   # 未設定なら静かにスキップ
+
+    from io import StringIO
+    import pandas as pd
+    import adapters
+    from . import airregi_fetch, rows as rows_mod
+    started = datetime.now(JST).isoformat()
+    print("\n" + "=" * 60)
+    print(f"【4】Airレジ 会計明細（下北沢）  対象営業日: {business_date}")
+    print("=" * 60)
+    try:
+        # 「下北沢」→ STORE_NAME_ALIAS で NOTIME下北沢店 に寄る（SIPOSと同じ店ID）。
+        store_id = sb.get_or_create_store(AIRREGI_STORE_NAME, store_cache)
+        if not force and sb.already_succeeded("airregi", business_date, store_id):
+            print("  すでに取り込み済みのためスキップ（--force で解除）。")
+            return [StepResult("airregi", "rejected_duplicate", "取り込み済み")]
+
+        csv_text = airregi_fetch.fetch(business_date, headless=headless)
+        save_raw(csv_text, "airregi", "下北沢", business_date)
+        df_in = pd.read_csv(StringIO(csv_text), dtype=str)
+        common = adapters.adapt_airregi(df_in, AIRREGI_POS, AIRREGI_STORE_NAME)
+        # 念のため対象営業日だけに絞る（取得CSVに前後日が混ざっても安全に）。
+        common = common[common["date"] == business_date].copy()
+        common = common[common["date"].notna()]
+        common["line_no"] = common.groupby("tx_id").cumcount()
+
+        # 同じ日の AirREGI 売上を消してから入れ直す（再実行に強く）。
+        sb.delete("sales", {
+            "store_id": f"eq.{store_id}",
+            "pos_name": f"eq.{AIRREGI_POS}",
+            "business_date": f"eq.{business_date}"})
+        if len(common) == 0:
+            sb.log(run_id=run_id, source="airregi", business_date=business_date,
+                   store_id=store_id, status="no_data", message="売上0",
+                   started_at=started)
+            print("  売上0（取り込むものなし）。")
+            return [StepResult("airregi", "no_data", "売上0")]
+
+        payload = rows_mod.cashier_rows(common, lambda name: store_id)
+        ins, _ = sb.insert_ignore_duplicates(
+            "sales", payload, on_conflict="store_id,pos_name,tx_id,line_no")
+        txn = len({r["tx_id"] for r in payload})
+        ssum = sum(r["sales_in_tax"] for r in payload if r["line_no"] == 0)
+        print(f"  【下北沢/Airレジ】{txn}取引 / {int(ssum):,}円 → 追加 {ins}行")
+        sb.log(run_id=run_id, source="airregi", business_date=business_date,
+               store_id=store_id, status="success", rows_fetched=len(payload),
+               rows_inserted=ins, message=f"{txn}取引 {int(ssum)}円", started_at=started)
+        return [StepResult("airregi", "success", f"{txn}取引 {int(ssum):,}円", len(payload), ins)]
+    except Exception as e:
+        detail = f"{type(e).__name__}: {e}"
+        print(f"  ❌ Airレジ取り込み失敗: {detail}")
+        if not isinstance(e, EtlError):
+            traceback.print_exc()
+        sb.log(run_id=run_id, source="airregi", business_date=business_date,
+               store_id=None, status="failed", message=detail[:2000], started_at=started)
+        return [StepResult("airregi", "failed", detail)]
+
+
 # ============================================================
 # メイン
 # ============================================================
@@ -364,8 +512,10 @@ def main() -> int:
         description="NOTIME 日次ETL（cashier売上 / デジテール来店数 → Supabase）"
     )
     parser.add_argument("--date", help="対象の営業日 YYYY-MM-DD（省略時は前日）")
-    parser.add_argument("--only", choices=["cashier", "digitel", "pos", "bundle"],
-                        help="1種類だけ動かす（cashier / digitel / pos=Air/EZ接続 / bundle=バンドル名）")
+    parser.add_argument("--only",
+                        choices=["cashier", "digitel", "pos", "bundle", "smaregi", "airregi"],
+                        help="1種類だけ動かす（cashier / digitel / pos=Air/EZ接続 / "
+                             "bundle=バンドル名 / smaregi=隠岐 / airregi=下北沢Airレジ）")
     parser.add_argument("--force", action="store_true",
                         help="取り込み済みの日でも、もう一度取り込む")
     parser.add_argument("--headed", action="store_true",
@@ -411,6 +561,14 @@ def main() -> int:
         # Air/EZ等の「レジ接続」（store_pos）を巡回して取り込む。未登録なら何もしない。
         from .pos_live import run_live_pos
         results.extend(run_live_pos(sb, business_date, run_id, args.force, headless))
+    if args.only in (None, "smaregi"):
+        # スマレジ店（隠岐）。SMAREGI_ID/PW が無ければ何もしない。
+        results.extend(run_smaregi(sb, business_date, run_id, args.force,
+                                   headless, store_cache))
+    if args.only in (None, "airregi"):
+        # Airレジ店（下北沢の2つ目のレジ）。AIRREGI_ID/PW が無ければ何もしない。
+        results.extend(run_airregi(sb, business_date, run_id, args.force,
+                                   headless, store_cache))
 
     # ---- まとめ ----
     icons = {"success": "✅", "no_data": "ℹ️",
@@ -430,7 +588,7 @@ def main() -> int:
     #  ・bundle_master（SALEの名称マスタ）
     #  ・レジ接続の各店（ezregi#N / airregi#N）… 1店のログイン不調で全店の
     #    ダッシュボード更新まで止めない。失敗は ingest_log と下の一覧に残る。
-    BEST_EFFORT = {"bundle_master"}
+    BEST_EFFORT = {"bundle_master", "airregi"}
 
     def _is_best_effort(r) -> bool:
         return r.name in BEST_EFFORT or "#" in r.name

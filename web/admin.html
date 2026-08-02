@@ -47,6 +47,12 @@
   .addrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px;padding-top:10px;border-top:1px dashed var(--border);}
   .msg{font-size:12.5px;font-weight:600;margin:8px 0 0;}
   .msg.ok{color:var(--good);} .msg.err{color:var(--bad);}
+  .secbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:12px;}
+  .secbar .btn{padding:9px 18px;}
+  .pill{font-size:12px;font-weight:700;color:var(--muted);}
+  .pill.on{color:var(--accent);}
+  tr.dirty td{background:var(--accent-weak);}
+  tr.dirty td:first-child{box-shadow:inset 3px 0 0 var(--accent);}
   .gate{max-width:460px;margin:12vh auto;text-align:center;padding:0 22px;}
   .gate .logo{font-size:22px;font-weight:800;} .gate .t{font-size:16px;font-weight:700;margin:16px 0 6px;} .gate .m{color:var(--ink2);font-size:14px;line-height:1.8;}
   .gbtn{display:inline-flex;align-items:center;gap:10px;background:var(--surface);color:var(--ink);border:1px solid var(--border);border-radius:11px;padding:12px 20px;font-size:15px;font-weight:700;cursor:pointer;box-shadow:var(--shadow);margin-top:18px;}
@@ -69,6 +75,7 @@
   <a href="pl.html"><span class="ic">📋</span>予実</a>
   <a href="trends.html"><span class="ic">📈</span>推移</a>
   <a href="promo.html"><span class="ic">🏷️</span>販促</a>
+  <a href="stock.html"><span class="ic">📦</span>棚卸</a>
   <a href="ask.html"><span class="ic">🔍</span>分析AI</a>
   <a href="admin.html" class="on"><span class="ic">⚙️</span>管理</a>
 </div></nav>
@@ -79,6 +86,14 @@ let SB=null, ME={email:"",role:null};
 const ROLES=[["viewer","閲覧"],["editor","編集"],["admin","管理"]];
 const POS_TYPES=[["cashier","cashier(レジ)"],["airregi","Airレジ"],["ezregi","EZレジ"]];
 let STORESCACHE=[];
+// 各項目の「未保存の変更」を覚えておく（行ID＝店舗id / レジid / ユーザーのメール）。
+// 編集すると行がここに入り、項目ごとの「変更を更新」ボタンでまとめて保存する。
+const dirtyUsers=new Set(), dirtyStores=new Set(), dirtyPos=new Set();
+const SEC={
+  users :{set:dirtyUsers, tbl:"#utbl", btn:"u_update", pill:"u_dirty"},
+  stores:{set:dirtyStores,tbl:"#stbl", btn:"s_update", pill:"s_dirty"},
+  pos   :{set:dirtyPos,   tbl:"#ptbl", btn:"p_update", pill:"p_dirty"},
+};
 const roleJp=r=>({viewer:"閲覧",editor:"編集",admin:"管理"}[r]||r);
 function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));}
 function screen(h){document.getElementById("app").innerHTML=h;}
@@ -133,8 +148,10 @@ async function render(){
     <div class="panel">
       <h2>ユーザー管理</h2>
       <p class="note">ロール：<b>閲覧</b>＝見るだけ／<b>編集</b>＝＋予算・コスト等の入力／<b>管理</b>＝＋ユーザー・店舗の管理。
-        追加したメール（Googleアカウント。@avend.co.jp 以外の個人Gmail等もOK）でログインすると使えます。</p>
+        追加したメール（Googleアカウント。@avend.co.jp 以外の個人Gmail等もOK）でログインすると使えます。<br>
+        ロールを変えたら、下の「<b>変更を更新</b>」ボタンでまとめて保存します。</p>
       <div class="tblwrap"><table id="utbl"><tbody><tr><td class="sub">読み込み中…</td></tr></tbody></table></div>
+      <div class="secbar"><button class="btn" id="u_update" disabled>変更を更新</button><span class="pill" id="u_dirty">変更はありません</span></div>
       <div class="addrow">
         <input id="u_email" class="wide" type="email" placeholder="メール（Googleアカウント）">
         <input id="u_name" placeholder="名前（任意）">
@@ -148,8 +165,10 @@ async function render(){
       <p class="note">直営/FC の区分・デジテール入店slug・オープン日などを設定できます。売上取り込みは<b>CSVの店舗名で自動的に店舗を追加</b>します（新しいFC店はここに自動で現れます）。<br>
         「<b>表示</b>」＝ダッシュボード（サマリー・予実・推移・販促）に<b>出す/隠す</b>（チェックを外すと一覧・店舗選択・合計から外れます。データ取り込みは続きます）。<br>
         「入店取得」＝夜間などデジテール来店を<b>集める</b>か／「KPIに来店」＝来店数・購入率の<b>KPIに使う</b>か（例：下北沢は取得ON・KPI OFF）。<br>
-        保存後、ダッシュボードは次回の集計更新（毎日の取り込み時、または管理者の再集計）で反映されます。</p>
+        編集したら下の「<b>変更を更新</b>」ボタンを押すと、この項目の変更がまとめて保存されます（変更した行は色が付きます）。
+        更新後、ダッシュボードは次回の集計更新（毎日の取り込み時、または管理者の再集計）で反映されます。</p>
       <div class="tblwrap"><table id="stbl"><tbody><tr><td class="sub">読み込み中…</td></tr></tbody></table></div>
+      <div class="secbar"><button class="btn" id="s_update" disabled>変更を更新</button><span class="pill" id="s_dirty">変更はありません</span></div>
       <div class="addrow">
         <input id="s_name" placeholder="店舗名（例：下北沢）">
         <input id="s_code" placeholder="コード（英字・例：shimokita）">
@@ -165,8 +184,10 @@ async function render(){
       <h2>レジ接続（自動取得の設定）</h2>
       <p class="note">店舗ごとに<b>レジ種類・URL・ID・パスワード</b>を登録すると、日次の自動取得がここを読み込んでログインします（GitHubのSecret登録は不要）。
         <b>パスワードは保存後は表示されません</b>（安全のため書き込み専用）。変更するときだけ入力してください。1店舗に複数レジ（例：下北沢＝Airレジ＋EZレジ）も可。<br>
-        Si(EZレジ)のように<b>1アカウントで複数店</b>の場合は、店舗を「<b>（アカウント全体・複数店）</b>」にして登録（店舗はデータの店舗名で自動作成されます）。</p>
+        Si(EZレジ)のように<b>1アカウントで複数店</b>の場合は、店舗を「<b>（アカウント全体・複数店）</b>」にして登録（店舗はデータの店舗名で自動作成されます）。<br>
+        既存の行を編集したら、下の「<b>変更を更新</b>」ボタンでまとめて保存します（PW欄は空のままならPWは変わりません）。</p>
       <div class="tblwrap"><table id="ptbl"><tbody><tr><td class="sub">読み込み中…</td></tr></tbody></table></div>
+      <div class="secbar"><button class="btn" id="p_update" disabled>変更を更新</button><span class="pill" id="p_dirty">変更はありません</span></div>
       <div class="addrow">
         <select id="p_store"></select>
         <select id="p_type">${POS_TYPES.map(([v,t])=>`<option value="${v}">${t}</option>`).join("")}</select>
@@ -191,6 +212,9 @@ async function render(){
   document.getElementById("u_add").onclick=addUser;
   document.getElementById("s_add").onclick=addStore;
   document.getElementById("p_add").onclick=addPos;
+  document.getElementById("u_update").onclick=updateUsers;
+  document.getElementById("s_update").onclick=updateStores;
+  document.getElementById("p_update").onclick=updatePos;
   await loadUsers(); await loadStores(); await loadPos(); await loadBundles();
 }
 
@@ -212,28 +236,62 @@ async function loadBundles(){
 
 function msg(id,text,ok){const el=document.getElementById(id);if(el){el.textContent=text;el.className="msg "+(ok?"ok":"err");}}
 
+// 「変更を更新」ボタンの表示（件数・有効/無効）と未保存件数のラベルを更新する。
+function refreshDirty(section){
+  const c=SEC[section]; if(!c)return; const n=c.set.size;
+  const btn=document.getElementById(c.btn), pill=document.getElementById(c.pill);
+  if(btn){btn.disabled=n===0; btn.textContent=n>0?`変更を更新（${n}件）`:"変更を更新";}
+  if(pill){pill.textContent=n>0?`未保存の変更 ${n}件`:"変更はありません"; pill.className="pill"+(n>0?" on":"");}
+}
+// テーブル内の入力欄を監視して、編集された行を「未保存」として記録する。
+// 各行の <tr> に data-row（その行のID）が付いている前提。
+function bindDirty(section){
+  const c=SEC[section]; const tb=document.querySelector(c.tbl); if(!tb)return;
+  tb.querySelectorAll("input,select").forEach(el=>{
+    const ev=(el.type==="checkbox"||el.tagName==="SELECT")?"change":"input";
+    el.addEventListener(ev,e=>{
+      const tr=e.target.closest("tr"); if(!tr)return;
+      const id=tr.dataset.row; if(id==null||id==="")return;
+      c.set.add(id); tr.classList.add("dirty"); refreshDirty(section);
+    });
+  });
+  refreshDirty(section);
+}
+
 async function loadUsers(){
+  dirtyUsers.clear();
   const {data,error}=await SB.from("app_users").select("*").order("role").order("email");
   const tb=document.querySelector("#utbl");
   if(error){tb.innerHTML=`<tbody><tr><td class="err">読み込み失敗：${esc(error.message)}</td></tr></tbody>`;return;}
   const head=`<thead><tr><th>メール</th><th>名前</th><th>ロール</th><th></th></tr></thead>`;
-  const rows=data.map(u=>`<tr>
+  const rows=data.map(u=>`<tr data-row="${esc(u.email)}">
     <td>${esc(u.email)}${u.email===ME.email?' <span class="sub">(自分)</span>':''}</td>
     <td>${esc(u.name)}</td>
     <td><select data-email="${esc(u.email)}" class="urole">${ROLES.map(([v,t])=>`<option value="${v}" ${u.role===v?"selected":""}>${t}</option>`).join("")}</select></td>
     <td>${u.email===ME.email?'':`<button class="btn danger" data-del="${esc(u.email)}">削除</button>`}</td></tr>`).join("");
   tb.innerHTML=head+"<tbody>"+rows+"</tbody>";
-  tb.querySelectorAll(".urole").forEach(sel=>sel.onchange=async()=>{
-    const email=sel.dataset.email;
-    const {error}=await SB.from("app_users").update({role:sel.value}).eq("email",email);
-    msg("u_msg", error?("変更失敗："+error.message):`${email} を「${roleJp(sel.value)}」に変更しました`, !error);
-  });
   tb.querySelectorAll("[data-del]").forEach(b=>b.onclick=async()=>{
     const email=b.dataset.del; if(!confirm(`${email} を削除しますか？`))return;
     const {error}=await SB.from("app_users").delete().eq("email",email);
     msg("u_msg", error?("削除失敗："+error.message):`${email} を削除しました`, !error);
     if(!error)loadUsers();
   });
+  bindDirty("users");
+}
+// ロールを変えた行だけ、まとめて保存する。
+async function updateUsers(){
+  const tb=document.querySelector("#utbl"); const ids=[...dirtyUsers];
+  if(!ids.length){msg("u_msg","変更はありません",true);return;}
+  const btn=document.getElementById("u_update"); btn.disabled=true; btn.textContent="更新中…";
+  const results=await Promise.all(ids.map(async email=>{
+    const sel=tb.querySelector(`.urole[data-email="${email}"]`);
+    if(!sel)return {ok:true};
+    const {error}=await SB.from("app_users").update({role:sel.value}).eq("email",email);
+    return {ok:!error, err:error&&error.message};
+  }));
+  const fail=results.filter(r=>!r.ok), ok=results.length-fail.length;
+  msg("u_msg", fail.length?`更新：成功${ok}件・失敗${fail.length}件（${esc(fail[0].err||"")}）`:`${ok}件を更新しました`, !fail.length);
+  await loadUsers();
 }
 async function addUser(){
   const email=(document.getElementById("u_email").value||"").trim().toLowerCase();
@@ -246,40 +304,49 @@ async function addUser(){
 }
 
 async function loadStores(){
+  dirtyStores.clear();
   const {data,error}=await SB.from("stores").select("*").order("id");
   const tb=document.querySelector("#stbl");
   if(error){tb.innerHTML=`<tbody><tr><td class="err">読み込み失敗：${esc(error.message)}</td></tr></tbody>`;return;}
   STORESCACHE=data||[];
   const psel=document.getElementById("p_store");
   if(psel)psel.innerHTML='<option value="">（アカウント全体・複数店）</option>'+STORESCACHE.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join("");
-  const head=`<thead><tr><th>店舗</th><th>表示</th><th>区分</th><th>入店slug</th><th>入店取得</th><th>KPIに来店</th><th>オープン日</th><th></th></tr></thead>`;
-  const rows=data.map(s=>`<tr>
+  const head=`<thead><tr><th>店舗</th><th>表示</th><th>区分</th><th>入店slug</th><th>入店取得</th><th>KPIに来店</th><th>オープン日</th></tr></thead>`;
+  const rows=data.map(s=>`<tr data-row="${s.id}">
     <td>${esc(s.name)} <span class="sub">${esc(s.code||"")}</span></td>
     <td style="text-align:center"><input type="checkbox" data-id="${s.id}" class="svis" ${s.visible!==false?"checked":""} title="ダッシュボードに表示"></td>
     <td><select data-id="${s.id}" class="sown"><option value="直営" ${(s.ownership||"直営")==="直営"?"selected":""}>直営</option><option value="FC" ${s.ownership==="FC"?"selected":""}>FC</option></select></td>
     <td><input data-id="${s.id}" class="sslug" value="${esc(s.digitel_slug||"")}" placeholder="—" style="width:130px"></td>
     <td style="text-align:center"><input type="checkbox" data-id="${s.id}" class="sentry" ${s.has_entry_data?"checked":""}></td>
     <td style="text-align:center"><input type="checkbox" data-id="${s.id}" class="skv" ${s.kpi_visitors!==false?"checked":""}></td>
-    <td><input type="date" data-id="${s.id}" class="sopen" value="${esc(s.open_date||"")}"></td>
-    <td><button class="btn ghost" data-save="${s.id}">保存</button></td></tr>`).join("");
+    <td><input type="date" data-id="${s.id}" class="sopen" value="${esc(s.open_date||"")}"></td></tr>`).join("");
   tb.innerHTML=head+"<tbody>"+rows+"</tbody>";
-  tb.querySelectorAll("[data-save]").forEach(b=>b.onclick=async()=>{
-    const id=b.dataset.save;
-    const own=tb.querySelector(`.sown[data-id="${id}"]`).value;
-    const slug=tb.querySelector(`.sslug[data-id="${id}"]`).value.trim()||null;
-    const entry=tb.querySelector(`.sentry[data-id="${id}"]`).checked;
-    const kv=tb.querySelector(`.skv[data-id="${id}"]`).checked;
-    const vis=tb.querySelector(`.svis[data-id="${id}"]`).checked;
-    const open=tb.querySelector(`.sopen[data-id="${id}"]`).value||null;
-    const {data,error}=await SB.from("stores").update({ownership:own,digitel_slug:slug,has_entry_data:entry,kpi_visitors:kv,visible:vis,open_date:open}).eq("id",id).select();
-    if(error){ msg("s_msg","保存失敗："+error.message,false); }
-    else if(!data||!data.length){
-      // RLSで弾かれると 0件・エラー無し で返る＝「保存したつもりで戻る」の原因。
-      msg("s_msg","保存できませんでした（権限）。あなたのアカウントに更新権限が無い可能性があります。管理者に sql/012_fix_store_ownership.sql の実行を依頼してください。",false);
-    } else {
-      msg("s_msg","店舗を保存しました",true);
-    }
-  });
+  bindDirty("stores");
+}
+// 編集した店舗だけ、まとめて保存する。
+async function updateStores(){
+  const tb=document.querySelector("#stbl"); const ids=[...dirtyStores];
+  if(!ids.length){msg("s_msg","変更はありません",true);return;}
+  const btn=document.getElementById("s_update"); btn.disabled=true; btn.textContent="更新中…";
+  const results=await Promise.all(ids.map(async id=>{
+    const q=c=>tb.querySelector(`.${c}[data-id="${id}"]`);
+    const payload={ownership:q("sown").value, digitel_slug:q("sslug").value.trim()||null,
+      has_entry_data:q("sentry").checked, kpi_visitors:q("skv").checked,
+      visible:q("svis").checked, open_date:q("sopen").value||null};
+    const {data,error}=await SB.from("stores").update(payload).eq("id",id).select();
+    if(error)return {ok:false, err:error.message};
+    if(!data||!data.length)return {ok:false, perm:true};   // RLSで弾かれると 0件・エラー無しで返る
+    return {ok:true};
+  }));
+  const fail=results.filter(r=>!r.ok), ok=results.length-fail.length;
+  if(fail.some(r=>r.perm)){
+    msg("s_msg","一部保存できませんでした（権限）。あなたのアカウントに更新権限が無い可能性があります。管理者に sql/012_fix_store_ownership.sql の実行を依頼してください。",false);
+  }else if(fail.length){
+    msg("s_msg",`更新：成功${ok}件・失敗${fail.length}件（${esc(fail[0].err||"")}）`,false);
+  }else{
+    msg("s_msg",`${ok}件の店舗を更新しました`,true);
+  }
+  await loadStores();
 }
 async function addStore(){
   const name=(document.getElementById("s_name").value||"").trim();
@@ -301,7 +368,7 @@ async function loadPos(){
   if(error){tb.innerHTML=`<tbody><tr><td class="err">読み込み失敗：${esc(error.message)}</td></tr></tbody>`;return;}
   const nameById=Object.fromEntries((STORESCACHE||[]).map(s=>[String(s.id),s.name]));
   const head=`<thead><tr><th>店舗</th><th>レジ</th><th>URL</th><th>ID</th><th>PW</th><th>稼働</th><th></th></tr></thead>`;
-  const rows=(data||[]).map(p=>`<tr>
+  const rows=(data||[]).map(p=>`<tr data-row="${p.id}" data-store="${p.store_id==null?'':p.store_id}">
     <td>${esc(nameById[String(p.store_id)]||(p.store_id==null?"（アカウント全体）":p.store_id))}</td>
     <td><select data-id="${p.id}" class="ptype">${POS_TYPES.map(([v,t])=>`<option value="${v}" ${p.pos_type===v?"selected":""}>${t}</option>`).join("")}</select>
       <input data-id="${p.id}" class="pname" value="${esc(p.pos_name||"")}" placeholder="表示名" style="width:110px;margin-top:4px"></td>
@@ -309,24 +376,37 @@ async function loadPos(){
     <td><input data-id="${p.id}" class="pid" value="${esc(p.login_id||"")}" style="width:110px"></td>
     <td><input data-id="${p.id}" class="ppw" type="password" placeholder="${p.pw_secret_id?"●●設定済み（変更時のみ）":"未設定"}" style="width:150px"></td>
     <td style="text-align:center"><input type="checkbox" data-id="${p.id}" class="pact" ${p.active?"checked":""}></td>
-    <td><button class="btn ghost" data-psave="${p.id}" data-store="${p.store_id==null?'':p.store_id}">保存</button> <button class="btn danger" data-pdel="${p.id}">削除</button></td></tr>`).join("");
+    <td><button class="btn danger" data-pdel="${p.id}">削除</button></td></tr>`).join("");
   tb.innerHTML=head+"<tbody>"+(rows||'<tr><td class="sub" colspan="7">まだレジ接続がありません。下の行から追加してください。</td></tr>')+"</tbody>";
-  tb.querySelectorAll("[data-psave]").forEach(b=>b.onclick=async()=>{
-    const id=b.dataset.psave, q=c=>tb.querySelector(`.${c}[data-id="${id}"]`);
-    const pw=q("ppw").value;
-    const {error}=await SB.rpc("admin_upsert_pos",{
-      p_id:Number(id), p_store_id:b.dataset.store?Number(b.dataset.store):null, p_pos_type:q("ptype").value,
-      p_pos_name:q("pname").value.trim(), p_url:q("purl").value.trim()||null,
-      p_login_id:q("pid").value.trim()||null, p_pw:pw||null, p_active:q("pact").checked});
-    msg("p_msg", error?("保存失敗："+error.message):"レジ接続を保存しました"+(pw?"（PW更新）":""), !error);
-    if(!error)loadPos();
-  });
   tb.querySelectorAll("[data-pdel]").forEach(b=>b.onclick=async()=>{
     if(!confirm("このレジ接続を削除しますか？（パスワードも消えます）"))return;
     const {error}=await SB.rpc("admin_delete_pos",{p_id:Number(b.dataset.pdel)});
     msg("p_msg", error?("削除失敗："+error.message):"削除しました", !error);
     if(!error)loadPos();
   });
+  bindDirty("pos");
+}
+// 編集したレジ接続だけ、まとめて保存する。PW欄が空の行はPWを変えない。
+async function updatePos(){
+  const tb=document.querySelector("#ptbl"); const ids=[...dirtyPos];
+  if(!ids.length){msg("p_msg","変更はありません",true);return;}
+  const btn=document.getElementById("p_update"); btn.disabled=true; btn.textContent="更新中…";
+  let pwChanged=false;
+  const results=await Promise.all(ids.map(async id=>{
+    const tr=tb.querySelector(`tr[data-row="${id}"]`); if(!tr)return {ok:true};
+    const q=c=>tb.querySelector(`.${c}[data-id="${id}"]`);
+    const pw=q("ppw").value; if(pw)pwChanged=true;
+    const store=tr.dataset.store;
+    const {error}=await SB.rpc("admin_upsert_pos",{
+      p_id:Number(id), p_store_id:store?Number(store):null, p_pos_type:q("ptype").value,
+      p_pos_name:q("pname").value.trim(), p_url:q("purl").value.trim()||null,
+      p_login_id:q("pid").value.trim()||null, p_pw:pw||null, p_active:q("pact").checked});
+    return {ok:!error, err:error&&error.message};
+  }));
+  const fail=results.filter(r=>!r.ok), ok=results.length-fail.length;
+  msg("p_msg", fail.length?`更新：成功${ok}件・失敗${fail.length}件（${esc(fail[0].err||"")}）`
+    :`${ok}件のレジ接続を更新しました`+(pwChanged?"（PW更新あり）":""), !fail.length);
+  await loadPos();
 }
 async function addPos(){
   const store_id=document.getElementById("p_store").value;

@@ -1,0 +1,60 @@
+# ============================================================
+#  Airレジ 調査（自動取得のセレクタ確定用）
+#
+#  AirID でログインし、ログイン後＆会計明細画面の構造（ナビ/リンク・
+#  CSV/ダウンロード系要素・<form>・日付入力欄）を Actions のログに出す。
+#  debug/ のスクショ・HTML も Artifact として保存する。
+#
+#  必要な Secrets: AIRREGI_ID / AIRREGI_PW（＋ SUPABASE系は不要）
+#  ※ セレクタが確定したら本番は daily-etl.yml（only=airregi）で動く。
+# ============================================================
+name: Airレジ 調査
+
+on:
+  workflow_dispatch:
+    inputs:
+      sales_url:
+        description: "会計明細画面のURL（分かっていれば。空なら既定を試す）"
+        required: false
+        default: ""
+
+concurrency:
+  group: notime-airregi-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TZ: Asia/Tokyo
+      AIRREGI_ID: ${{ secrets.AIRREGI_ID }}
+      AIRREGI_PW: ${{ secrets.AIRREGI_PW }}
+      AIRREGI_SALES_URL: ${{ inputs.sales_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: ライブラリをインストール
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: ブラウザ(Chromium)を用意
+        run: python -m playwright install --with-deps chromium
+      - name: 設定確認
+        run: |
+          if [ -z "$AIRREGI_ID" ] || [ -z "$AIRREGI_PW" ]; then
+            echo "::error::AIRREGI_ID / AIRREGI_PW が未登録です（Settings → Secrets → Actions）"; exit 1
+          fi
+      - name: 調査（ログイン→画面構造ダンプ）
+        run: python -m etl.airregi_fetch --discover
+      - name: 調査ファイルを保存（debug/）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: airregi-debug
+          path: debug/
+          if-no-files-found: ignore
+          retention-days: 7
