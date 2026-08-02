@@ -250,7 +250,19 @@ def login(page, email: str, password: str, trade_url: str | None = None) -> None
         )
 
     page.wait_for_load_state("networkidle", timeout=45_000)
-    print("  ログイン成功")
+
+    # アカウントによってはログイン後にトップ(/v2/client/top)へ着地し、取引一覧の期間欄が
+    # 無くて失敗する。取引一覧(/trade)に居なければ明示的に移動する。
+    if "/trade" not in page.url:
+        try:
+            page.goto(trade_url or CASHIER_TRADE_URL, wait_until="domcontentloaded")
+            try:
+                page.wait_for_load_state("networkidle", timeout=30_000)
+            except Exception:
+                pass
+        except Exception:
+            pass
+    print(f"  ログイン成功（現在URL: {page.url}）")
 
 
 # ------------------------------------------------------------
