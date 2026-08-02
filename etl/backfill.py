@@ -276,6 +276,134 @@ def run_airregi_backfill(sb: Supabase, start: str, end: str,
     print(f"  Supabaseへ保存: 新規 {inserted}行 / 既存で無視 {duplicate}行")
 
 
+def _month_chunks(start: str, end: str):
+    """[start, end] を月境界で区切って (月初, 月末) の並びにする。"""
+    from datetime import date as _date, timedelta
+
+    def _d(s):
+        y, m, d = map(int, s.split("-")); return _date(y, m, d)
+
+    def _month_end(d):
+        nm = _date(d.year + (d.month == 12), (d.month % 12) + 1, 1)
+        return nm - timedelta(days=1)
+
+    cur, last = _d(start), _d(end)
+    while cur <= last:
+        m_end = min(_month_end(cur), last)
+        yield cur.isoformat(), m_end.isoformat()
+        cur = m_end + timedelta(days=1)
+
+
+def run_sipos_backfill(sb: Supabase, start: str, end: str,
+                       headless: bool, store_cache: dict) -> None:
+    """SIPOS（EZレジ）の過去分を『売上報告書→購買情報明細』で作り直す。
+
+    ・取引照会(明細なし)ではなく購買情報明細（＝Si明細形式）を使うので、カテゴリ別も
+      出せ、売上・客数・点数が売上報告書に一致する。
+    ・SIPOSは直近3か月ぶんしかデータが残らないため、この窓の中を月ごとに取り直す。
+    ・同じ店・同じ月の既存行（pos=SIPOS / pos=Si / 旧取引照会）を消してから入れ直すので、
+      二重計上（手動Siインポートとの重複・旧取引照会の混入）が解消される。冪等。
+    """
+    import adapters
+    from . import pos_web, pos_sources, si_clean, rows as rows_mod
+
+    print("\n" + "=" * 60)
+    print(f"【SIPOS】購買情報明細で作り直し  期間: {start} 〜 {end}")
+    print("=" * 60)
+
+    try:
+        conns = [c for c in pos_sources.load_connections(sb, only_active=True)
+                 if c["pos_type"] == "ezregi"]
+    except Exception as e:
+        print(f"  ❌ SIPOS接続一覧の取得に失敗: {e}")
+        return
+    if not conns:
+        print("  ℹ️ SIPOS(ezレジ)接続が未登録のためスキップ。")
+        return
+    print(f"  対象接続: {len(conns)}件")
+
+    # この作り直しで置き換える pos_name（重複の元をまとめて掃除する）。
+    stale_pos = {"SIPOS", "Si"}
+    for c in conns:
+        if c.get("pos_name"):
+            stale_pos.add(c["pos_name"])
+    pos_list = ",".join(sorted(stale_pos))
+
+    total_ins = 0
+    for c in conns:
+        label = f'ezregi#{c["id"]}'
+        if not c.get("login_pw"):
+            print(f"  ⚠️ {label}: パスワード未復号のためスキップ。")
+            continue
+        for m_start, m_end in _month_chunks(start, end):
+            ym = m_start[:7]
+            try:
+                csv_text = pos_web.fetch(c["url"], c["login_id"], c["login_pw"],
+                                         m_start, "ezregi", label=f"{label}/{ym}",
+                                         headless=headless, end_date=m_end)
+                if not (csv_text or "").strip():
+                    print(f"  【{label}】{ym}: 明細0件（休業・売上なし/データ保持期間外）。")
+                    continue
+                df_in = _read_si_month(csv_text)
+                if df_in is None or len(df_in) == 0:
+                    print(f"  【{label}】{ym}: 取り込める明細行なし。")
+                    continue
+                df_in = si_clean.normalize_si_datetime(df_in)
+                common = adapters.adapt_ezregi(df_in, c["pos_name"] or "SIPOS")
+
+                # 店の対応付け（手動インポートと同じ：生の店舗名ベース）。
+                if c.get("store_id"):
+                    common["store"] = None
+                    fixed = int(c["store_id"])
+                    store_id_of = lambda name, _s=fixed: _s
+                else:
+                    common["store"] = si_clean.si_store_names(df_in["店舗名"]).reindex(common.index)
+                    store_id_of = lambda name: sb.get_or_create_store(name, store_cache)
+
+                common = common[common["date"].notna()].copy()
+                common = common[(common["date"] >= m_start) & (common["date"] <= m_end)].copy()
+                if len(common) == 0:
+                    print(f"  【{label}】{ym}: 期間内の明細0件。")
+                    continue
+                common["line_no"] = common.groupby("tx_id").cumcount()
+                payload = rows_mod.cashier_rows(common, store_id_of)
+
+                # 影響する店だけ、対象月の既存行（SIPOS/Si/旧取引照会）を消してから入れ直す。
+                store_ids = sorted({r["store_id"] for r in payload})
+                if store_ids:
+                    sb.delete("sales", {
+                        "store_id": f"in.({','.join(str(i) for i in store_ids)})",
+                        "pos_name": f"in.({pos_list})",
+                        "and": f"(business_date.gte.{m_start},business_date.lte.{m_end})"})
+                ins, _dup = sb.insert_ignore_duplicates(
+                    "sales", payload, on_conflict="store_id,pos_name,tx_id,line_no")
+                total_ins += ins
+                txn = len({(r["store_id"], r["tx_id"]) for r in payload})
+                ssum = sum(r["sales_in_tax"] for r in payload if r["line_no"] == 0)
+                stores = sorted({r for r in common["store"].astype(str).unique() if r and r != "None"})
+                print(f"  【{label}】{ym}: {txn}取引 / {int(ssum):,}円 → 追加 {ins}行"
+                      f"（店舗: {', '.join(stores[:12])}）")
+            except Exception as e:
+                print(f"  【{label}】{ym}: ❌ 取得/保存に失敗（スキップ）: "
+                      f"{type(e).__name__}: {e}")
+    print(f"  ✅ SIPOS backfill 完了（合計 追加 {total_ins}行）")
+
+
+def _read_si_month(csv_text: str):
+    """購買情報明細CSVを DataFrame に。見出し（店舗コード…レシートNo）から読む。"""
+    import io as _io
+    import pandas as pd
+    lines = csv_text.splitlines()
+    hdr = next((i for i, ln in enumerate(lines)
+                if "店舗コード" in ln and "レシートNo" in ln), None)
+    if hdr is None:
+        return None
+    df = pd.read_csv(_io.StringIO("\n".join(lines[hdr:])), dtype=str,
+                     engine="python", on_bad_lines="skip")
+    df.columns = [str(c).strip() for c in df.columns]
+    return df[df["店舗名"].astype(str).str.strip() != ""]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="NOTIME 過去分の一括取り込み（backfill）"
@@ -284,7 +412,7 @@ def main() -> int:
                         help=f"開始日 YYYY-MM-DD（既定 {DEFAULT_FROM}）")
     parser.add_argument("--to", dest="date_to", default=None,
                         help="終了日 YYYY-MM-DD（既定は今日）")
-    parser.add_argument("--only", choices=["cashier", "digitel", "smaregi", "airregi"],
+    parser.add_argument("--only", choices=["cashier", "digitel", "smaregi", "airregi", "sipos"],
                         help="片方だけ動かす")
     parser.add_argument("--headed", action="store_true",
                         help="ブラウザの画面を出して動かす")
@@ -341,6 +469,14 @@ def main() -> int:
         except Exception as e:
             failed = True
             print(f"  ❌ Airレジ backfill 失敗: {type(e).__name__}: {e}")
+
+    # SIPOS は既定の一括(None)には含めない（3か月保持・作り直し系のため明示指定で動かす）。
+    if args.only == "sipos":
+        try:
+            run_sipos_backfill(sb, start, end, headless, store_cache)
+        except Exception as e:
+            failed = True
+            print(f"  ❌ SIPOS backfill 失敗: {type(e).__name__}: {e}")
 
     print("\n" + "=" * 60)
     if failed:

@@ -47,13 +47,22 @@ def _read_si_table(text: str) -> pd.DataFrame:
 
 def _to_common(csv_text: str, pos_type: str, pos_name: str) -> pd.DataFrame:
     if pos_type == "ezregi":
-        # SIPOSは2形式ある：取引照会CSV（取引日付/合計金額…＝1取引1行）と、
-        # 【Si】DB明細CSV（店舗コード/商品分類名…）。見出しで判定して振り分ける。
+        # SIPOSの正は「売上報告書→購買情報明細（purchaseDetailsList）」＝Si明細と同形式
+        # （店舗コード/商品分類名/税込売価…）。カテゴリ別も出せ、売上・客数・点数が
+        # 売上報告書に一致する。旧「取引照会CSV（取引日付…1取引1行・明細なし）」は
+        # 保険として見出しで判定して振り分ける（通常は明細側を通る）。
         head = (csv_text or "")[:2000]
         if "取引日付" in head and ("合計金額" in head or "レシートNo" in head and "合計点数" in head):
             df = pd.read_csv(io.StringIO(csv_text), dtype=str)
             return adapters.adapt_ezregi_tran(df, pos_name)
-        return adapters.adapt_ezregi(_read_si_table(csv_text), pos_name)
+        # 購買情報明細（Si明細形式）。店名は生の店舗名ベース（ブランド名を残す）で
+        # そろえる＝手動インポート(import_pos_csv)と完全に同じにして store_id を一致させる。
+        from . import si_clean
+        df_in = _read_si_table(csv_text)
+        df_in = si_clean.normalize_si_datetime(df_in)
+        common = adapters.adapt_ezregi(df_in, pos_name)
+        common["store"] = si_clean.si_store_names(df_in["店舗名"]).reindex(common.index)
+        return common
     if pos_type == "airregi":
         df = pd.read_csv(io.StringIO(csv_text), dtype=str)
         return adapters.adapt_airregi(df, pos_name, pos_name)

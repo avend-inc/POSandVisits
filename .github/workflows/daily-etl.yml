@@ -39,7 +39,7 @@ on:
         required: false
         default: "both"
         type: choice
-        options: [both, cashier, digitel, smaregi, airregi]
+        options: [both, cashier, digitel, smaregi, airregi, sipos]
       force:
         description: "取り込み済みの日でも、もう一度取り込む"
         required: false
@@ -140,6 +140,7 @@ jobs:
             if [ "${{ inputs.only }}" = "digitel" ]; then ARGS="$ARGS --only digitel"; fi
             if [ "${{ inputs.only }}" = "smaregi" ]; then ARGS="$ARGS --only smaregi"; fi
             if [ "${{ inputs.only }}" = "airregi" ]; then ARGS="$ARGS --only airregi"; fi
+            if [ "${{ inputs.only }}" = "sipos" ]; then ARGS="$ARGS --only sipos"; fi
             echo "実行(backfill): python -m etl.backfill $ARGS"
             python -m etl.backfill $ARGS
           else

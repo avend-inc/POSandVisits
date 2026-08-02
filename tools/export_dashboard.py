@@ -270,46 +270,41 @@ def build_data(sb: Supabase) -> dict:
     except Exception as _e:
         print("  （売上サマリーの出力に失敗: {}）".format(_e))
 
-    # --- 診断2: 同一伝票が複数店舗に割り当てられていないか（店舗混線の検知） ---
+    # --- 診断2: SIPOS系店舗の「店舗×月×pos_name」内訳（二重計上チェック＆照合用） ---
+    #   ねらい：同じ店・同じ月に pos=SIPOS と pos=Si が両方あると二重計上になる。
+    #   作り直し後は各(店,月)が1つのposだけになり、純売上が売上報告書に一致するはず。
     try:
-        tx_store: dict[tuple, set] = {}
-        for r in sales:
-            k = (r.get("pos_name") or "", r["tx_id"])
-            tx_store.setdefault(k, set()).add(r["store_id"])
-        multi = [(k, v) for k, v in tx_store.items() if len(v) > 1]
-        print("\n=== 診断: 複数店舗に重複した伝票（混線検知）: {}件 ===".format(len(multi)))
-        for (k, v) in multi[:12]:
-            names = ", ".join(name_by_id.get(x, str(x)) for x in sorted(v))
-            print("  伝票 pos={} tx_id={} → 店舗[{}]".format(k[0], k[1], names))
-    except Exception as _e:
-        print("  （混線検知に失敗: {}）".format(_e))
-
-    # --- 診断3: 対象2店の7月内訳（pos_name別 伝票数・純売上） ---
-    try:
-        TARGET = {"SELFURUGI本店", "SELFURUGI鎌ヶ谷店"}
-        id_by_name = {v: k for k, v in name_by_id.items()}
-        tgt_ids = {id_by_name[n] for n in TARGET if n in id_by_name}
-        agg: dict[tuple, dict] = {}
+        POS_KEEP = {"SIPOS", "Si"}
+        agg: dict[tuple, dict] = {}      # (sid, ym, pos) -> {in, tx}
         seen_tx = set()
         for r in sales:
-            if r["store_id"] not in tgt_ids:
-                continue
-            if not str(r["business_date"]).startswith("2026-07"):
-                continue
             pn = r.get("pos_name") or ""
-            key = (r["store_id"], pn)
+            if pn not in POS_KEEP:
+                continue
+            ym = str(r["business_date"])[:7]
+            key = (r["store_id"], ym, pn)
             a = agg.setdefault(key, {"in": 0.0, "tx": set()})
             txk = (r["store_id"], pn, r["tx_id"])
             if txk not in seen_tx:
                 seen_tx.add(txk)
                 a["in"] += _num(r["sales_in_tax"])
                 a["tx"].add(r["tx_id"])
-        print("\n=== 診断: 対象店の7月内訳（pos_name別）===")
-        for (sid, pn), a in sorted(agg.items()):
-            print("  {} / pos={} : 純売上 {:,} / 伝票 {}件".format(
-                name_by_id.get(sid, sid), pn, int(round(a["in"])), len(a["tx"])))
+        # 店舗×月ごとに、存在するposを並べる（複数なら⚠️二重計上の疑い）。
+        by_sm: dict[tuple, list] = {}
+        for (sid, ym, pn), a in agg.items():
+            by_sm.setdefault((sid, ym), []).append((pn, a))
+        recent = sorted({ym for (_, ym) in by_sm})[-4:]
+        print("\n=== 診断: SIPOS系 店舗×月×pos 内訳（直近{}か月・照合用）===".format(len(recent)))
+        for (sid, ym) in sorted(by_sm, key=lambda k: (name_by_id.get(k[0], ""), k[1])):
+            if ym not in recent:
+                continue
+            parts = by_sm[(sid, ym)]
+            warn = " ⚠️二重計上の疑い(pos複数)" if len(parts) > 1 else ""
+            detail = " / ".join("pos={} 純売上{:,}/伝票{}件".format(
+                pn, int(round(a["in"])), len(a["tx"])) for pn, a in sorted(parts))
+            print("  {} {} : {}{}".format(name_by_id.get(sid, sid), ym, detail, warn))
     except Exception as _e:
-        print("  （対象店内訳の出力に失敗: {}）".format(_e))
+        print("  （SIPOS内訳の出力に失敗: {}）".format(_e))
 
     return {
         "generated_at": datetime.now(JST).isoformat(timespec="seconds"),

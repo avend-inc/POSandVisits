@@ -349,13 +349,96 @@ def _sipos_open_transaction(page, base: str, label: str) -> bool:
     return False
 
 
+def _sipos_open_report(page, base: str, label: str) -> bool:
+    """メニューから『売上報告書』（販売管理→売上報告書）へ遷移する。到達判定は
+    『CSVダウンロード』ボタンが出るかどうかで行う（URLはテナントで異なるため）。"""
+    def _has_csv_button() -> bool:
+        try:
+            return page.locator(
+                "button:has-text('CSVダウンロード'), a:has-text('CSVダウンロード'),"
+                "button:has-text('CSV'), a:has-text('CSV')").count() > 0
+        except Exception:
+            return False
+
+    def _try_click() -> bool:
+        try:
+            lk = page.locator("a:has-text('売上報告書'), button:has-text('売上報告書')")
+            if lk.count():
+                lk.first.click(timeout=5_000)
+                _sipos_wait(page)
+                return _has_csv_button()
+        except Exception:
+            pass
+        return False
+
+    if _try_click():
+        return True
+    # 折りたたみメニュー（販売管理/売上/レポート等）を開いてから再挑戦。
+    for grp in ("販売管理", "売上", "販売", "レポート", "集計", "分析", "データ"):
+        try:
+            g = page.locator(
+                f"a:has-text('{grp}'), button:has-text('{grp}'), [data-toggle]:has-text('{grp}')"
+            ).first
+            if g.count():
+                g.click(timeout=2_000)
+                page.wait_for_timeout(600)
+                if _try_click():
+                    return True
+        except Exception:
+            continue
+    # 最後の手段：リンクの href を取り出して直接遷移する。
+    try:
+        lk = page.locator("a:has-text('売上報告書')")
+        if lk.count():
+            href = lk.first.get_attribute("href")
+            if href:
+                target = href if href.startswith("http") else base + href
+                page.goto(target, wait_until="domcontentloaded")
+                _sipos_wait(page)
+                return _has_csv_button()
+    except Exception:
+        pass
+    return False
+
+
+def _sipos_check_option(page, label_text: str) -> bool:
+    """ダウンロード形式モーダルの中で、ラベル文字に対応するチェックボックスをONにする。
+    レイアウトが『□ ラベル』でも『ラベル □』でも拾えるよう、各チェックボックスの
+    近傍テキスト（for属性ラベル/囲みラベル/親・隣接テキスト）で照合する。"""
+    js = r"""
+    (txt) => {
+      const cbs = [...document.querySelectorAll('input[type=checkbox]')];
+      const near = (cb) => {
+        let s = '';
+        if (cb.id){ const l=document.querySelector('label[for="'+cb.id+'"]'); if(l) s+=' '+l.innerText; }
+        const wl = cb.closest('label'); if (wl) s += ' ' + wl.innerText;
+        if (cb.parentElement) s += ' ' + cb.parentElement.innerText;
+        if (cb.nextElementSibling) s += ' ' + cb.nextElementSibling.innerText;
+        if (cb.previousElementSibling) s += ' ' + cb.previousElementSibling.innerText;
+        return s;
+      };
+      for (const cb of cbs){
+        if (near(cb).includes(txt)){ if(!cb.checked){ cb.click(); } return true; }
+      }
+      return false;
+    }"""
+    try:
+        return bool(page.evaluate(js, label_text))
+    except Exception:
+        return False
+
+
 def _fetch_sipos(page, context, url: str, d0: str, d1: str, label: str) -> bytes:
-    """SIPOS：ログイン済みページから 取引照会→期間→検索→CSVダウンロード。"""
+    """SIPOS：ログイン済みページから 売上報告書 → CSVダウンロード →
+    『購買情報明細』を選んでダウンロード → ZIP を展開し purchaseDetailsList_*.csv を返す。
+
+    取引照会（取引単位・明細なし）ではなく、売上報告書の購買情報明細（＝Si明細と同形式：
+    店舗コード/商品分類名/税込売価…）を使う。カテゴリ別も出せ、売上・客数・点数が
+    売上報告書に一致する。"""
     base = _origin(url)
-    # 詳細ダンプ（メニュー候補・到達ページ）は1店デバッグ時のみ（全店実行では出さない）。
     debug = bool(os.environ.get("POS_DEBUG") or os.environ.get("POS_ONLY_STORE"))
 
-    # 1) 店舗選択（サーバ側セッションに反映させる）。ログイン直後は storeSelect にいる想定。
+    # 1) 店舗選択（サーバ側セッションに全店を反映）。ログイン直後は storeSelect の想定。
     if "storeselect" not in page.url.lower():
         try:
             page.goto(base + "/management/storeSelect", wait_until="domcontentloaded")
@@ -364,86 +447,91 @@ def _fetch_sipos(page, context, url: str, d0: str, d1: str, label: str) -> bytes
             pass
     _sipos_select_all_stores(page, label)
 
-    # 2) 取引照会へは「メニューのリンクをクリック」してアプリ内遷移で進む
-    #    （/list を直接GETすると商品検索へリダイレクトされるため）。
-    #    まずダッシュボードを開き、取引照会リンクを探してクリックする。
+    # 2) 売上報告書へアプリ内遷移。
     page.goto(base + "/management/", wait_until="domcontentloaded")
     _sipos_wait(page)
-
+    if not _sipos_open_report(page, base, label):
+        dump_page(page, f"{label}_sipos_report_notfound")
+        dump_controls(page, f"{label}_sipos_report_notfound")
+        raise EtlError(f"{label}: 売上報告書メニューへ移動できませんでした。")
     if debug:
-        # メニューの全リンク（取引/売上系）を洗い出して href を確定する。
-        try:
-            links = page.evaluate(r"""() => [...document.querySelectorAll('a[href]')]
-              .map(a => ({t:(a.innerText||'').trim().replace(/\s+/g,' ').slice(0,24),
-                          href:a.getAttribute('href'),
-                          vis:!!(a.getBoundingClientRect().width||a.getBoundingClientRect().height)}))
-              .filter(l => /transaction|取引|売上|sales|日報|レポート|report|集計|明細/.test((l.t||'')+(l.href||'')))""")
-            print(f"  {label}: メニュー候補（取引/売上系）:")
-            for l in links[:30]:
-                print(f"    menu {l}")
-        except Exception as e:
-            print(f"  （メニュー診断に失敗: {e}）")
+        print(f"  {label}: 売上報告書の到達URL = {page.url}")
 
-    if not _sipos_open_transaction(page, base, label):
-        dump_page(page, f"{label}_sipos_menu_notfound")
-        dump_controls(page, f"{label}_sipos_menu_notfound")
-        raise EtlError(f"{label}: 取引照会メニューへ移動できませんでした。")
-
-    if debug:
-        print(f"  {label}: 取引照会の到達URL = {page.url}")
-        dump_controls(page, f"{label}_sipos_landed")
-
-    # 期間（YYYY/MM/DD HH:MM）：開始 00:00 / 終了 23:59
-    start_v = f"{d0.replace('-', '/')} 00:00"
-    end_v = f"{d1.replace('-', '/')} 23:59"
-    print(f"  {label}: 期間を {start_v} 〜 {end_v} に設定します")
-    _sipos_set_datetime(page, "検索開始日時", start_v)
-    _sipos_set_datetime(page, "検索終了日時", end_v)
-
-    # 検索
-    if not (_click_exact(page, ["検索"]) or _click_by_text(page, ["検索"])):
-        dump_page(page, f"{label}_sipos_search_notfound")
-        dump_controls(page, f"{label}_sipos_search_notfound")
-        raise EtlError(f"{label}: 取引照会の「検索」ボタンが見つかりませんでした。")
-    try:
-        page.wait_for_load_state("networkidle", timeout=30_000)
-    except Exception:
-        pass
-    page.wait_for_timeout(1500)
-
-    # CSVダウンロード（別タブで開く場合にも備えて download を拾う）
+    # 3) CSVダウンロードを開く（形式選択モーダルが出る）。
     downloads: list = []
     page.on("download", lambda d: downloads.append(d))
     context.on("page", lambda pg: pg.on("download", lambda d: downloads.append(d)))
 
     if _click_first_text(page, ["CSVダウンロード", "CSV出力", "CSVエクスポート", "CSV"]) is None:
-        # 検索結果0件（休業日・売上なし）ならCSVボタンは出ない。これは異常ではないので
-        # 空を返して「明細0件（正常）」として扱う。
-        try:
-            body = page.inner_text("body")
-        except Exception:
-            body = ""
-        if any(k in body for k in ("0件", "該当するデータ", "ございません", "ありません", "見つかりません")):
-            print(f"  {label}: 検索結果0件（休業日・売上なしとみなします）。")
-            return b""
-        dump_page(page, f"{label}_sipos_csv_notfound")
-        dump_controls(page, f"{label}_sipos_csv_notfound")
-        raise EtlError(f"{label}: 「CSVダウンロード」ボタンが見つかりませんでした。"
-                       "（検索結果が0件だと出ないことがあります）")
+        dump_page(page, f"{label}_sipos_csvbtn_notfound")
+        dump_controls(page, f"{label}_sipos_csvbtn_notfound")
+        raise EtlError(f"{label}: 売上報告書の「CSVダウンロード」ボタンが見つかりませんでした。")
+    page.wait_for_timeout(1200)   # モーダルの描画待ち
+
+    # 4) 期間（開始日/終了日 = YYYY/MM/DD）をモーダルに設定。
+    start_v = d0.replace("-", "/")
+    end_v = d1.replace("-", "/")
+    print(f"  {label}: ダウンロード期間を {start_v} 〜 {end_v} に設定します")
+    _sipos_set_datetime(page, "開始日", start_v)
+    _sipos_set_datetime(page, "終了日", end_v)
+
+    # 5) 『購買情報明細』にチェック（他はそのままでもZIP内から明細だけ拾う）。
+    if not _sipos_check_option(page, "購買情報明細"):
+        # 表記ゆれ（購入情報明細）にも対応。
+        _sipos_check_option(page, "購入情報明細")
+    if debug:
+        dump_controls(page, f"{label}_sipos_download_modal")
+
+    # 6) モーダル内の『ダウンロード』を押す。
     _confirm_download_modal(page)
 
-    deadline = time.time() + 90
+    deadline = time.time() + 120
     while not downloads and time.time() < deadline:
         page.wait_for_timeout(500)
-    if downloads:
-        path = downloads[0].path()
-        if path:
-            data = open(path, "rb").read()
-            print(f"  {label}: CSVを取得しました（{len(data)} bytes）")
-            return data
-    dump_page(page, f"{label}_sipos_download_failed")
-    dump_controls(page, f"{label}_sipos_download_failed")
-    raise EtlError(f"{label}: CSVダウンロードが完了しませんでした。debug/ の通信記録をご確認ください。")
+    if not downloads:
+        dump_page(page, f"{label}_sipos_download_failed")
+        dump_controls(page, f"{label}_sipos_download_failed")
+        raise EtlError(f"{label}: ダウンロードが完了しませんでした。debug/ の記録をご確認ください。")
+    path = downloads[0].path()
+    if not path:
+        raise EtlError(f"{label}: ダウンロードのパスが取得できませんでした。")
+    data = open(path, "rb").read()
+    print(f"  {label}: ダウンロード取得（{len(data)} bytes）")
+    return _extract_purchase_details(data, label)
+
+
+def _extract_purchase_details(data: bytes, label: str) -> bytes:
+    """ダウンロードが ZIP なら purchaseDetailsList_*.csv を取り出す。CSVならそのまま。"""
+    if not data:
+        return b""
+    if data[:2] == b"PK":
+        import io as _io
+        import zipfile
+        try:
+            zf = zipfile.ZipFile(_io.BytesIO(data))
+        except Exception as e:
+            raise EtlError(f"{label}: ZIPを展開できませんでした: {e}")
+        names = zf.namelist()
+        target = next((n for n in names if "purchasedetail" in n.lower()), None)
+        if target is None:
+            target = next((n for n in names if n.lower().endswith(".csv")), None)
+        print(f"  {label}: ZIP内 {names} → 使用: {target}")
+        if target is None:
+            raise EtlError(f"{label}: ZIPに購買情報明細(CSV)が見つかりません: {names}")
+        return zf.read(target)
+    return data
+
+
+def _decode_sipos(data: bytes) -> str:
+    """購買情報明細CSVの文字コード（UTF-8 BOM / UTF-8 / Shift-JIS）を判定して文字列化。"""
+    if not data:
+        return ""
+    for enc in ("utf-8-sig", "utf-8", "cp932"):
+        try:
+            return data.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", errors="replace")
 
 
 def fetch(url: str, login_id: str, login_pw: str, business_date: str,
@@ -463,7 +551,7 @@ def fetch(url: str, login_id: str, login_pw: str, business_date: str,
             with browser_page(headless=headless) as (page, context):
                 _login(page, url, login_id or "", login_pw or "", prefix, label)
                 if _is_sipos(url):
-                    return decode_csv(_fetch_sipos(page, context, url, business_date, d1, label))
+                    return _decode_sipos(_fetch_sipos(page, context, url, business_date, d1, label))
                 _set_date_range(page, business_date, d1, prefix, label)
                 return decode_csv(_download(page, context, prefix, label))
         except Exception as e:
