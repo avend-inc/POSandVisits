@@ -158,12 +158,7 @@ jobs:
       # 取り込みが成功した後、または dashboard 単独モードのときに動く。
       - name: ダッシュボードを更新
         if: ${{ inputs.dashboard || success() }}
-        run: |
-          if [ "${{ inputs.dashboard }}" = "true" ]; then
-            python -m tools.export_dashboard --print-json
-          else
-            python -m tools.export_dashboard
-          fi
+        run: python -m tools.export_dashboard
 
       # 失敗したときだけ、原因調査用のファイルを残す（7日で自動削除）
       - name: 失敗時の調査用ファイルを保存
