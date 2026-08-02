@@ -204,9 +204,11 @@ def run_live_pos(sb, business_date: str, run_id: str,
                 # 直営(Secretアカウント)以外の cashier アカウント（例: 天王台）を、接続の
                 # url/id/pw で直営と同じ手順（ログイン→検索→CSV出力(明細)）で取得する。
                 from . import cashier_fetch
+                # cashierは全アカウント同じサイト。接続URLがトップ等でも確実に取引一覧を
+                # 開けるよう、正規の取引一覧URL(既定)を使う（trade_urlは渡さない）。
                 csv_text = cashier_fetch.fetch_range_creds(
                     c["login_id"] or "", c["login_pw"] or "",
-                    business_date, business_date, headless=headless, trade_url=c.get("url"))
+                    business_date, business_date, headless=headless)
             else:
                 csv_text = pos_web.fetch(c["url"], c["login_id"], c["login_pw"],
                                          business_date, c["pos_type"], label=label, headless=headless)
