@@ -246,22 +246,31 @@ def _sipos_select_all_stores(page, label: str) -> None:
         print(f"  （店舗選択の診断に失敗: {e}）")
 
     # 「全店舗選択」を OFF→ON でトグルして onclick を確実に発火させる。
+    # ※ click/is_checked は timeout を必ず付ける（既定30秒×店舗数でハングするため）。
     try:
         cb = page.locator("#check_all_stores").first
         if cb.count():
-            if cb.is_checked():
-                cb.click(); page.wait_for_timeout(400)
-            cb.click(); page.wait_for_timeout(1500)
+            try:
+                if cb.is_checked(timeout=2_000):
+                    cb.click(timeout=3_000); page.wait_for_timeout(400)
+            except Exception:
+                pass
+            cb.click(timeout=3_000); page.wait_for_timeout(1500)
     except Exception:
         pass
-    # 保険：個別の店舗チェックも未選択があれば ON にする。
+    # 保険：個別の店舗チェックも未選択があれば ON にする（全体で最大20秒まで）。
     try:
         boxes = page.locator("input.store[type=checkbox]")
-        for i in range(min(boxes.count(), 60)):
+        n = min(boxes.count(), 80)
+        deadline = time.time() + 20
+        for i in range(n):
+            if time.time() > deadline:
+                print(f"  （店舗チェックの一括ONは時間上限で打ち切り: {i}/{n}）")
+                break
             b = boxes.nth(i)
             try:
-                if not b.is_checked():
-                    b.click(); page.wait_for_timeout(200)
+                if not b.is_checked(timeout=1_000):
+                    b.click(timeout=1_500); page.wait_for_timeout(120)
             except Exception:
                 continue
     except Exception:
@@ -482,8 +491,25 @@ def _fetch_sipos(page, context, url: str, d0: str, d1: str, label: str) -> bytes
     if debug:
         dump_controls(page, f"{label}_sipos_download_modal")
 
-    # 6) モーダル内の『ダウンロード』を押す。
-    _confirm_download_modal(page)
+    # 6) モーダル内の『ダウンロード』を押す。まず明示的に（timeout付きで）押し、
+    #    ダメなら共通のモーダル確定ヘルパにフォールバックする。
+    print(f"  {label}: ダウンロードボタンを押します")
+    clicked = False
+    for sel in (".modal.show button:has-text('ダウンロード')",
+                ".modal.in button:has-text('ダウンロード')",
+                ".modal.show .btn-primary",
+                "button:has-text('ダウンロードする')",
+                "button:has-text('ダウンロード')"):
+        try:
+            loc = page.locator(sel).first
+            if loc.count() and loc.is_visible():
+                loc.click(timeout=5_000)
+                clicked = True
+                break
+        except Exception:
+            continue
+    if not clicked:
+        _confirm_download_modal(page)
 
     deadline = time.time() + 120
     while not downloads and time.time() < deadline:
