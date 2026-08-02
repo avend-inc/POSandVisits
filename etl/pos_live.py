@@ -95,7 +95,7 @@ def run_live_pos(sb, business_date: str, run_id: str,
 
     try:
         conns = [c for c in load_connections(sb, only_active=True)
-                 if c["pos_type"] in ("airregi", "ezregi")]
+                 if c["pos_type"] in ("airregi", "ezregi", "cashier")]
     except Exception as e:
         print(f"  接続一覧の取得に失敗: {e}")
         return [Result("pos_connections", "failed", str(e))]
@@ -200,8 +200,16 @@ def run_live_pos(sb, business_date: str, run_id: str,
             continue
 
         try:
-            csv_text = pos_web.fetch(c["url"], c["login_id"], c["login_pw"],
-                                     business_date, c["pos_type"], label=label, headless=headless)
+            if c["pos_type"] == "cashier":
+                # 直営(Secretアカウント)以外の cashier アカウント（例: 天王台）を、接続の
+                # url/id/pw で直営と同じ手順（ログイン→検索→CSV出力(明細)）で取得する。
+                from . import cashier_fetch
+                csv_text = cashier_fetch.fetch_range_creds(
+                    c["login_id"] or "", c["login_pw"] or "",
+                    business_date, business_date, headless=headless, trade_url=c.get("url"))
+            else:
+                csv_text = pos_web.fetch(c["url"], c["login_id"], c["login_pw"],
+                                         business_date, c["pos_type"], label=label, headless=headless)
             import os as _os2
             if _os2.environ.get("POS_DEBUG") or _os2.environ.get("POS_ONLY_STORE"):
                 head = "\n".join((csv_text or "").splitlines()[:8])

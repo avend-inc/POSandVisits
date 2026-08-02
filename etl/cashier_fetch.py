@@ -211,9 +211,9 @@ def open_search_options(page) -> None:
 # ------------------------------------------------------------
 # ログイン
 # ------------------------------------------------------------
-def login(page, email: str, password: str) -> None:
+def login(page, email: str, password: str, trade_url: str | None = None) -> None:
     print("cashier にログインしています...")
-    page.goto(CASHIER_TRADE_URL, wait_until="domcontentloaded")
+    page.goto(trade_url or CASHIER_TRADE_URL, wait_until="domcontentloaded")
 
     # ログイン画面へ飛ばされるのを待つ
     try:
@@ -523,19 +523,19 @@ def decode_csv(data: bytes) -> str:
 # ------------------------------------------------------------
 # まとめ
 # ------------------------------------------------------------
-def fetch_range(start_date: str, end_date: str, headless: bool = True) -> str:
+def fetch_range_creds(email: str, password: str, start_date: str, end_date: str,
+                      headless: bool = True, trade_url: str | None = None) -> str:
     """
-    start_date 〜 end_date の売上明細CSVを取ってきて、文字列で返す。
-    1回のログインで期間まとめて取れる（backfill用）。失敗時は3回まで試す。
+    指定の資格情報(email/password)でログインし、start_date〜end_date の売上明細CSVを返す。
+    1回のログインで期間まとめて取れる。失敗時は数回試す。
+    直営(GitHub Secret)以外の cashier アカウント（例: 天王台）を『レジ接続』の
+    url/id/pw で取り込むために使う。trade_url は接続のURL（未指定なら既定の取引一覧URL）。
     """
-    email = require_env("CASHIER_ID", "cashier のログイン用メールアドレス")
-    password = require_env("CASHIER_PW", "cashier のログイン用パスワード")
-
     last_error: Exception | None = None
     for attempt in range(1, RETRIES + 1):
         try:
             with browser_page(headless=headless) as (page, context):
-                login(page, email, password)
+                login(page, email, password, trade_url=trade_url)
                 set_date_range(page, start_date, end_date)
                 return decode_csv(download_csv(page, context))
         except Exception as e:
@@ -546,6 +546,16 @@ def fetch_range(start_date: str, end_date: str, headless: bool = True) -> str:
                 time.sleep(wait)
 
     raise EtlError(f"cashier のCSVを{RETRIES}回試しても取得できませんでした。\n{last_error}")
+
+
+def fetch_range(start_date: str, end_date: str, headless: bool = True) -> str:
+    """
+    start_date 〜 end_date の売上明細CSVを取ってきて、文字列で返す（直営＝Secretアカウント）。
+    1回のログインで期間まとめて取れる（backfill用）。失敗時は3回まで試す。
+    """
+    email = require_env("CASHIER_ID", "cashier のログイン用メールアドレス")
+    password = require_env("CASHIER_PW", "cashier のログイン用パスワード")
+    return fetch_range_creds(email, password, start_date, end_date, headless=headless)
 
 
 def fetch(business_date: str, headless: bool = True) -> str:
