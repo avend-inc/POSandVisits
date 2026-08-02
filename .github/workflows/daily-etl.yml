@@ -59,6 +59,14 @@ on:
         required: false
         default: false
         type: boolean
+      pos_limit:
+        description: "SIPOS動作確認用：先頭N接続だけ処理（空なら全接続）"
+        required: false
+        default: ""
+      pos_only_store:
+        description: "SIPOS動作確認用：url/pos_name/接続IDが一致する接続だけ処理"
+        required: false
+        default: ""
 
 # 同時に2つ走らないようにする（二重取り込みの予防）
 concurrency:
@@ -74,6 +82,8 @@ jobs:
 
     env:
       TZ: Asia/Tokyo
+      POS_LIMIT: ${{ inputs.pos_limit }}
+      POS_ONLY_STORE: ${{ inputs.pos_only_store }}
       CASHIER_ID: ${{ secrets.CASHIER_ID }}
       CASHIER_PW: ${{ secrets.CASHIER_PW }}
       DIGITAIL_ID: ${{ secrets.DIGITAIL_ID }}

@@ -320,6 +320,15 @@ def run_sipos_backfill(sb: Supabase, start: str, end: str,
     if not conns:
         print("  ℹ️ SIPOS(ezレジ)接続が未登録のためスキップ。")
         return
+    # 動作確認用：POS_LIMIT=N で先頭N接続だけ、POS_ONLY_STORE=文字 でurl/pos_name一致だけ。
+    import os as _os
+    only = (_os.environ.get("POS_ONLY_STORE") or "").strip()
+    if only:
+        conns = [c for c in conns if only in (c.get("url") or "")
+                 or only in (c.get("pos_name") or "") or str(c.get("id")) == only]
+    lim = (_os.environ.get("POS_LIMIT") or "").strip()
+    if lim.isdigit() and int(lim) > 0:
+        conns = conns[:int(lim)]
     print(f"  対象接続: {len(conns)}件")
 
     # この作り直しで置き換える pos_name（重複の元をまとめて掃除する）。
@@ -348,6 +357,7 @@ def run_sipos_backfill(sb: Supabase, start: str, end: str,
                 if df_in is None or len(df_in) == 0:
                     print(f"  【{label}】{ym}: 取り込める明細行なし。")
                     continue
+                _cols = list(df_in.columns)
                 df_in = si_clean.normalize_si_datetime(df_in)
                 common = adapters.adapt_ezregi(df_in, c["pos_name"] or "SIPOS")
 
@@ -384,8 +394,15 @@ def run_sipos_backfill(sb: Supabase, start: str, end: str,
                 print(f"  【{label}】{ym}: {txn}取引 / {int(ssum):,}円 → 追加 {ins}行"
                       f"（店舗: {', '.join(stores[:12])}）")
             except Exception as e:
+                import traceback as _tb
                 print(f"  【{label}】{ym}: ❌ 取得/保存に失敗（スキップ）: "
                       f"{type(e).__name__}: {e}")
+                try:
+                    print(f"    列={_cols}")
+                    print(f"    先頭行={df_in.iloc[0].to_dict()}")
+                except Exception:
+                    pass
+                _tb.print_exc()
 
     # 旧「取引照会」から取得した行を全期間から掃除する（ユーザー要望）。
     #   取引照会は明細が無く line_category='（明細なし）' で入っている。購買情報明細
