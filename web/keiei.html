@@ -177,12 +177,15 @@ async function renderKeiei(){
   if(trows.length){
     const rate=(a,b)=>b?Math.round(a/b*100)+"%":"—";
     h+=`<div class="panel"><h2>■ 予算達成の見込み（${ml(cur)}・目標 vs 着地）</h2><div class="tblwrap"><table><thead><tr><th>店舗</th><th>税抜売上 目標</th><th>着地見込</th><th>達成率</th><th>来店 目標</th><th>着地見込</th><th>達成率</th></tr></thead><tbody>`;
-    trows.forEach(({tok,st})=>{ const idset=new Set([st.id]); const so=curEnd?sumIds(idset,cf,curEnd):{ex:0,v:0,hasV:false};
-      const exLand=Math.round(proj(so.ex||0)), vLand=so.hasV?Math.round(proj(so.v||0)):null;
+    trows.forEach(({tok,st})=>{ const idset=new Set([st.id]);
+      const isOwn=ownOf(st.id)==="直営";
+      // 税抜売上の着地見込＝直営なら上の「各店の税抜売上着地(当月)」の編集値と連動。それ以外は実績の日割り。
+      const exLand=isOwn&&M.storeEx[st.id]?M.storeEx[st.id].cur:Math.round(proj(curEnd?sumIds(idset,cf,curEnd).ex||0:0));
+      const so=curEnd?sumIds(idset,cf,curEnd):{v:0,hasV:false}; const vLand=so.hasV?Math.round(proj(so.v||0)):null;
       const tg=T[tok][cur]||{}; const exT=tg.ex?Math.round(tg.ex):null, vT=tg.visitors?Math.round(tg.visitors):null;
-      h+=`<tr><td>${esc(st.name)}</td><td>${exT?yf(exT):"—"}</td><td>${yf(exLand)}</td><td><b>${exT?rate(exLand,exT):"—"}</b></td><td>${vT?NUM(vT)+"人":"—"}</td><td>${vLand!=null?NUM(vLand)+"人":"—"}</td><td><b>${(vT&&vLand!=null)?rate(vLand,vT):"—"}</b></td></tr>`;
+      h+=`<tr><td>${esc(st.name)}</td><td>${exT?yf(exT):"—"}</td><td id="tex-${st.id}">${yf(exLand)}</td><td><b id="trate-${st.id}">${exT?rate(exLand,exT):"—"}</b></td><td>${vT?NUM(vT)+"人":"—"}</td><td>${vLand!=null?NUM(vLand)+"人":"—"}</td><td><b>${(vT&&vLand!=null)?rate(vLand,vT):"—"}</b></td></tr>`;
     });
-    h+=`</tbody></table></div><div class="note">目標＝月次予実「予算」（Excel取込）。着地見込＝当月の実績を日割りで満月換算。達成率＝着地÷目標。</div></div>`;
+    h+=`</tbody></table></div><div class="note">目標＝月次予実「予算」（Excel取込）。税抜売上の着地見込＝上の「直営：各店の税抜売上 着地見込（当月）」の値と連動（編集・保存が反映）。来店＝当月実績の日割り。達成率＝着地÷目標。</div></div>`;
   }
   // 直営 税抜売上
   h+=`<div class="panel"><h2>■ 直営：各店の税抜売上 着地見込</h2><div class="tblwrap"><table><thead><tr><th>店舗</th><th>${ml(prev)}</th><th>${ml(cur)}</th><th>${ml(next)}</th></tr></thead><tbody>`;
@@ -210,6 +213,10 @@ async function renderKeiei(){
     let wtot=0;WH.forEach(([k])=>{const sub=num("wh|"+k+"|qty")*num("wh|"+k+"|unit");wtot+=sub;const e=D.getElementById("wsub-"+k);if(e)e.textContent=yf(sub);});
     D.getElementById("wtot").textContent=yf(wtot);
     D.getElementById("honbu").textContent=yf(roy+wtot+num("con|val"));
+    // 予算達成パネルの税抜売上着地＝直営の当月着地(編集値)と連動
+    trows.forEach(({tok,st})=>{ if(ownOf(st.id)!=="直営")return; const land=num("sx|"+st.id+"|cur");
+      const te=D.getElementById("tex-"+st.id); if(te)te.textContent=yf(land);
+      const exT=(T[tok][cur]||{}).ex; const tr=D.getElementById("trate-"+st.id); if(tr)tr.textContent=exT?(Math.round(land/exT*100)+"%"):"—"; });
   };
   D.querySelectorAll(".ki").forEach(e=>e.addEventListener("input",recalc)); recalc();
   if(loaded.src)D.getElementById("ki-status").textContent=(loaded.src==="server"?"サーバーの保存値を表示中":"この端末の保存値を表示中");
