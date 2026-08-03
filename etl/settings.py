@@ -70,14 +70,26 @@ STORE_NAME_ALIAS = {
 }
 
 
+# ブランド名の表記ゆれ（カタカナ⇔英字）。デジテールは店により
+# 「セルフルギ徳島沖浜店」/「SELFURUGI宇都宮店」のように混在するため、
+# 同じ店だと判定できるよう英字ブランドへ寄せる（実データで確認済み）。
+_BRAND_KANA = {
+    "セルフルギ": "SELFURUGI",
+    "ノータイム": "NOTIME",
+}
+
+
 def _clean_name(name: str) -> str:
     """
     店舗名の表記ゆれをそろえる下ごしらえ。
       ・全角/半角のゆれ（NFKC。全角英数→半角、全角スペース→半角 など）
       ・前後・途中の空白（半角/全角）を全部除去
+      ・ブランド名のカタカナ表記→英字表記（セルフルギ→SELFURUGI 等）
     """
     n = unicodedata.normalize("NFKC", name or "")
     n = re.sub(r"\s+", "", n)
+    for kana, latin in _BRAND_KANA.items():
+        n = n.replace(kana, latin)
     return n.strip()
 
 

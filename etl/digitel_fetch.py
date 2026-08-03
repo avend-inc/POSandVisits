@@ -69,18 +69,21 @@ def login(page, user: str | None = None, password: str | None = None) -> None:
     print("  ログイン成功")
 
 
-# 店名（NOTIME / SELFURUGI で始まる）のすぐ後ろに スラッグ（英小文字＋_）が続く並び
+# 店名（ブランド名で始まる）のすぐ後ろに スラッグ（英小文字＋_）が続く並び。
+# ⚠️ デジテール側は店により latin「SELFURUGI…」とカタカナ「セルフルギ…」が混在する
+#    （実データで確認：セルフルギ徳島沖浜店 等）。両表記を拾う。
+_BRANDS = r"NOTIME|SELFURUGI|セルフルギ|ノータイム"
 _PRIMARY_STORE_RE = re.compile(
-    r'"((?:NOTIME|SELFURUGI)[^"]{0,30}?)"\s*,\s*"([a-z][a-z0-9_]{2,})"')
+    r'"((?:' + _BRANDS + r')[^"]{0,30}?)"\s*,\s*"([a-z][a-z0-9_]{2,})"')
 # 「店らしい」名前（末尾が「店」／ブランド語を含む）＋スラッグらしき値の広めの網。
 # 診断専用：本来拾えているはずなのに拾えていない“取りこぼし候補”を可視化するために使う。
 _STORE_LIKE_RE = re.compile(
-    r'"([^"]*?(?:店|NOTIME|SELFURUGI|GARAGE)[^"]*?)"\s*,\s*"([a-z][a-z0-9_]{2,})"')
+    r'"([^"]*?(?:店|NOTIME|SELFURUGI|GARAGE|セルフルギ|ノータイム)[^"]*?)"\s*,\s*"([a-z][a-z0-9_]{2,})"')
 
 
 def _is_headquarters(name: str) -> bool:
     # 本部（ブランド名そのまま = アカウントの入れ物。slugは"code"等で店ではない）
-    return (not name) or name in ("NOTIME", "SELFURUGI") or "本部" in name
+    return (not name) or name in ("NOTIME", "SELFURUGI", "セルフルギ", "ノータイム") or "本部" in name
 
 
 def scan_store_pairs(html: str) -> tuple[dict[str, str], list[tuple[str, str]]]:
