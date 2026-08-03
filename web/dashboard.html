@@ -336,8 +336,8 @@ function sumRowsForIds(from,to,idset){ return sumRows(DATA.daily.filter(r=>idset
 // 対象期間が「その月の1日始まり＆同じ月内」なら着地見込みを出す（今月・前月など）。
 // 今月は末日がデータ最新日にクランプされる（例 7/31→7/29）ので、末日一致は要求しない。
 function isMonthPeriod(){ const ym=state.from.slice(0,7); return state.from===ym+"-01" && state.to.slice(0,7)===ym; }
-// KPIカード＆店舗比較で使う指標（税抜売上・取引数・販売数はカードに出さない）
-const KPI_CARDS=["in","v","pr","aov","upt","aup"];
+// KPIカード＆店舗比較で使う指標（取引数・販売数はカードに出さない）
+const KPI_CARDS=["in","ex","v","pr","aov","upt","aup"];
 // ---- グレード（ランク帯）判定：カテゴリ→季節、税抜単価→帯（下限しきい値で下の帯に寄せる）----
 function gradeOf(category, price){
   const season=(DATA.catSeason||{})[category];
