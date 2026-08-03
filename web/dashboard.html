@@ -530,7 +530,7 @@ function render(){
   document.querySelectorAll(".chip[data-preset]").forEach(b=>b.onclick=()=>{
     const[f,t]=presetRange(b.dataset.preset);state.from=f;state.to=t;syncDateInputs();savePeriod();draw();});
   document.getElementById("themebtn").onclick=toggleTheme;
-  const rb=document.getElementById("reportbtn"); if(rb)rb.onclick=makeReport;
+  const rb=document.getElementById("reportbtn"); if(rb)rb.onclick=openReportDialog;
   if(SB){const lb=document.getElementById("logoutbtn");if(lb)lb.onclick=doLogout;}
   draw();
 }
@@ -649,11 +649,38 @@ function rptAvgMed(ym){
   const med=n?(n%2?vals[(n-1)/2]:(vals[n/2-1]+vals[n/2])/2):0;
   return {avg,med,n};
 }
-async function makeReport(){
+// レポートボタン → 対象年月を選ぶポップアップ。選んだ月で makeReport を実行する。
+function openReportDialog(){
+  const def=rptPickYm();
+  const minYm=(DATA._min||"").slice(0,7), maxYm=(DATA._salesMax||DATA._max||"").slice(0,7);
+  const ov=document.createElement("div");
+  ov.setAttribute("role","dialog");
+  ov.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:9999;";
+  const box=document.createElement("div");
+  box.style.cssText="background:var(--surface,#fff);color:var(--ink,#1a1d21);border:1px solid var(--border,#e2e6ea);border-radius:12px;padding:22px 24px;min-width:300px;max-width:92vw;box-shadow:0 12px 44px rgba(0,0,0,.35);";
+  box.innerHTML='<div style="font-size:16px;font-weight:700;margin-bottom:6px">📊 レポート出力</div>'+
+    '<div style="font-size:13px;color:var(--muted,#8a929b);margin-bottom:14px">対象の年月を選んでください（前月比などは自動でその前月と比較します）。</div>'+
+    '<label style="font-size:13px;font-weight:600">対象年月　<input type="month" id="rpt-ym" value="'+def+'"'+(minYm?' min="'+minYm+'"':'')+(maxYm?' max="'+maxYm+'"':'')+' style="padding:7px 10px;font-size:14px;border:1px solid var(--border,#ccc);border-radius:8px;background:var(--surface,#fff);color:var(--ink,#111)"></label>'+
+    '<div style="margin-top:18px;display:flex;gap:10px;justify-content:flex-end">'+
+      '<button id="rpt-cancel" class="themebtn">キャンセル</button>'+
+      '<button id="rpt-go" class="themebtn" style="background:var(--accent,#2f6fd0);color:#fff;border-color:var(--accent,#2f6fd0)">出力する</button>'+
+    '</div>';
+  ov.appendChild(box); document.body.appendChild(ov);
+  const close=()=>{ if(ov.parentNode)document.body.removeChild(ov); document.removeEventListener("keydown",onKey); };
+  const go=()=>{ const v=(box.querySelector("#rpt-ym").value||"").trim(); if(!/^\d{4}-\d{2}$/.test(v)){alert("年月を選んでください。");return;} close(); makeReport(v); };
+  const onKey=e=>{ if(e.key==="Escape")close(); if(e.key==="Enter")go(); };
+  box.querySelector("#rpt-cancel").onclick=close;
+  box.querySelector("#rpt-go").onclick=go;
+  ov.addEventListener("click",e=>{ if(e.target===ov)close(); });
+  document.addEventListener("keydown",onKey);
+  const inp=box.querySelector("#rpt-ym"); if(inp&&inp.focus)inp.focus();
+}
+async function makeReport(ymArg){
   const btn=document.getElementById("reportbtn"); const old=btn?btn.textContent:"";
   try{
     if(btn){btn.disabled=true;btn.textContent="⏳ 生成中…";}
-    const ym=rptPickYm(), pym=prevYm(ym);
+    // ポップアップで指定された年月（YYYY-MM）があればそれを対象月に。無ければ自動選択。
+    const ym=(typeof ymArg==="string"&&/^\d{4}-\d{2}$/.test(ymArg))?ymArg:rptPickYm(), pym=prevYm(ym);
     const [cf,ct]=monthSpan(ym), [pf,pt]=monthSpan(pym);
     const [yy,mm]=ym.split("-"); const MO=+mm;
     const isCurMonth=(ym===(DATA._salesMax||"").slice(0,7));
