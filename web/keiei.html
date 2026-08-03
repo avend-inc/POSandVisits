@@ -67,7 +67,8 @@
 "use strict";
 const NUM=n=>Math.round(n).toLocaleString("ja-JP");
 const CONFIG_URL="https://rwfcsanmqvkxiuwdeddv.supabase.co/storage/v1/object/public/dashboard/config.json";
-let SB=null, DATA=null, ME={email:"",role:null};
+let SB=null, DATA=null, ME={email:"",role:null}, TARGETS=null;
+async function loadTargets(){ if(window.__TARGETS__){TARGETS=window.__TARGETS__;return;} try{TARGETS=await (await fetch("targets.json",{cache:"no-store"})).json();}catch(e){TARGETS=null;} }
 
 function screen(h){document.getElementById("app").innerHTML=h;}
 function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));}
@@ -103,7 +104,7 @@ async function ensureSupabase(){ if(window.supabase)return; await new Promise((r
   s.src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2";s.onload=res;s.onerror=()=>rej(new Error("ログイン部品を読み込めませんでした"));document.head.appendChild(s);}); }
 async function boot(){
   try{
-    if(window.__DATA__){DATA=window.__DATA__;prep();ME.role="admin";renderKeiei();return;}
+    if(window.__DATA__){DATA=window.__DATA__;prep();ME.role="admin";await loadTargets();renderKeiei();return;}
     let cfg=null; try{cfg=await (await fetch(CONFIG_URL,{cache:"no-store"})).json();}catch(e){}
     if(!cfg||cfg.mode!=="auth"){ screen('<div class="gate"><div class="logo">🧮 経営レポート</div><div class="t">ログインが必要です</div><div class="m">この画面は管理者専用です。Googleログインの設定が完了すると利用できます。</div><div style="margin-top:14px"><a class="navlink" href="index.html">← ダッシュボードへ</a></div></div>'); return; }
     await ensureSupabase();
@@ -116,7 +117,7 @@ async function boot(){
     if(ME.role!=="admin"){ showDenied(ME.role?("この画面は管理者専用です（あなたの権限："+({viewer:"閲覧",editor:"編集"}[ME.role]||ME.role)+"）"):"アクセス権がありません。管理者にユーザー追加を依頼してください。"); return; }
     const {data,error}=await SB.storage.from("dashboard-data").download("data.json");
     if(error)throw new Error("データを取得できませんでした（"+error.message+"）");
-    DATA=JSON.parse(await data.text()); prep(); renderKeiei();
+    DATA=JSON.parse(await data.text()); prep(); await loadTargets(); renderKeiei();
   }catch(e){ showError(e); }
 }
 function showLogin(){ screen('<div class="gate"><div class="logo">🧮 経営レポート</div><div class="t">ログイン</div><div class="m">管理者の Google アカウントでログインしてください。</div><button class="gbtn" id="gl"><span class="g"></span>Google でログイン</button></div>');
@@ -170,6 +171,19 @@ async function renderKeiei(){
   let h='';
   h+=`<header><h1>🧮 経営レポート</h1><span class="sub">対象 <b>${cur}</b>（前月 ${ml(prev)}／当月 ${ml(cur)}／来月 ${ml(next)}）${elapsed?`　当月は ${elapsed}/${daysIn}日で日割り換算`:'　当月データなし'}</span><a class="navlink" href="index.html" style="margin-left:auto">← ダッシュボード</a></header>`;
   h+=`<div class="note">前月＝実績確定／当月＝日割り満月換算／来月＝前年同月比で推定。自動入力ですが編集できます（「保存する」で全員に共有）。</div>`;
+  // ■ 予算達成の見込み（目標 vs 着地）※月次予実Excelから取込んだ目標を店舗に紐付け
+  const T=(TARGETS&&TARGETS.targets)||{};
+  const trows=Object.keys(T).map(tok=>({tok,st:usableStores().find(s=>(s.name||"").indexOf(tok)>=0)})).filter(x=>x.st&&T[x.tok][cur]);
+  if(trows.length){
+    const rate=(a,b)=>b?Math.round(a/b*100)+"%":"—";
+    h+=`<div class="panel"><h2>■ 予算達成の見込み（${ml(cur)}・目標 vs 着地）</h2><div class="tblwrap"><table><thead><tr><th>店舗</th><th>税抜売上 目標</th><th>着地見込</th><th>達成率</th><th>来店 目標</th><th>着地見込</th><th>達成率</th></tr></thead><tbody>`;
+    trows.forEach(({tok,st})=>{ const idset=new Set([st.id]); const so=curEnd?sumIds(idset,cf,curEnd):{ex:0,v:0,hasV:false};
+      const exLand=Math.round(proj(so.ex||0)), vLand=so.hasV?Math.round(proj(so.v||0)):null;
+      const tg=T[tok][cur]||{}; const exT=tg.ex?Math.round(tg.ex):null, vT=tg.visitors?Math.round(tg.visitors):null;
+      h+=`<tr><td>${esc(st.name)}</td><td>${exT?yf(exT):"—"}</td><td>${yf(exLand)}</td><td><b>${exT?rate(exLand,exT):"—"}</b></td><td>${vT?NUM(vT)+"人":"—"}</td><td>${vLand!=null?NUM(vLand)+"人":"—"}</td><td><b>${(vT&&vLand!=null)?rate(vLand,vT):"—"}</b></td></tr>`;
+    });
+    h+=`</tbody></table></div><div class="note">目標＝月次予実「予算」（Excel取込）。着地見込＝当月の実績を日割りで満月換算。達成率＝着地÷目標。</div></div>`;
+  }
   // 直営 税抜売上
   h+=`<div class="panel"><h2>■ 直営：各店の税抜売上 着地見込</h2><div class="tblwrap"><table><thead><tr><th>店舗</th><th>${ml(prev)}</th><th>${ml(cur)}</th><th>${ml(next)}</th></tr></thead><tbody>`;
   dstores.forEach(s=>{const e=M.storeEx[s.id];h+=`<tr><td>${esc(s.name)}</td><td>${ni("sx|"+s.id+"|prev",e.prev)}</td><td>${ni("sx|"+s.id+"|cur",e.cur)}</td><td>${ni("sx|"+s.id+"|next",e.next)}</td></tr>`;});
