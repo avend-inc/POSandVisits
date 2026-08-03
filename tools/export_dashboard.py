@@ -134,7 +134,10 @@ def build_data(sb: Supabase) -> dict:
         # in/ex=伝票の税込/税抜合計、tx=伝票数、it=販売点数(レジ袋等を除く)、
         # bag_in/bag_ex=レジ袋等の税込/税抜ぶん（KPIからは除外し、別枠で表示する）、
         # bag_q=レジ袋・クーポンの点数
-        return {"in": 0.0, "ex": 0.0, "tx": 0, "it": 0.0, "v": None,
+        # ex=税抜の「実額」合計（明細/伝票に税抜がある店）。
+        # ex_est=税抜が元データに無く 税込÷1.1 で“近似”した分（デジテールの日次合計のみの店）。
+        #   → 実額が1円も無く近似だけの店日は、税抜KPIを「—」にする（推定値を出さない）。
+        return {"in": 0.0, "ex": 0.0, "ex_est": 0.0, "tx": 0, "it": 0.0, "v": None,
                 "bag_in": 0.0, "bag_ex": 0.0, "bag_q": 0.0, "reji_in": 0.0,
                 "coup_in": 0.0, "coup_q": 0.0}   # クーポン割引額・点数（レジ袋と分離）
 
@@ -159,7 +162,14 @@ def build_data(sb: Supabase) -> dict:
         if txkey not in tx_seen:
             tx_seen.add(txkey)
             rec["in"] += in_tax
-            rec["ex"] += ex_tax
+            # 税抜が“実額”か“近似(÷1.1)”かを分ける。
+            # デジテール日次合計（pos=DIGITEL かつ 明細なし）は税抜が元データに無く近似。
+            lc0 = (r.get("line_category") or "").strip()
+            is_est_ex = (r.get("pos_name") == "DIGITEL") and (lc0 in NOCAT)
+            if is_est_ex:
+                rec["ex_est"] += ex_tax
+            else:
+                rec["ex"] += ex_tax
             rec["tx"] += 1
             # 点数は tx_qty ではなく明細(line_qty)の合計で数える（下で加算）。
             # こうするとレジ袋・クーポンを点数から自然に除ける。
@@ -228,8 +238,12 @@ def build_data(sb: Supabase) -> dict:
          # 実売上を含む）。ロイヤリティ計算に使うため、POSの純売上と1円まで一致させる。
          # （レジ袋・クーポンの内訳は下の bag/coup で別途参照できる）
          "in": round(v["in"]),
-         "ex": round(v["ex"]),
-         "tx": v["tx"], "it": round(v["it"]),
+         # デジテール日次合計のみの店日（明細＝税抜・点数が無い）は税抜・点数系KPIを null に。
+         # → ダッシュボードで税抜売上・商品単価(税抜)・平均購入数・販売数は「—」表示。
+         #   税込売上・取引数・客単価(税込)・来店・購入率は実額のまま。
+         "ex": (None if (v["ex"] <= 0 and v["ex_est"] > 0) else round(v["ex"])),
+         "tx": v["tx"],
+         "it": (None if (v["ex"] <= 0 and v["ex_est"] > 0) else round(v["it"])),
          "v": v["v"],
          "bag": round(v["reji_in"]), "bagq": round(v["bag_q"]),
          # クーポン：利用数(点数)と割引額（値引はマイナス金額で入ることが多い）
