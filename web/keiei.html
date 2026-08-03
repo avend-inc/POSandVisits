@@ -173,7 +173,7 @@ async function renderKeiei(){
   h+=`<div class="note">前月＝実績確定／当月＝日割り満月換算／来月＝前年同月比で推定。自動入力ですが編集できます（「保存する」で全員に共有）。</div>`;
   // ■ 予算達成の見込み（目標 vs 着地）※月次予実Excelから取込んだ目標を店舗に紐付け
   const T=(TARGETS&&TARGETS.targets)||{};
-  const trows=Object.keys(T).map(tok=>({tok,st:usableStores().find(s=>(s.name||"").indexOf(tok)>=0)})).filter(x=>x.st&&T[x.tok][cur]);
+  const trows=Object.keys(T).map(tok=>{ const cand=usableStores().filter(s=>(s.name||"").indexOf(tok)>=0); return {tok,st:cand.find(s=>ownOf(s.id)==="直営")||cand[0]}; }).filter(x=>x.st&&T[x.tok][cur]);
   if(trows.length){
     const rate=(a,b)=>b?Math.round(a/b*100)+"%":"—";
     h+=`<div class="panel"><h2>■ 予算達成の見込み（${ml(cur)}・目標 vs 着地）</h2><div class="tblwrap"><table><thead><tr><th>店舗</th><th>税抜売上 目標</th><th>着地見込</th><th>達成率</th><th>来店 目標</th><th>着地見込</th><th>達成率</th></tr></thead><tbody>`;
