@@ -426,6 +426,12 @@ function presetRange(kind){
     return clampRange(...monthSpan(`${py}-${String(pm).padStart(2,"0")}`));}
   return[DATA._min,DATA._max];
 }
+// 期間（state.from/to）を日付入力欄の表示にも反映する。
+// プリセット（前月・今週など）を押したときに欄が更新されず、実際の集計期間とズレるのを防ぐ。
+function syncDateInputs(){
+  const f=document.getElementById("from"), t=document.getElementById("to");
+  if(f)f.value=state.from; if(t)t.value=state.to;
+}
 
 function render(){
   syncAdminTab();
@@ -485,10 +491,10 @@ function render(){
     </div>`;
 
   document.getElementById("store").onchange=e=>{const v=e.target.value;state.store=AGG_SCOPES[v]?v:+v;draw();};
-  document.getElementById("from").onchange=e=>{state.from=clampLo(e.target.value||DATA._min);if(state.from>state.to)state.to=state.from;draw();};
-  document.getElementById("to").onchange=e=>{state.to=clampHi(e.target.value||DATA._max);if(state.to<state.from)state.from=state.to;draw();};
+  document.getElementById("from").onchange=e=>{state.from=clampLo(e.target.value||DATA._min);if(state.from>state.to)state.to=state.from;syncDateInputs();draw();};
+  document.getElementById("to").onchange=e=>{state.to=clampHi(e.target.value||DATA._max);if(state.to<state.from)state.from=state.to;syncDateInputs();draw();};
   document.querySelectorAll(".chip[data-preset]").forEach(b=>b.onclick=()=>{
-    const[f,t]=presetRange(b.dataset.preset);state.from=f;state.to=t;draw();});
+    const[f,t]=presetRange(b.dataset.preset);state.from=f;state.to=t;syncDateInputs();draw();});
   document.getElementById("themebtn").onclick=toggleTheme;
   const rb=document.getElementById("reportbtn"); if(rb)rb.onclick=makeReport;
   if(SB){const lb=document.getElementById("logoutbtn");if(lb)lb.onclick=doLogout;}
