@@ -180,7 +180,7 @@ function prep(){
   DATA._visitMax=vd.length?vd[vd.length-1]:DATA._max;
   // デジテール（入店計測）が入っている店舗の集合。来店客数・購入率はこの店だけで計算する。
   DATA._visitStores=new Set(DATA.daily.filter(r=>r.v!=null).map(r=>r.s));
-  const [tf,tt]=presetRange("thismonth"); state.from=tf; state.to=tt;  // 既定＝今月
+  const [tf,tt]=defaultRange(); state.from=tf; state.to=tt;  // 既定＝実データのある最新の月
 }
 
 function screen(html){document.getElementById("app").innerHTML=html;}
@@ -425,6 +425,20 @@ function presetRange(kind){
   if(kind==="lastmonth"){const[y,m]=today.split("-").map(Number);let py=y,pm=m-1;if(pm===0){pm=12;py--;}
     return clampRange(...monthSpan(`${py}-${String(pm).padStart(2,"0")}`));}
   return[DATA._min,DATA._max];
+}
+// 画面を開いた時の既定期間＝「実際に集計されているデータの期間」。
+// 基本は“売上データのある最新の月（1日〜最新データ日）”。ただし月初でまだ
+// 日数が少ない（最新日が5日未満）ときは、直前の“データが揃った月”を丸ごと既定にする。
+function defaultRange(){
+  const smax=DATA._salesMax||DATA._max;              // 最新の売上データ日
+  const dom=Number(smax.slice(8,10));                // その「日」
+  if(dom<5){
+    const [y,m]=smax.split("-").map(Number); let py=y,pm=m-1; if(pm===0){pm=12;py--;}
+    const prev=`${py}-${String(pm).padStart(2,"0")}`;
+    const [ps,pe]=monthSpan(prev);
+    if(pe>=DATA._min) return clampRange(ps,pe);        // 直前の月に実データがある時だけ採用
+  }
+  return clampRange(smax.slice(0,7)+"-01", smax);     // それ以外は最新月の1日〜最新データ日
 }
 
 function render(){
