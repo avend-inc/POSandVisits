@@ -127,6 +127,7 @@
   <a href="promo.html"><span class="ic">🏷️</span>販促</a>
   <a href="stock.html"><span class="ic">📦</span>棚卸</a>
   <a href="ask.html"><span class="ic">🔍</span>分析AI</a>
+  <a href="keiei.html" id="tab-keiei" style="display:none"><span class="ic">🧮</span>経営</a>
   <a href="admin.html" id="tab-admin" style="display:none"><span class="ic">⚙️</span>管理</a>
 </div></nav>
 
@@ -343,7 +344,7 @@ function aggScopeList(){
   return [{id:"own",name:SCOPE_LABEL.own}];
 }
 // 管理タブは管理者のときだけ出す（認証モードでロール確定後に呼ぶ）
-function syncAdminTab(){const t=document.getElementById("tab-admin");if(t)t.style.display=(ME&&ME.role==="admin")?"":"none";}
+function syncAdminTab(){const ad=!!(ME&&ME.role==="admin");const t=document.getElementById("tab-admin");if(t)t.style.display=ad?"":"none";const k=document.getElementById("tab-keiei");if(k)k.style.display=ad?"":"none";}
 // いま見ているグループ（直営／FC）のタブを点灯する
 function syncGroupTab(){
   const on=(GROUP==="fc")?"tab-fc":"tab-own";
@@ -477,7 +478,6 @@ function render(){
     <header>
       <h1>売上KPI管理 <span class="gbadge">${GROUP_LABEL}</span></h1>
       <button class="themebtn" id="reportbtn" style="margin-left:auto">📊 レポート</button>
-      <button class="themebtn" id="keieibtn" style="margin-left:8px;display:none">🧮 経営レポート</button>
       <button class="themebtn" id="themebtn" style="margin-left:8px">◐ 表示切替</button>
       ${SB?'<button class="themebtn" id="logoutbtn" style="margin-left:8px">ログアウト</button>':''}
     </header>
@@ -532,9 +532,6 @@ function render(){
     const[f,t]=presetRange(b.dataset.preset);state.from=f;state.to=t;syncDateInputs();savePeriod();draw();});
   document.getElementById("themebtn").onclick=toggleTheme;
   const rb=document.getElementById("reportbtn"); if(rb)rb.onclick=openReportDialog;
-  // 経営レポート：編集者(editor)・管理者(admin)だけに表示
-  const kb=document.getElementById("keieibtn");
-  if(kb){ const canK=!!(SB&&ME&&(ME.role==="editor"||ME.role==="admin")); kb.style.display=canK?"":"none"; kb.onclick=openKeieiReport; }
   if(SB){const lb=document.getElementById("logoutbtn");if(lb)lb.onclick=doLogout;}
   draw();
 }
@@ -653,160 +650,6 @@ function rptAvgMed(ym){
   const med=n?(n%2?vals[(n-1)/2]:(vals[n/2-1]+vals[n/2])/2):0;
   return {avg,med,n};
 }
-// ============================================================
-//  経営レポート（編集者専用）：着地見込＋ロイヤリティ＋卸売上。値はサーバー(mgmt_report)へ保存。
-// ============================================================
-function keieiSumIds(ids,from,to){ return sumRows(DATA.daily.filter(r=>ids.has(r.s)&&r.d>=from&&r.d<=to)); }
-async function keieiLoad(ym){
-  try{ if(SB){ const {data}=await SB.from("mgmt_report").select("payload").eq("ym",ym).maybeSingle(); if(data&&data.payload)return {src:"server",p:data.payload}; } }catch(e){}
-  try{ const s=localStorage.getItem("mgmtReport:"+ym); if(s)return {src:"local",p:JSON.parse(s)}; }catch(e){}
-  return {src:null,p:null};
-}
-async function keieiSave(ym,payload){
-  let server=false;
-  try{ if(SB){ const {error}=await SB.from("mgmt_report").upsert({ym,payload,updated_by:(ME&&ME.email)||null},{onConflict:"ym"}); if(!error)server=true; } }catch(e){}
-  try{ localStorage.setItem("mgmtReport:"+ym,JSON.stringify(payload)); }catch(e){}
-  return server;
-}
-async function openKeieiReport(){
-  if(!(SB&&ME&&(ME.role==="editor"||ME.role==="admin"))){ alert("経営レポートは編集者・管理者のみ利用できます。"); return; }
-  const yfmt=v=>"¥"+Math.round(+v||0).toLocaleString("ja-JP");
-  const mlab=m=>(+m.slice(5,7))+"月";
-  // 当月＝売上データのある最新月。前月・来月。前年同月・前年来月。
-  const cur=(DATA._salesMax||DATA._max||todayStr()).slice(0,7);
-  const prev=prevYm(cur), next=rptAddMonths(cur,1);
-  const lyCur=rptAddMonths(cur,-12), lyNext=rptAddMonths(next,-12);
-  const [cf,ct]=monthSpan(cur), [pf,pt]=monthSpan(prev);
-  const [lcf,lct]=monthSpan(lyCur), [lnf,lnt]=monthSpan(lyNext);
-  const daysIn=+ct.slice(8,10);
-  const curEnd=((DATA._salesMax||"")>=cf && (DATA._salesMax||"")<=ct)?DATA._salesMax:null;
-  const elapsed=curEnd?(+curEnd.slice(8,10)):0;
-  const proj=(sofar)=>elapsed>0?sofar/elapsed*daysIn:0;   // 当月：日割り満月換算
-  const grow=(lyc,lyn)=>(lyc>0&&lyn>0)?lyn/lyc:1;         // 来月：前年同月比の伸び率
-  // ---- 直営：各店 税抜売上 着地見込 ----
-  const dstores=usableStores().filter(s=>ownOf(s.id)==="直営");
-  const storeEx={};
-  dstores.forEach(s=>{ const id=s.id, idset=new Set([id]);
-    const pEx=keieiSumIds(idset,pf,pt).ex||0;
-    const cSo=curEnd?(keieiSumIds(idset,cf,curEnd).ex||0):0;
-    const cLand=elapsed>0?proj(cSo):pEx;
-    const g=grow(keieiSumIds(idset,lcf,lct).ex||0, keieiSumIds(idset,lnf,lnt).ex||0);
-    storeEx[id]={name:s.name, prev:Math.round(pEx), cur:Math.round(cLand), next:Math.round(cLand*g)};
-  });
-  // ---- 直営：全体KPI 着地見込（前月/当月/来月）----
-  const dids=new Set(dstores.map(s=>s.id));
-  const aggPrev=keieiSumIds(dids,pf,pt);
-  const aggSo=curEnd?keieiSumIds(dids,cf,curEnd):keieiSumIds(dids,cf,cf);
-  const f=elapsed>0?daysIn/elapsed:0;
-  const gAll=grow(keieiSumIds(dids,lcf,lct).ex||0, keieiSumIds(dids,lnf,lnt).ex||0);
-  const scale=(a,m)=>({ex:(a.ex||0)*m, in:(a.in||0)*m, tx:(a.tx||0)*m, it:(a.it||0)*m, v:(a.hasV?a.v:0)*m, txv:(a.txv||0)*m, hasV:a.hasV});
-  const aggCur=scale(aggSo,f), aggNext=scale(aggCur,gAll);
-  const kpiOf=a=>({ ex:Math.round(a.ex||0),
-    aov:(a.tx>0?Math.round(a.in/a.tx):0), upt:(a.tx>0?+(a.it/a.tx).toFixed(2):0),
-    aup:(a.it>0?Math.round(a.ex/a.it):0), v:Math.round(a.v||0),
-    pr:((a.hasV!==false)&&a.v>0?+(a.txv/a.v*100).toFixed(1):0) });
-  const KPIS=[{k:"ex",n:"税抜売上",money:1},{k:"aov",n:"客単価(税込)",money:1},{k:"upt",n:"平均購入点数",unit:"点"},{k:"aup",n:"商品単価(税抜)",money:1},{k:"v",n:"来店客数",unit:"人"},{k:"pr",n:"購入率",unit:"%"}];
-  const kpi={prev:kpiOf(aggPrev),cur:kpiOf(aggCur),next:kpiOf(aggNext)};
-  // ---- FC：ロイヤリティ用の当月着地売上（税込）----
-  const fcIds=new Set(usableStores().filter(s=>ownOf(s.id)!=="直営").map(s=>s.id));
-  const fcSo=curEnd?keieiSumIds(fcIds,cf,curEnd).in||0:0;
-  const fcLandIn=Math.round(elapsed>0?proj(fcSo):0);
-  // 自動計算値（auto）
-  const auto={ storeEx, kpi, roy:{base:fcLandIn, rate:6.8},
-    wh:{NOTIME:{qty:0,unit:0},SELFURUGI:{qty:0,unit:0},GARAGE:{qty:0,unit:0},NEW:{qty:0,unit:0}}, con:0 };
-  // 保存値を読み込んで上書き
-  const loaded=await keieiLoad(cur); const saved=loaded.p||{};
-  const merged=JSON.parse(JSON.stringify(auto));
-  if(saved.storeEx)for(const id in merged.storeEx){ if(saved.storeEx[id]){["prev","cur","next"].forEach(c=>{ if(saved.storeEx[id][c]!=null)merged.storeEx[id][c]=saved.storeEx[id][c]; });} }
-  if(saved.kpi)["prev","cur","next"].forEach(c=>{ if(saved.kpi[c])Object.assign(merged.kpi[c],saved.kpi[c]); });
-  if(saved.roy)Object.assign(merged.roy,saved.roy);
-  if(saved.wh)for(const k in merged.wh){ if(saved.wh[k])Object.assign(merged.wh[k],saved.wh[k]); }
-  if(saved.con!=null)merged.con=saved.con;
-  // ---- 画面（オーバーレイ）----
-  const IS="width:96px;padding:4px 6px;border:1px solid var(--border,#ccc);border-radius:6px;background:var(--surface,#fff);color:var(--ink,#111);text-align:right;font-size:13px;";
-  const ni=(k,v,w)=>`<input class="ki" data-k="${k}" value="${v}" inputmode="decimal" style="${IS}${w?'width:'+w+'px;':''}">`;
-  const WH=[["NOTIME","NOTIME"],["SELFURUGI","SELFURUGI"],["GARAGE","SELFURUGI GARAGE"],["NEW","新店"]];
-  const th2='style="text-align:right;padding:6px 8px;color:var(--muted,#888);font-weight:700;font-size:12px;border-bottom:2px solid var(--border,#ddd)"';
-  const thl='style="text-align:left;padding:6px 8px;color:var(--muted,#888);font-weight:700;font-size:12px;border-bottom:2px solid var(--border,#ddd)"';
-  const td='style="padding:5px 8px;border-bottom:1px solid var(--border,#eee)"';
-  const tdr='style="padding:5px 8px;border-bottom:1px solid var(--border,#eee);text-align:right"';
-  let html='';
-  html+=`<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px">
-    <div style="font-size:18px;font-weight:800">🧮 経営レポート</div>
-    <div style="font-size:13px;color:var(--muted,#888)">対象：<b>${cur}</b>（前月 ${mlab(prev)}／当月 ${mlab(cur)}／来月 ${mlab(next)}）${elapsed?`　当月は ${elapsed}/${daysIn}日で日割り換算`:'　当月データなし'}</div></div>`;
-  html+=`<div style="font-size:12px;color:var(--muted,#888);margin-bottom:14px">前月＝実績確定／当月＝日割り満月換算／来月＝前年同月比で推定。数値は自動入力ですが編集できます（保存で全員に共有）。</div>`;
-  // 直営 税抜売上
-  html+=`<div style="font-weight:700;margin:6px 0 4px">■ 直営：各店の税抜売上 着地見込</div>`;
-  html+=`<div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;min-width:520px"><thead><tr><th ${thl}>店舗</th><th ${th2}>${mlab(prev)}</th><th ${th2}>${mlab(cur)}</th><th ${th2}>${mlab(next)}</th></tr></thead><tbody>`;
-  dstores.forEach(s=>{ const e=merged.storeEx[s.id];
-    html+=`<tr><td ${td}>${esc(s.name)}</td><td ${tdr}>${ni("sx|"+s.id+"|prev",e.prev)}</td><td ${tdr}>${ni("sx|"+s.id+"|cur",e.cur)}</td><td ${tdr}>${ni("sx|"+s.id+"|next",e.next)}</td></tr>`; });
-  html+=`<tr><td ${td}><b>直営 計</b></td><td ${tdr}><b id="tot-prev"></b></td><td ${tdr}><b id="tot-cur"></b></td><td ${tdr}><b id="tot-next"></b></td></tr>`;
-  html+=`</tbody></table></div>`;
-  // 直営 KPI
-  html+=`<div style="font-weight:700;margin:16px 0 4px">■ 直営：主要KPI 着地見込（直営全体）</div>`;
-  html+=`<div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;min-width:520px"><thead><tr><th ${thl}>KPI</th><th ${th2}>${mlab(prev)}</th><th ${th2}>${mlab(cur)}</th><th ${th2}>${mlab(next)}</th></tr></thead><tbody>`;
-  KPIS.forEach(m=>{ html+=`<tr><td ${td}>${m.n}${m.unit?`<span style="color:var(--muted,#888)">（${m.unit}）</span>`:''}</td>`+
-    ["prev","cur","next"].map(c=>`<td ${tdr}>${ni("kpi|"+c+"|"+m.k,merged.kpi[c][m.k])}</td>`).join("")+`</tr>`; });
-  html+=`</tbody></table></div>`;
-  // FC 本部売上
-  html+=`<div style="font-weight:700;margin:16px 0 4px">■ FC売上（本部としての売上着地見込）</div>`;
-  // ①ロイヤリティ
-  html+=`<div style="margin:4px 0 2px;font-size:13px;font-weight:700">① ロイヤリティ</div>`;
-  html+=`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px">FC着地売上(税込) ${ni("roy|base",merged.roy.base,120)} × 率 ${ni("roy|rate",merged.roy.rate,64)}% ＝ <b id="roy-res" style="font-size:15px"></b></div>`;
-  // ②卸売上
-  html+=`<div style="margin:12px 0 2px;font-size:13px;font-weight:700">② 卸売上</div>`;
-  html+=`<div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;min-width:520px"><thead><tr><th ${thl}>区分</th><th ${th2}>発送数</th><th ${th2}>卸商品単価</th><th ${th2}>小計</th></tr></thead><tbody>`;
-  WH.forEach(([k,nm])=>{ const w=merged.wh[k];
-    html+=`<tr><td ${td}>${nm}</td><td ${tdr}>${ni("wh|"+k+"|qty",w.qty)}</td><td ${tdr}>${ni("wh|"+k+"|unit",w.unit)}</td><td ${tdr}><b id="wsub-${k}"></b></td></tr>`; });
-  html+=`<tr><td ${td}><b>卸売上 合計</b></td><td ${tdr}></td><td ${tdr}></td><td ${tdr}><b id="wtot"></b></td></tr>`;
-  html+=`</tbody></table></div>`;
-  // ③委託店
-  html+=`<div style="margin:12px 0 2px;font-size:13px;font-weight:700">③ 委託店</div>`;
-  html+=`<div style="display:flex;align-items:center;gap:8px;font-size:13px">卸売上見込み ${ni("con|val",merged.con,120)}</div>`;
-  // 本部合計
-  html+=`<div style="margin-top:14px;padding:10px 12px;background:var(--surface2,#eef);border-radius:8px;display:flex;justify-content:space-between;align-items:center"><b>本部売上見込 合計（ロイヤリティ＋卸＋委託）</b><b id="honbu" style="font-size:17px"></b></div>`;
-  // ボタン
-  html+=`<div style="margin-top:16px;display:flex;gap:10px;justify-content:flex-end;align-items:center">
-    <span id="ki-status" style="font-size:12px;color:var(--muted,#888)"></span>
-    <button id="ki-auto" class="themebtn">自動再計算</button>
-    <button id="ki-close" class="themebtn">閉じる</button>
-    <button id="ki-save" class="themebtn" style="background:var(--accent,#2f6fd0);color:#fff;border-color:var(--accent,#2f6fd0)">保存する</button></div>`;
-  const ov=document.createElement("div");
-  ov.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;z-index:9999;overflow:auto;padding:24px 12px;";
-  const box=document.createElement("div");
-  box.style.cssText="background:var(--surface,#fff);color:var(--ink,#111);border:1px solid var(--border,#e2e6ea);border-radius:12px;padding:20px 22px;width:100%;max-width:980px;box-shadow:0 14px 50px rgba(0,0,0,.4);";
-  box.innerHTML=html; ov.appendChild(box); document.body.appendChild(ov);
-  const close=()=>{ if(ov.parentNode)document.body.removeChild(ov); };
-  const g=k=>box.querySelector('[data-k="'+k+'"]'); const num=k=>{const el=g(k);return el?(parseFloat(String(el.value).replace(/[^0-9.\-]/g,''))||0):0;};
-  const recalc=()=>{
-    ["prev","cur","next"].forEach(c=>{ let t=0; dstores.forEach(s=>t+=num("sx|"+s.id+"|"+c)); const el=box.querySelector("#tot-"+c); if(el)el.textContent=yfmt(t); });
-    const roy=num("roy|base")*num("roy|rate")/100; box.querySelector("#roy-res").textContent=yfmt(roy);
-    let wtot=0; WH.forEach(([k])=>{ const sub=num("wh|"+k+"|qty")*num("wh|"+k+"|unit"); wtot+=sub; const el=box.querySelector("#wsub-"+k); if(el)el.textContent=yfmt(sub); });
-    box.querySelector("#wtot").textContent=yfmt(wtot);
-    box.querySelector("#honbu").textContent=yfmt(roy+wtot+num("con|val"));
-  };
-  box.querySelectorAll(".ki").forEach(el=>el.addEventListener("input",recalc));
-  recalc();
-  if(loaded.src)box.querySelector("#ki-status").textContent=(loaded.src==="server"?"サーバーの保存値を表示中":"この端末の保存値を表示中");
-  box.querySelector("#ki-close").onclick=close;
-  ov.addEventListener("click",e=>{ if(e.target===ov)close(); });
-  box.querySelector("#ki-auto").onclick=()=>{
-    for(const id in auto.storeEx){["prev","cur","next"].forEach(c=>{const el=g("sx|"+id+"|"+c);if(el)el.value=auto.storeEx[id][c];});}
-    ["prev","cur","next"].forEach(c=>KPIS.forEach(m=>{const el=g("kpi|"+c+"|"+m.k);if(el)el.value=auto.kpi[c][m.k];}));
-    const rb=g("roy|base");if(rb)rb.value=auto.roy.base; recalc();
-  };
-  box.querySelector("#ki-save").onclick=async()=>{
-    const payload={storeEx:{},kpi:{prev:{},cur:{},next:{}},roy:{base:num("roy|base"),rate:num("roy|rate")},wh:{},con:num("con|val")};
-    dstores.forEach(s=>{payload.storeEx[s.id]={prev:num("sx|"+s.id+"|prev"),cur:num("sx|"+s.id+"|cur"),next:num("sx|"+s.id+"|next")};});
-    ["prev","cur","next"].forEach(c=>KPIS.forEach(m=>{payload.kpi[c][m.k]=num("kpi|"+c+"|"+m.k);}));
-    WH.forEach(([k])=>{payload.wh[k]={qty:num("wh|"+k+"|qty"),unit:num("wh|"+k+"|unit")};});
-    const btn=box.querySelector("#ki-save"); btn.disabled=true; btn.textContent="保存中…";
-    const server=await keieiSave(cur,payload);
-    btn.disabled=false; btn.textContent="保存する";
-    box.querySelector("#ki-status").textContent=server?"✅ サーバーに保存しました（全員に共有）":"⚠️ この端末に保存（サーバー保存は sql/018 実行後に有効）";
-  };
-}
-
 // レポートボタン → 対象年月を選ぶポップアップ。選んだ月で makeReport を実行する。
 function openReportDialog(){
   const def=rptPickYm();
