@@ -171,24 +171,17 @@ const CONFIG_URL="https://rwfcsanmqvkxiuwdeddv.supabase.co/storage/v1/object/pub
 let SB=null, ME={email:"",role:null};   // Supabase クライアント／ログイン中ユーザー
 
 // 「プリントTシャツ」「バンド/ミュージックTシャツ」「アニメ/ムービーTシャツ」は直営店だけの細分。
-// 画面・レポート全体では「Tシャツ」に統合して扱う（原本は catRaw/catpRaw に保持＝Tシャツ内訳ページ用）。
+// ★これらを「Tシャツ」に統合するのは “レポートの中だけ”。ダッシュボード画面は原本のまま。
+//   → 統合・除外は rptCatAgg / rptBandAgg / rptCatShareMonth（レポート集計）だけで適用する。
 // Tシャツ細分の判定（表記ゆれに強いキーワード判定）。プリント／バンド・ミュージック／アニメ・ムービー。
 function tshirtTheme(c){ c=(c||""); if(c.indexOf("シャツ")<0)return null;
   if(c.indexOf("プリント")>=0)return "プリントT";
   if(c.indexOf("バンド")>=0||c.indexOf("ミュージック")>=0)return "バンド/ミュージックT";
   if(c.indexOf("アニメ")>=0||c.indexOf("ムービー")>=0||c.indexOf("映画")>=0)return "アニメ/ムービーT";
   return null; }
-// カテゴリ/価格帯ランキングから除外（セール＝バンドル割引の擬似カテゴリ。販売点数比率に出ないよう除外）
+// レポートのカテゴリ/価格帯ランキングから除外（セール＝バンドル割引の擬似カテゴリ）。画面には影響しない。
 function isDropCat(c){ c=(c||""); return c.indexOf("セール")>=0||c==="SALE"; }
 function normCat(c){ return tshirtTheme(c)?"Tシャツ":c; }
-function mergeCatRows(rows){ const m=new Map();
-  for(const r of (rows||[])){ if(isDropCat(r.c))continue; const c=normCat(r.c); const k=r.d+"|"+r.s+"|"+c;
-    let e=m.get(k); if(!e){e={d:r.d,s:r.s,c,a:0,q:0};m.set(k,e);} e.a+=r.a||0; e.q+=r.q||0; }
-  return [...m.values()]; }
-function mergeCatpRows(rows){ const m=new Map();
-  for(const r of (rows||[])){ if(isDropCat(r.c))continue; const c=normCat(r.c); const k=r.d+"|"+r.s+"|"+c+"|"+r.p;
-    let e=m.get(k); if(!e){e={d:r.d,s:r.s,c,p:r.p,a:0,q:0};m.set(k,e);} e.a+=r.a||0; e.q+=r.q||0; }
-  return [...m.values()]; }
 function prep(){
   if(!DATA||!DATA.daily)throw new Error("データが空です");
   const ds=DATA.daily.map(r=>r.d).sort();
@@ -199,13 +192,8 @@ function prep(){
   DATA._visitMax=vd.length?vd[vd.length-1]:DATA._max;
   // デジテール（入店計測）が入っている店舗の集合。来店客数・購入率はこの店だけで計算する。
   DATA._visitStores=new Set(DATA.daily.filter(r=>r.v!=null).map(r=>r.s));
-  // Tシャツ細分を統合（原本を残してから置き換える）。二重実行に備えフラグで一度だけ。
-  if(!DATA._catMerged){
-    DATA.catRaw=DATA.cat||[]; DATA.catpRaw=DATA.catp||[];
-    DATA.cat=mergeCatRows(DATA.catRaw); DATA.catp=mergeCatpRows(DATA.catpRaw);
-    if(DATA.catSeason){ for(const sc of Object.keys(DATA.catSeason)){ if(tshirtTheme(sc)&&!DATA.catSeason["Tシャツ"])DATA.catSeason["Tシャツ"]=DATA.catSeason[sc]; } }
-    DATA._catMerged=true;
-  }
+  // ※ DATA.cat / DATA.catp は原本のまま（画面のカテゴリ表示はTシャツ細分を分けて出す）。
+  //   Tシャツ統合・セール除外はレポート集計側（rptCatAgg等）だけで行う。
   const [tf,tt]=presetRange("thismonth"); state.from=tf; state.to=tt;  // 既定＝今月
   const sv=loadSavedPeriod(); if(sv){state.from=sv[0]; state.to=sv[1];}  // 他タブで選んだ期間があれば引き継ぐ
 }
@@ -584,17 +572,17 @@ function rptPickYm(){
   const dom=+smax.slice(8,10);
   return dom<=5 ? prevYm(ym) : ym;
 }
-// 店舗idの集合を述語にしてカテゴリ集計（DATA.cat）
+// 店舗idの集合を述語にしてカテゴリ集計（DATA.cat）※レポート専用：Tシャツ細分を統合・セール除外
 function rptCatAgg(from,to,pred){
   const m=new Map();
-  for(const r of (DATA.cat||[])){ if(!pred(r.s))continue; if(r.d<from||r.d>to)continue;
-    let c=m.get(r.c); if(!c){c={c:r.c,a:0,q:0};m.set(r.c,c);} c.a+=r.a||0; c.q+=r.q||0; }
+  for(const r of (DATA.cat||[])){ if(!pred(r.s))continue; if(r.d<from||r.d>to)continue; if(isDropCat(r.c))continue;
+    const cn=normCat(r.c); let c=m.get(cn); if(!c){c={c:cn,a:0,q:0};m.set(cn,c);} c.a+=r.a||0; c.q+=r.q||0; }
   return [...m.values()];
 }
-// 店舗idの集合を述語にして価格帯（税抜単価）別に集計（DATA.catp）→ バンドごとの売上・点数
+// 店舗idの集合を述語にして価格帯（税抜単価）別に集計（DATA.catp）※レポート専用：セール除外
 function rptBandAgg(from,to,pred){
   const bands=RPT_BANDS.map(b=>({label:b.label,a:0,q:0})); let ta=0,tq=0;
-  for(const r of (DATA.catp||[])){ if(!pred(r.s))continue; if(r.d<from||r.d>to)continue;
+  for(const r of (DATA.catp||[])){ if(!pred(r.s))continue; if(r.d<from||r.d>to)continue; if(isDropCat(r.c))continue;
     const i=rptBandIdx(r.p||0); bands[i].a+=r.a||0; bands[i].q+=r.q||0; ta+=r.a||0; tq+=r.q||0; }
   return {bands,ta,tq};
 }
@@ -974,7 +962,7 @@ async function makeReport(){
     const ownIds=new Set(usableStores().filter(st=>ownOf(st.id)==="直営").map(st=>st.id));
     const tagg={}; TKEYS.forEach(k=>tagg[k]={a:0,q:0});
     // 原本（統合前）カテゴリからキーワードで3種に振り分け（表記ゆれに強く。アニメ等の取りこぼしを防ぐ）
-    for(const r of (DATA.catRaw||[])){ const th2=tshirtTheme(r.c); if(!th2)continue; if(!ownIds.has(r.s))continue; if(r.d<cf||r.d>ct)continue; tagg[th2].a+=r.a||0; tagg[th2].q+=r.q||0; }
+    for(const r of (DATA.cat||[])){ const th2=tshirtTheme(r.c); if(!th2)continue; if(!ownIds.has(r.s))continue; if(r.d<cf||r.d>ct)continue; tagg[th2].a+=r.a||0; tagg[th2].q+=r.q||0; }
     const tTotA=TKEYS.reduce((x,k)=>x+tagg[k].a,0), tTotQ=TKEYS.reduce((x,k)=>x+tagg[k].q,0);
     if(tTotA<=0){
       s.addText("対象期間の直営店に、Tシャツ（プリント／バンド／アニメ）の明細データがありません。",{x:0.6,y:3.2,w:12,h:0.5,fontSize:14,color:MUT});
@@ -1125,7 +1113,7 @@ function rptKeyStores(srows){
 // 指定月の全店カテゴリ構成（明細のある店の合計）→ {m:Map(cat→売上), tot}
 function rptCatShareMonth(ym){
   const [f,t]=monthSpan(ym); const m=new Map(); let tot=0;
-  for(const r of (DATA.cat||[])){ if(r.d<f||r.d>t)continue; m.set(r.c,(m.get(r.c)||0)+(r.a||0)); tot+=r.a||0; }
+  for(const r of (DATA.cat||[])){ if(r.d<f||r.d>t)continue; if(isDropCat(r.c))continue; const c=normCat(r.c); m.set(c,(m.get(c)||0)+(r.a||0)); tot+=r.a||0; }
   return {m,tot};
 }
 // 単点分析の示唆（強み／前月比要因／打ち手）
