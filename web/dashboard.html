@@ -965,7 +965,7 @@ async function makeReport(){
     }else{
       const colW0=3.0, cw=(12.13-colW0)/scols.length;
       const yColor=y2=>y2===yy?GOLD:ICE;   // 当年＝金 ／ 前年＝水色
-      const shHead=[th("カテゴリ")].concat(scols.map(c=>({text:(+c.ym.slice(5,7))+"月",options:{bold:true,color:yColor(c.ym.slice(0,4)),fill:{color:NAVY},align:"right"}})));
+      const shHead=[th("カテゴリ")].concat(scols.map(c=>({text:c.ym.slice(0,4)+"年\n"+(+c.ym.slice(5,7))+"月",options:{bold:true,color:yColor(c.ym.slice(0,4)),fill:{color:NAVY},align:"right"}})));
       const shBody=seasonCats.map(cat=>{
         return [{text:cat,options:{bold:true}}].concat(scols.map(c=>{ const v=c.cs.m.get(cat)||0; const pct=c.cs.tot>0?v/c.cs.tot*100:0;
           return {text:pct>0?pct.toFixed(1)+"%":"—",options:{align:"right"}}; }));
