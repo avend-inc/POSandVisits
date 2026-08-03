@@ -877,13 +877,6 @@ async function makeReport(ymArg){
         {text:k.aov==null?"—":yen(k.aov),options:{align:"right"}},
         {text:k.upt==null?"—":k.upt.toFixed(2)+"点",options:{align:"right"}},
         {text:k.aup==null?"—":yen(k.aup),options:{align:"right"}}]; });
-    // FC平均（対象店）参考行
-    k5Body.push([{text:"—",options:{align:"center",fill:{color:ICE}}},{text:"FC平均（対象店）",options:{bold:true,fill:{color:ICE}}},
-      {text:man(fcAvg),options:{align:"right",bold:true,fill:{color:ICE}}},{text:"—",options:{align:"right",fill:{color:ICE}}},
-      {text:fcKC.pr==null?"—":fcKC.pr.toFixed(1)+"%",options:{align:"right",bold:true,fill:{color:ICE}}},
-      {text:fcKC.aov==null?"—":yen(fcKC.aov),options:{align:"right",bold:true,fill:{color:ICE}}},
-      {text:fcKC.upt==null?"—":fcKC.upt.toFixed(2)+"点",options:{align:"right",bold:true,fill:{color:ICE}}},
-      {text:fcKC.aup==null?"—":yen(fcKC.aup),options:{align:"right",bold:true,fill:{color:ICE}}}]);
     s.addTable([k5Head].concat(k5Body),{x:0.6,y:1.55,w:12.13,colW:[0.8,2.83,1.5,1.5,1.3,1.5,1.4,1.3],fontSize:11.5,rowH:0.5,valign:"middle",border:{pt:0.5,color:LINE},fill:{color:"FFFFFF"}});
     // 所見（トップ店の強みKPI）
     const k5notes=[];
@@ -942,15 +935,6 @@ async function makeReport(ymArg){
           {text:k.upt==null?"—":k.upt.toFixed(2)+"点",options:{align:"right"}},
           {text:k.aup==null?"—":yen(k.aup),options:{align:"right"}}]; });
       const ownIdSet=new Set(ownRows.map(r=>r.id));
-      const ownC=sumRowsForIds(cf,ct,ownIdSet), ownP=sumRowsForIds(pf,pt,ownIdSet); const ok=rptKpi(ownC);
-      const oMoM=ownP.in>0?(ownC.in/ownP.in-1)*100:null;
-      oBody.push([{text:"直営 合計",options:{bold:true,fill:{color:ICE}}},{text:man(ownC.in),options:{align:"right",bold:true,fill:{color:ICE}}},
-        {text:oMoM==null?"—":sp(oMoM),options:{align:"right",bold:true,color:clr(oMoM),fill:{color:ICE}}},
-        {text:ownC.hasV?NUM(ownC.v)+"人":"—",options:{align:"right",bold:true,fill:{color:ICE}}},
-        {text:ok.pr==null?"—":ok.pr.toFixed(1)+"%",options:{align:"right",bold:true,fill:{color:ICE}}},
-        {text:ok.aov==null?"—":yen(ok.aov),options:{align:"right",bold:true,fill:{color:ICE}}},
-        {text:ok.upt==null?"—":ok.upt.toFixed(2)+"点",options:{align:"right",bold:true,fill:{color:ICE}}},
-        {text:ok.aup==null?"—":yen(ok.aup),options:{align:"right",bold:true,fill:{color:ICE}}}]);
       const nrows=oBody.length+1, kpiEnd=1.55+nrows*0.5;
       s.addTable([oHead].concat(oBody),{x:0.6,y:1.55,w:12.13,colW:[2.83,1.5,1.3,1.5,1.3,1.5,1.4,1.3],fontSize:11.5,rowH:0.5,valign:"middle",border:{pt:0.5,color:LINE},fill:{color:"FFFFFF"}});
       // 直営の売れ筋カテゴリ（販売点数）＋主力ランク（下部に余白がある時のみ）
