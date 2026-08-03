@@ -186,13 +186,18 @@ async function renderKeiei(){
   const grow=(a,b)=>(a>0&&b>0)?b/a:1;
   // 直営 各店 税抜売上
   const dstores=usableStores().filter(s=>ownOf(s.id)==="直営");
+  // 予算（月次予実「予算」＝目標）を店舗×月で引く。翌月以降の着地見込みに使う。
+  const T=(TARGETS&&TARGETS.targets)||{};
+  const tgtEx=(sid,ym)=>{const nm=(dstores.find(s=>s.id===sid)||{}).name||"";for(const tok in T){if(nm.indexOf(tok)>=0&&T[tok][ym]&&T[tok][ym].ex!=null)return Math.round(T[tok][ym].ex);}return null;};
   // 当月着地は「予実タブ（🎯着地見込み）」と同じ計算＝編集値も反映される。
   const fcMap={}; for(const s of dstores){ try{fcMap[s.id]=await fcLandingEx(s.id,cur);}catch(e){fcMap[s.id]=null;} }
   const storeEx={};
   dstores.forEach(s=>{const idset=new Set([s.id]);
     const pEx=sumIds(idset,pf,pt).ex||0;
     const cLand=(elapsed>0&&fcMap[s.id])?fcMap[s.id].ex:pEx, g=grow(sumIds(idset,lcf,lct).ex||0,sumIds(idset,lnf,lnt).ex||0);
-    storeEx[s.id]={prev:Math.round(pEx),cur:Math.round(cLand),next:Math.round(cLand*g)};});
+    // 翌月（来月）＝予算があれば予算を着地見込みに、無ければ前年同月比推定。
+    const nb=tgtEx(s.id,next);
+    storeEx[s.id]={prev:Math.round(pEx),cur:Math.round(cLand),next:(nb!=null?nb:Math.round(cLand*g))};});
   // 直営 全体KPI
   const dids=new Set(dstores.map(s=>s.id));
   const aggPrev=sumIds(dids,pf,pt), aggSo=curEnd?sumIds(dids,cf,curEnd):sumIds(dids,cf,cf);
@@ -202,6 +207,8 @@ async function renderKeiei(){
   const kOf=a=>({ex:Math.round(a.ex||0),aov:(a.tx>0?Math.round(a.in/a.tx):0),upt:(a.tx>0?+(a.it/a.tx).toFixed(2):0),aup:(a.it>0?Math.round(a.ex/a.it):0),v:Math.round(a.v||0),pr:(a.v>0?+(a.txv/a.v*100).toFixed(1):0)});
   const KPIS=[{k:"ex",n:"税抜売上"},{k:"aov",n:"客単価(税込)"},{k:"upt",n:"平均購入点数",u:"点"},{k:"aup",n:"商品単価(税抜)"},{k:"v",n:"来店客数",u:"人"},{k:"pr",n:"購入率",u:"%"}];
   const kpi={prev:kOf(aggPrev),cur:kOf(aggCur),next:kOf(aggNext)};
+  // 直営全体の翌月 税抜売上は、各店の翌月着地（予算優先）の合計と一致させる。
+  kpi.next.ex=Math.round(dstores.reduce((t,s)=>t+(storeEx[s.id].next||0),0));
   // FC 税込着地（ロイヤリティ基礎）
   const fcIds=new Set(usableStores().filter(s=>ownOf(s.id)!=="直営").map(s=>s.id));
   const fcLandIn=Math.round(elapsed>0?proj(curEnd?sumIds(fcIds,cf,curEnd).in||0:0):0);
@@ -218,9 +225,8 @@ async function renderKeiei(){
   const WH=[["NOTIME","NOTIME"],["SELFURUGI","SELFURUGI"],["GARAGE","SELFURUGI GARAGE"],["NEW","新店"]];
   let h='';
   h+=`<header><h1>🧮 経営レポート</h1><span class="sub">対象 <b>${cur}</b>（前月 ${ml(prev)}／当月 ${ml(cur)}／来月 ${ml(next)}）${elapsed?`　当月は ${elapsed}/${daysIn}日で日割り換算`:'　当月データなし'}</span><a class="navlink" href="index.html" style="margin-left:auto">← ダッシュボード</a></header>`;
-  h+=`<div class="note">前月＝実績確定／当月＝日割り満月換算／来月＝前年同月比で推定。自動入力ですが編集できます（「保存する」で全員に共有）。</div>`;
+  h+=`<div class="note">前月＝実績確定／当月＝予実タブと同じ着地見込み／翌月以降＝<b>予算（月次予実「予算」）</b>を着地見込みに（予算が無い店のみ前年同月比で推定）。自動入力ですが編集できます（「保存する」で全員に共有）。</div>`;
   // ■ 予算達成の見込み（目標 vs 着地）※月次予実Excelから取込んだ目標を店舗に紐付け
-  const T=(TARGETS&&TARGETS.targets)||{};
   const trows=Object.keys(T).map(tok=>{ const cand=usableStores().filter(s=>(s.name||"").indexOf(tok)>=0); return {tok,st:cand.find(s=>ownOf(s.id)==="直営")||cand[0]}; }).filter(x=>x.st&&T[x.tok][cur]);
   if(trows.length){
     const rate=(a,b)=>b?Math.round(a/b*100)+"%":"—";
@@ -239,7 +245,7 @@ async function renderKeiei(){
   h+=`<div class="panel"><h2>■ 直営：各店の税抜売上 着地見込</h2><div class="tblwrap"><table><thead><tr><th>店舗</th><th>${ml(prev)}</th><th>${ml(cur)}</th><th>${ml(next)}</th></tr></thead><tbody>`;
   dstores.forEach(s=>{const e=M.storeEx[s.id];h+=`<tr><td>${esc(s.name)}</td><td>${ni("sx|"+s.id+"|prev",e.prev)}</td><td>${ni("sx|"+s.id+"|cur",e.cur)}</td><td>${ni("sx|"+s.id+"|next",e.next)}</td></tr>`;});
   h+=`<tr class="total"><td>直営 計</td><td id="tot-prev"></td><td id="tot-cur"></td><td id="tot-next"></td></tr>`;
-  h+=`</tbody></table></div><div class="note">当月（${ml(cur)}）＝<b>予実タブ「🎯着地見込み」と同じ着地</b>を表示（残平日/土日祝×1日平均＋締日までの実績。予実タブでの編集が反映）。当月の恒久的な調整は予実タブで。前月＝実績確定／来月＝前年同月比で推定。</div>`;
+  h+=`</tbody></table></div><div class="note">当月（${ml(cur)}）＝<b>予実タブ「🎯着地見込み」と同じ着地</b>（残平日/土日祝×1日平均＋締日までの実績。予実タブでの編集が反映。恒久調整は予実タブで）。翌月（${ml(next)}）＝<b>予算</b>（月次予実「予算」。無い店のみ前年同月比推定）。前月＝実績確定。</div>`;
   // 直営 KPI
   h+=`<div class="subhd">直営：主要KPI 着地見込（直営全体）</div><div class="tblwrap"><table><thead><tr><th>KPI</th><th>${ml(prev)}</th><th>${ml(cur)}</th><th>${ml(next)}</th></tr></thead><tbody>`;
   KPIS.forEach(m=>{h+=`<tr><td>${m.n}${m.u?`（${m.u}）`:''}</td>`+["prev","cur","next"].map(c=>`<td>${ni("kpi|"+c+"|"+m.k,M.kpi[c][m.k])}</td>`).join("")+`</tr>`;});
