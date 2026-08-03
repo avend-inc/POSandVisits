@@ -117,7 +117,19 @@ function prep(){ if(!DATA||!DATA.daily)throw new Error("データが空です");
   const sd=DATA.daily.filter(r=>(r.tx||0)>0||(r.in||0)>0).map(r=>r.d).sort();
   DATA._salesMax=sd.length?sd[sd.length-1]:DATA._max;
   const t=todayStr(), ym=(DATA._salesMax||DATA._max).slice(0,7);
-  state.to=DATA._max; state.from=ym+"-01"; if(state.from<DATA._min)state.from=DATA._min; }
+  state.to=DATA._max; state.from=ym+"-01"; if(state.from<DATA._min)state.from=DATA._min;
+  const sv=loadSavedPeriod(); if(sv){state.from=sv[0]; state.to=sv[1];} }  // 他タブで選んだ期間があれば引き継ぐ
+// 期間を他タブ（比較・推移など別ページ）と共有する。localStorageに保存し、各ページの初期表示で読み込む。
+function savePeriod(){ try{localStorage.setItem("kpiPeriod",JSON.stringify({from:state.from,to:state.to}));}catch(e){} }
+function loadSavedPeriod(){
+  try{const s=JSON.parse(localStorage.getItem("kpiPeriod")||"null");
+    if(s&&s.from&&s.to){
+      let f=s.from<DATA._min?DATA._min:(s.from>DATA._max?DATA._max:s.from);
+      let t=s.to>DATA._max?DATA._max:(s.to<DATA._min?DATA._min:s.to);
+      if(f>t)f=t; return [f,t];
+    }}catch(e){}
+  return null;
+}
 function showLogin(){ screen(`<div class="gate"><div class="logo">🏷️ 販促効果</div>
   <div class="t">ログイン</div><div class="m">許可されたメンバー専用です。</div>
   <button class="gbtn" id="gl"><span class="g"></span>Google でログイン</button></div>`);
@@ -196,9 +208,9 @@ function render(){
     <p class="note">SALE＝レジのバンドル（セット割）。利用数＝そのバンドルを使った伝票数、売上＝バンドル（セール商品）の金額。名称は「バンドル名 取り込み」で反映されます${namedCount?`（登録済み ${namedCount}件）`:"（未登録＝コード表示）"}。クーポンは「クーポン」明細の利用数・割引額。データは締日まで。</p>`);
   document.getElementById("themebtn").onclick=()=>{const r=document.documentElement;const c=r.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");r.setAttribute("data-theme",c==="dark"?"light":"dark");};
   document.getElementById("store").onchange=e=>{const v=e.target.value;state.store=AGG_SCOPES[v]?v:+v;render();};
-  document.getElementById("from").onchange=e=>{state.from=e.target.value||DATA._min;if(state.from>state.to)state.to=state.from;render();};
-  document.getElementById("to").onchange=e=>{state.to=e.target.value||DATA._max;if(state.to<state.from)state.from=state.to;render();};
-  document.querySelectorAll(".chip[data-preset]").forEach(b=>b.onclick=()=>{setPreset(b.dataset.preset);render();});
+  document.getElementById("from").onchange=e=>{state.from=e.target.value||DATA._min;if(state.from>state.to)state.to=state.from;savePeriod();render();};
+  document.getElementById("to").onchange=e=>{state.to=e.target.value||DATA._max;if(state.to<state.from)state.from=state.to;savePeriod();render();};
+  document.querySelectorAll(".chip[data-preset]").forEach(b=>b.onclick=()=>{setPreset(b.dataset.preset);savePeriod();render();});
   drawBody(hasBundleData);
 }
 function setPreset(k){ const t=todayStr();
