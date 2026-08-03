@@ -106,6 +106,7 @@
   <a href="promo.html"><span class="ic">🏷️</span>販促</a>
   <a href="stock.html"><span class="ic">📦</span>棚卸</a>
   <a href="ask.html"><span class="ic">🔍</span>分析AI</a>
+  <a href="keiei.html" id="tab-keiei" style="display:none"><span class="ic">🧮</span>経営</a>
   <a href="admin.html" id="tab-admin" style="display:none"><span class="ic">⚙️</span>管理</a>
 </div></nav>
 
@@ -227,7 +228,7 @@ function periods(from,to,g,storeId){
 function usableStores(){const w=new Set(DATA.daily.map(r=>r.s));return DATA.stores.filter(s=>w.has(s.id)&&s.visible!==false);}
 function brandOf(sid){const s=(DATA.stores||[]).find(x=>String(x.id)===String(sid));const n=(s&&s.name)||"";
   if(n.indexOf("SELFURUGI")===0)return "SELFURUGI"; if(n.indexOf("NOTIME")===0)return "NOTIME"; return "その他";}
-function syncAdminTab(){const t=document.getElementById("tab-admin");if(t)t.style.display=(ME&&ME.role==="admin")?"":"none";}
+function syncAdminTab(){const ad=!!(ME&&ME.role==="admin");const t=document.getElementById("tab-admin");if(t)t.style.display=ad?"":"none";const k=document.getElementById("tab-keiei");if(k)k.style.display=ad?"":"none";}
 function monthSpan(ym){const[y,m]=ym.split("-").map(Number);const last=new Date(Date.UTC(y,m,0)).getUTCDate();return[`${ym}-01`,`${ym}-${String(last).padStart(2,"0")}`];}
 function clampRange(f,t){if(f<DATA._min)f=DATA._min;if(t>DATA._max)t=DATA._max;if(f>t)f=t;return[f,t];}
 function todayStr(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;}

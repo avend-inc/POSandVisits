@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#2f6fd0">
+<meta name="robots" content="noindex, nofollow">
+<title>経営レポート｜売上KPI管理</title>
+<style>
+  :root{ --bg:#f6f7f9;--surface:#fff;--surface2:#f0f2f5;--border:#e2e6ea;--ink:#1a1d21;--ink2:#5b636c;--muted:#8a929b;
+    --accent:#2f6fd0;--accent-weak:#dbe6f7;--good:#1a8a5a;--bad:#c0392b;--shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.04);--radius:14px;}
+  @media (prefers-color-scheme: dark){:root{ --bg:#0e1116;--surface:#161b22;--surface2:#1c232c;--border:#2a323c;--ink:#e7ebef;--ink2:#a3adb8;--muted:#727d89;--accent:#5b9bff;--accent-weak:#1e2f4a;--good:#3fce8c;--bad:#ff6b5e;--shadow:0 1px 2px rgba(0,0,0,.4);}}
+  :root[data-theme="dark"]{ --bg:#0e1116;--surface:#161b22;--surface2:#1c232c;--border:#2a323c;--ink:#e7ebef;--ink2:#a3adb8;--muted:#727d89;--accent:#5b9bff;--accent-weak:#1e2f4a;--good:#3fce8c;--bad:#ff6b5e;--shadow:0 1px 2px rgba(0,0,0,.4);}
+  :root[data-theme="light"]{ --bg:#f6f7f9;--surface:#fff;--surface2:#f0f2f5;--border:#e2e6ea;--ink:#1a1d21;--ink2:#5b636c;--muted:#8a929b;--accent:#2f6fd0;--accent-weak:#dbe6f7;--good:#1a8a5a;--bad:#c0392b;--shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.04);}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,sans-serif;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;}
+  .wrap{max-width:1000px;margin:0 auto;padding:18px 16px 96px;}
+  header{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;}
+  h1{font-size:20px;margin:0;font-weight:700;letter-spacing:.02em;}
+  .sub{color:var(--muted);font-size:12px;}
+  .themebtn{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:9px;padding:8px 14px;font-size:13px;cursor:pointer;}
+  .panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px 16px;margin:14px 0;}
+  .panel h2{font-size:15px;margin:2px 0 8px;font-weight:800;}
+  .subhd{font-size:13px;font-weight:700;margin:14px 0 4px;color:var(--ink);}
+  .tblwrap{overflow-x:auto;}
+  table{width:100%;border-collapse:collapse;font-size:13px;min-width:520px;}
+  th,td{padding:6px 8px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--border);}
+  th:first-child,td:first-child{text-align:left;}
+  th{color:var(--muted);font-weight:700;font-size:12px;}
+  tr.total td{font-weight:800;background:var(--surface2);}
+  input.ki{width:108px;padding:5px 7px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--ink);text-align:right;font-size:13px;font-family:inherit;}
+  input.ki:focus{outline:none;border-color:var(--accent);}
+  .krow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;}
+  .honbu{margin-top:14px;padding:12px 14px;background:var(--accent-weak);border-radius:10px;display:flex;justify-content:space-between;align-items:center;font-weight:800;}
+  .note{font-size:11.5px;color:var(--muted);margin:8px 0 0;line-height:1.7;}
+  .actions{position:sticky;bottom:64px;background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);padding:10px 14px;margin-top:16px;display:flex;gap:10px;align-items:center;justify-content:flex-end;flex-wrap:wrap;}
+  .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:60;background:var(--surface);border-top:1px solid var(--border);box-shadow:0 -2px 12px rgba(0,0,0,.07);padding-bottom:env(safe-area-inset-bottom);}
+  .tabbar-in{max-width:720px;margin:0 auto;display:flex;}
+  .tabbar a{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 1px 9px;text-decoration:none;color:var(--ink2);font-size:10.5px;font-weight:700;}
+  .tabbar a .ic{font-size:18px;line-height:1;filter:grayscale(.25) opacity(.85);}
+  .tabbar a.on{color:var(--accent);} .tabbar a.on .ic{filter:none;}
+  .gate{max-width:440px;margin:14vh auto;text-align:center;padding:0 22px;}
+  .gate .logo{font-size:22px;font-weight:750;} .gate .t{font-size:16px;font-weight:700;margin:18px 0 6px;} .gate .m{color:var(--ink2);font-size:14px;line-height:1.8;}
+  .gbtn{display:inline-flex;align-items:center;gap:10px;background:var(--surface);color:var(--ink);border:1px solid var(--border);border-radius:11px;padding:12px 20px;font-size:15px;font-weight:700;cursor:pointer;box-shadow:var(--shadow);margin-top:18px;}
+  .gbtn .g{width:18px;height:18px;border-radius:50%;background:conic-gradient(#ea4335 0 25%,#fbbc05 0 50%,#34a853 0 75%,#4285f4 0);}
+  .navlink{color:var(--accent);text-decoration:none;font-weight:700;font-size:14px;}
+  .err{padding:20px;color:var(--bad);font-weight:600;}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"><div class="sub" style="padding:40px 0">読み込み中…</div></div>
+<nav class="tabbar"><div class="tabbar-in">
+  <a href="index.html?g=own"><span class="ic">🏢</span>直営</a>
+  <a href="index.html?g=fc"><span class="ic">🏬</span>FC</a>
+  <a href="pl.html"><span class="ic">📋</span>予実</a>
+  <a href="trends.html"><span class="ic">📈</span>推移</a>
+  <a href="promo.html"><span class="ic">🏷️</span>販促</a>
+  <a href="stock.html"><span class="ic">📦</span>棚卸</a>
+  <a href="ask.html"><span class="ic">🔍</span>分析AI</a>
+  <a href="keiei.html" class="on"><span class="ic">🧮</span>経営</a>
+  <a href="admin.html" id="tab-admin" style="display:none"><span class="ic">⚙️</span>管理</a>
+</div></nav>
+<script>
+"use strict";
+const NUM=n=>Math.round(n).toLocaleString("ja-JP");
+const CONFIG_URL="https://rwfcsanmqvkxiuwdeddv.supabase.co/storage/v1/object/public/dashboard/config.json";
+let SB=null, DATA=null, ME={email:"",role:null};
+
+function screen(h){document.getElementById("app").innerHTML=h;}
+function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));}
+function showError(e){screen('<div class="err">読み込めませんでした：'+esc(String(e&&e.message||e))+'</div>');}
+function todayStr(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;}
+function prevYm(ym){let[y,m]=ym.split("-").map(Number);m--;if(m===0){m=12;y--;}return y+"-"+String(m).padStart(2,"0");}
+function monthSpan(ym){const[y,m]=ym.split("-").map(Number);const last=new Date(Date.UTC(y,m,0)).getUTCDate();return[`${ym}-01`,`${ym}-${String(last).padStart(2,"0")}`];}
+function addMonths(ym,d){let[y,m]=ym.split("-").map(Number);m+=d;while(m<=0){m+=12;y--;}while(m>12){m-=12;y++;}return y+"-"+String(m).padStart(2,"0");}
+function ownOf(sid){const s=(DATA.stores||[]).find(x=>String(x.id)===String(sid));return (s&&s.own)?s.own:"直営";}
+function kvOf(sid){const s=(DATA.stores||[]).find(x=>String(x.id)===String(sid));return s?(s.kv!==false):true;}
+function usableStores(){const w=new Set(DATA.daily.map(r=>r.s));return DATA.stores.filter(s=>w.has(s.id)&&s.visible!==false);}
+function sumRows(rows){const p={in:0,ex:0,tx:0,txv:0,it:0,v:0,hasV:false};
+  for(const r of rows){p.in+=r.in||0;p.ex+=(r.ex!=null?r.ex:0);p.tx+=r.tx||0;p.it+=(r.it!=null?r.it:0);if(kvOf(r.s)){p.txv+=r.tx||0;if(r.v!=null){p.v+=r.v;p.hasV=true;}}}
+  if(!p.hasV)p.v=0;return p;}
+function prep(){const ds=DATA.daily.map(r=>r.d).sort();DATA._min=ds[0];DATA._max=ds[ds.length-1];
+  const sd=DATA.daily.filter(r=>(r.tx||0)>0||(r.in||0)>0).map(r=>r.d).sort();DATA._salesMax=sd.length?sd[sd.length-1]:DATA._max;}
+
+// ---- 保存（mgmt_report：月ごとJSON。サーバー未整備時は端末にフォールバック）----
+async function keieiLoad(ym){
+  try{ if(SB){ const {data}=await SB.from("mgmt_report").select("payload").eq("ym",ym).maybeSingle(); if(data&&data.payload)return {src:"server",p:data.payload}; } }catch(e){}
+  try{ const s=localStorage.getItem("mgmtReport:"+ym); if(s)return {src:"local",p:JSON.parse(s)}; }catch(e){}
+  return {src:null,p:null};
+}
+async function keieiSave(ym,payload){
+  let server=false;
+  try{ if(SB){ const {error}=await SB.from("mgmt_report").upsert({ym,payload,updated_by:(ME&&ME.email)||null},{onConflict:"ym"}); if(!error)server=true; } }catch(e){}
+  try{ localStorage.setItem("mgmtReport:"+ym,JSON.stringify(payload)); }catch(e){}
+  return server;
+}
+
+// ---- 認証（管理者のみ）＋データ読込 ----
+async function ensureSupabase(){ if(window.supabase)return; await new Promise((res,rej)=>{const s=document.createElement("script");
+  s.src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2";s.onload=res;s.onerror=()=>rej(new Error("ログイン部品を読み込めませんでした"));document.head.appendChild(s);}); }
+async function boot(){
+  try{
+    if(window.__DATA__){DATA=window.__DATA__;prep();ME.role="admin";renderKeiei();return;}
+    let cfg=null; try{cfg=await (await fetch(CONFIG_URL,{cache:"no-store"})).json();}catch(e){}
+    if(!cfg||cfg.mode!=="auth"){ screen('<div class="gate"><div class="logo">🧮 経営レポート</div><div class="t">ログインが必要です</div><div class="m">この画面は管理者専用です。Googleログインの設定が完了すると利用できます。</div><div style="margin-top:14px"><a class="navlink" href="index.html">← ダッシュボードへ</a></div></div>'); return; }
+    await ensureSupabase();
+    SB=window.supabase.createClient(cfg.url,cfg.anon,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,flowType:"pkce",storageKey:"notime-auth"}});
+    const {data:{session}}=await SB.auth.getSession();
+    if(!session){showLogin();return;}
+    ME.email=(session.user&&session.user.email||"").toLowerCase();
+    let role=null; try{const {data:u}=await SB.from("app_users").select("role").eq("email",ME.email).maybeSingle();role=u&&u.role||null;}catch(e){}
+    ME.role=role;
+    if(ME.role!=="admin"){ showDenied(ME.role?("この画面は管理者専用です（あなたの権限："+({viewer:"閲覧",editor:"編集"}[ME.role]||ME.role)+"）"):"アクセス権がありません。管理者にユーザー追加を依頼してください。"); return; }
+    const {data,error}=await SB.storage.from("dashboard-data").download("data.json");
+    if(error)throw new Error("データを取得できませんでした（"+error.message+"）");
+    DATA=JSON.parse(await data.text()); prep(); renderKeiei();
+  }catch(e){ showError(e); }
+}
+function showLogin(){ screen('<div class="gate"><div class="logo">🧮 経営レポート</div><div class="t">ログイン</div><div class="m">管理者の Google アカウントでログインしてください。</div><button class="gbtn" id="gl"><span class="g"></span>Google でログイン</button></div>');
+  document.getElementById("gl").onclick=async()=>{const redirectTo=location.origin+location.pathname; await SB.auth.signInWithOAuth({provider:"google",options:{redirectTo,queryParams:{prompt:"select_account"}}});}; }
+function showDenied(msg){ screen('<div class="gate"><div class="logo">🧮 経営レポート</div><div class="t">アクセスできません</div><div class="m">'+esc(msg)+'</div><button class="gbtn" id="lo"><span class="g"></span>別のアカウントでログイン</button><div style="margin-top:14px"><a class="navlink" href="index.html">← ダッシュボードへ</a></div></div>');
+  document.getElementById("lo").onclick=async()=>{try{await SB.auth.signOut();}catch(e){}location.reload();}; }
+
+// ---- 本体：経営レポート ----
+async function renderKeiei(){
+  const yf=v=>"¥"+Math.round(+v||0).toLocaleString("ja-JP");
+  const ml=m=>(+m.slice(5,7))+"月";
+  const cur=(DATA._salesMax||DATA._max||todayStr()).slice(0,7);
+  const prev=prevYm(cur), next=addMonths(cur,1);
+  const lyCur=addMonths(cur,-12), lyNext=addMonths(next,-12);
+  const [cf,ct]=monthSpan(cur),[pf,pt]=monthSpan(prev),[lcf,lct]=monthSpan(lyCur),[lnf,lnt]=monthSpan(lyNext);
+  const daysIn=+ct.slice(8,10);
+  const curEnd=((DATA._salesMax||"")>=cf&&(DATA._salesMax||"")<=ct)?DATA._salesMax:null;
+  const elapsed=curEnd?(+curEnd.slice(8,10)):0;
+  const sumIds=(ids,from,to)=>sumRows(DATA.daily.filter(r=>ids.has(r.s)&&r.d>=from&&r.d<=to));
+  const proj=s=>elapsed>0?s/elapsed*daysIn:0;
+  const grow=(a,b)=>(a>0&&b>0)?b/a:1;
+  // 直営 各店 税抜売上
+  const dstores=usableStores().filter(s=>ownOf(s.id)==="直営");
+  const storeEx={};
+  dstores.forEach(s=>{const idset=new Set([s.id]);
+    const pEx=sumIds(idset,pf,pt).ex||0, cSo=curEnd?(sumIds(idset,cf,curEnd).ex||0):0;
+    const cLand=elapsed>0?proj(cSo):pEx, g=grow(sumIds(idset,lcf,lct).ex||0,sumIds(idset,lnf,lnt).ex||0);
+    storeEx[s.id]={prev:Math.round(pEx),cur:Math.round(cLand),next:Math.round(cLand*g)};});
+  // 直営 全体KPI
+  const dids=new Set(dstores.map(s=>s.id));
+  const aggPrev=sumIds(dids,pf,pt), aggSo=curEnd?sumIds(dids,cf,curEnd):sumIds(dids,cf,cf);
+  const f=elapsed>0?daysIn/elapsed:0, gAll=grow(sumIds(dids,lcf,lct).ex||0,sumIds(dids,lnf,lnt).ex||0);
+  const scale=(a,m)=>({ex:(a.ex||0)*m,in:(a.in||0)*m,tx:(a.tx||0)*m,it:(a.it||0)*m,v:(a.hasV?a.v:0)*m,txv:(a.txv||0)*m,hasV:a.hasV});
+  const aggCur=scale(aggSo,f), aggNext=scale(aggCur,gAll);
+  const kOf=a=>({ex:Math.round(a.ex||0),aov:(a.tx>0?Math.round(a.in/a.tx):0),upt:(a.tx>0?+(a.it/a.tx).toFixed(2):0),aup:(a.it>0?Math.round(a.ex/a.it):0),v:Math.round(a.v||0),pr:(a.v>0?+(a.txv/a.v*100).toFixed(1):0)});
+  const KPIS=[{k:"ex",n:"税抜売上"},{k:"aov",n:"客単価(税込)"},{k:"upt",n:"平均購入点数",u:"点"},{k:"aup",n:"商品単価(税抜)"},{k:"v",n:"来店客数",u:"人"},{k:"pr",n:"購入率",u:"%"}];
+  const kpi={prev:kOf(aggPrev),cur:kOf(aggCur),next:kOf(aggNext)};
+  // FC 税込着地（ロイヤリティ基礎）
+  const fcIds=new Set(usableStores().filter(s=>ownOf(s.id)!=="直営").map(s=>s.id));
+  const fcLandIn=Math.round(elapsed>0?proj(curEnd?sumIds(fcIds,cf,curEnd).in||0:0):0);
+  const auto={storeEx,kpi,roy:{base:fcLandIn,rate:6.8},wh:{NOTIME:{qty:0,unit:0},SELFURUGI:{qty:0,unit:0},GARAGE:{qty:0,unit:0},NEW:{qty:0,unit:0}},con:0};
+  const loaded=await keieiLoad(cur), saved=loaded.p||{};
+  const M=JSON.parse(JSON.stringify(auto));
+  if(saved.storeEx)for(const id in M.storeEx){if(saved.storeEx[id])["prev","cur","next"].forEach(c=>{if(saved.storeEx[id][c]!=null)M.storeEx[id][c]=saved.storeEx[id][c];});}
+  if(saved.kpi)["prev","cur","next"].forEach(c=>{if(saved.kpi[c])Object.assign(M.kpi[c],saved.kpi[c]);});
+  if(saved.roy)Object.assign(M.roy,saved.roy);
+  if(saved.wh)for(const k in M.wh){if(saved.wh[k])Object.assign(M.wh[k],saved.wh[k]);}
+  if(saved.con!=null)M.con=saved.con;
+  const ni=(k,v)=>`<input class="ki" data-k="${k}" value="${v}" inputmode="decimal">`;
+  const WH=[["NOTIME","NOTIME"],["SELFURUGI","SELFURUGI"],["GARAGE","SELFURUGI GARAGE"],["NEW","新店"]];
+  let h='';
+  h+=`<header><h1>🧮 経営レポート</h1><span class="sub">対象 <b>${cur}</b>（前月 ${ml(prev)}／当月 ${ml(cur)}／来月 ${ml(next)}）${elapsed?`　当月は ${elapsed}/${daysIn}日で日割り換算`:'　当月データなし'}</span><a class="navlink" href="index.html" style="margin-left:auto">← ダッシュボード</a></header>`;
+  h+=`<div class="note">前月＝実績確定／当月＝日割り満月換算／来月＝前年同月比で推定。自動入力ですが編集できます（「保存する」で全員に共有）。</div>`;
+  // 直営 税抜売上
+  h+=`<div class="panel"><h2>■ 直営：各店の税抜売上 着地見込</h2><div class="tblwrap"><table><thead><tr><th>店舗</th><th>${ml(prev)}</th><th>${ml(cur)}</th><th>${ml(next)}</th></tr></thead><tbody>`;
+  dstores.forEach(s=>{const e=M.storeEx[s.id];h+=`<tr><td>${esc(s.name)}</td><td>${ni("sx|"+s.id+"|prev",e.prev)}</td><td>${ni("sx|"+s.id+"|cur",e.cur)}</td><td>${ni("sx|"+s.id+"|next",e.next)}</td></tr>`;});
+  h+=`<tr class="total"><td>直営 計</td><td id="tot-prev"></td><td id="tot-cur"></td><td id="tot-next"></td></tr>`;
+  h+=`</tbody></table></div>`;
+  // 直営 KPI
+  h+=`<div class="subhd">直営：主要KPI 着地見込（直営全体）</div><div class="tblwrap"><table><thead><tr><th>KPI</th><th>${ml(prev)}</th><th>${ml(cur)}</th><th>${ml(next)}</th></tr></thead><tbody>`;
+  KPIS.forEach(m=>{h+=`<tr><td>${m.n}${m.u?`（${m.u}）`:''}</td>`+["prev","cur","next"].map(c=>`<td>${ni("kpi|"+c+"|"+m.k,M.kpi[c][m.k])}</td>`).join("")+`</tr>`;});
+  h+=`</tbody></table></div></div>`;
+  // FC
+  h+=`<div class="panel"><h2>■ FC売上（本部としての売上着地見込）</h2>`;
+  h+=`<div class="subhd">① ロイヤリティ</div><div class="krow">FC着地売上(税込) ${ni("roy|base",M.roy.base)} × 率 ${ni("roy|rate",M.roy.rate)}% ＝ <b id="roy-res" style="font-size:15px"></b></div>`;
+  h+=`<div class="subhd">② 卸売上</div><div class="tblwrap"><table><thead><tr><th>区分</th><th>発送数</th><th>卸商品単価</th><th>小計</th></tr></thead><tbody>`;
+  WH.forEach(([k,nm])=>{const w=M.wh[k];h+=`<tr><td>${nm}</td><td>${ni("wh|"+k+"|qty",w.qty)}</td><td>${ni("wh|"+k+"|unit",w.unit)}</td><td id="wsub-${k}"></td></tr>`;});
+  h+=`<tr class="total"><td>卸売上 合計</td><td></td><td></td><td id="wtot"></td></tr></tbody></table></div>`;
+  h+=`<div class="subhd">③ 委託店</div><div class="krow">卸売上見込み ${ni("con|val",M.con)}</div>`;
+  h+=`<div class="honbu"><span>本部売上見込 合計（① ロイヤリティ＋② 卸＋③ 委託）</span><span id="honbu" style="font-size:17px"></span></div></div>`;
+  h+=`<div class="actions"><span id="ki-status" class="sub"></span><button id="ki-auto" class="themebtn">自動再計算</button><button id="ki-save" class="themebtn" style="background:var(--accent);color:#fff;border-color:var(--accent)">保存する</button></div>`;
+  screen(h);
+  const D=document, gel=k=>D.querySelector('[data-k="'+k+'"]'), num=k=>{const e=gel(k);return e?(parseFloat(String(e.value).replace(/[^0-9.\-]/g,''))||0):0;};
+  const recalc=()=>{
+    ["prev","cur","next"].forEach(c=>{let t=0;dstores.forEach(s=>t+=num("sx|"+s.id+"|"+c));const e=D.getElementById("tot-"+c);if(e)e.textContent=yf(t);});
+    const roy=num("roy|base")*num("roy|rate")/100; D.getElementById("roy-res").textContent=yf(roy);
+    let wtot=0;WH.forEach(([k])=>{const sub=num("wh|"+k+"|qty")*num("wh|"+k+"|unit");wtot+=sub;const e=D.getElementById("wsub-"+k);if(e)e.textContent=yf(sub);});
+    D.getElementById("wtot").textContent=yf(wtot);
+    D.getElementById("honbu").textContent=yf(roy+wtot+num("con|val"));
+  };
+  D.querySelectorAll(".ki").forEach(e=>e.addEventListener("input",recalc)); recalc();
+  if(loaded.src)D.getElementById("ki-status").textContent=(loaded.src==="server"?"サーバーの保存値を表示中":"この端末の保存値を表示中");
+  D.getElementById("ki-auto").onclick=()=>{
+    for(const id in auto.storeEx)["prev","cur","next"].forEach(c=>{const e=gel("sx|"+id+"|"+c);if(e)e.value=auto.storeEx[id][c];});
+    ["prev","cur","next"].forEach(c=>KPIS.forEach(m=>{const e=gel("kpi|"+c+"|"+m.k);if(e)e.value=auto.kpi[c][m.k];}));
+    const rb=gel("roy|base");if(rb)rb.value=auto.roy.base; recalc();
+  };
+  D.getElementById("ki-save").onclick=async()=>{
+    const payload={storeEx:{},kpi:{prev:{},cur:{},next:{}},roy:{base:num("roy|base"),rate:num("roy|rate")},wh:{},con:num("con|val")};
+    dstores.forEach(s=>{payload.storeEx[s.id]={prev:num("sx|"+s.id+"|prev"),cur:num("sx|"+s.id+"|cur"),next:num("sx|"+s.id+"|next")};});
+    ["prev","cur","next"].forEach(c=>KPIS.forEach(m=>{payload.kpi[c][m.k]=num("kpi|"+c+"|"+m.k);}));
+    WH.forEach(([k])=>{payload.wh[k]={qty:num("wh|"+k+"|qty"),unit:num("wh|"+k+"|unit")};});
+    const b=D.getElementById("ki-save");b.disabled=true;b.textContent="保存中…";
+    const server=await keieiSave(cur,payload);
+    b.disabled=false;b.textContent="保存する";
+    D.getElementById("ki-status").textContent=server?"✅ サーバーに保存しました（全員に共有）":"⚠️ この端末に保存（サーバー保存は sql/018 実行後に有効）";
+  };
+}
+boot();
+</script>
+</body>
+</html>
