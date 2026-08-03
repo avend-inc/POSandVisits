@@ -792,7 +792,7 @@ async function makeReport(){
         [{text:"取引数（合計）",options:{bold:true,fill:{color:ICE}}},{text:NUM(totVP.txv)+"件",options:{align:"right",bold:true,fill:{color:ICE}}},{text:NUM(totVC.txv)+"件",options:{align:"right",bold:true,fill:{color:ICE}}},{text:scnt(dVis.total),options:{align:"right",bold:true,color:clr(dVis.total),fill:{color:ICE}}}],
       ];
       s.addTable([[th("要因"),thR(pM),thR(cM),thR("取引数への寄与")]].concat(rC),{x:0.6,y:4.4,w:6.0,colW:[1.9,1.35,1.35,1.4],fontSize:11.5,rowH:0.5,valign:"middle",border:{pt:0.5,color:LINE},fill:{color:"FFFFFF"}});
-      s.addText("※ デジテール導入の既存店のみ。取引数＝来店客数×購入率で分解。",{x:0.6,y:5.95,w:6.2,h:0.3,fontSize:9,color:MUT});
+      s.addText("※ デジテール導入の既存店のみ。取引数＝来店客数×購入率で分解。",{x:0.6,y:6.46,w:6.2,h:0.2,fontSize:9,color:MUT});
     }else{
       s.addText("デジテール導入の既存店が無いため、来店×購入率の分解は割愛。",{x:0.6,y:4.45,w:6,h:0.4,fontSize:11,color:MUT});
     }
@@ -837,7 +837,7 @@ async function makeReport(){
       {text:kC.aov==null?"—":yen(kC.aov),options:{align:"right",bold:true,fill:{color:ICE}}},
       {text:kC.upt==null?"—":kC.upt.toFixed(2)+"点",options:{align:"right",bold:true,fill:{color:ICE}}},
       {text:kC.aup==null?"—":yen(kC.aup),options:{align:"right",bold:true,fill:{color:ICE}}}]);
-    s.addTable([k5Head].concat(k5Body),{x:0.6,y:1.55,w:12.13,colW:[0.8,2.83,1.5,1.5,1.3,1.5,1.4,1.3],fontSize:11.5,rowH:0.58,valign:"middle",border:{pt:0.5,color:LINE},fill:{color:"FFFFFF"}});
+    s.addTable([k5Head].concat(k5Body),{x:0.6,y:1.55,w:12.13,colW:[0.8,2.83,1.5,1.5,1.3,1.5,1.4,1.3],fontSize:11.5,rowH:0.5,valign:"middle",border:{pt:0.5,color:LINE},fill:{color:"FFFFFF"}});
     // 所見（トップ店の強みKPI）
     const k5notes=[];
     { const byAov=[...top].sort((a,b)=>(rptKpi(b.c).aov||0)-(rptKpi(a.c).aov||0))[0];
@@ -929,11 +929,12 @@ async function makeReport(){
     }
 
     // ================= Slide 10: カテゴリ比率の推移（季節性）=================
-    s=P.addSlide(); s.background={color:BG}; head(s,"カテゴリ比率の推移 ｜ 季節性","前年6・7・8月／前月／当月のカテゴリ構成比（明細のある店の合計）");
+    s=P.addSlide(); s.background={color:BG}; head(s,"カテゴリ比率の推移 ｜ 季節性","月別のカテゴリ構成比（明細のある店の合計）。列名の色で年を区別");
     const lastY=String(+yy-1);
+    // 前年 6/7/8/9月 と 当年（前月・当月）。ラベルは「◯月」のみ、年は列名の色で区別。
     const seasonDefs=[
-      {lbl:"前年6月",ym:lastY+"-06"},{lbl:"前年7月",ym:lastY+"-07"},{lbl:"前年8月",ym:lastY+"-08"},
-      {lbl:"前月",ym:pym},{lbl:"当月",ym:ym},
+      {ym:lastY+"-06"},{ym:lastY+"-07"},{ym:lastY+"-08"},{ym:lastY+"-09"},
+      {ym:pym},{ym:ym},
     ];
     const scols=seasonDefs.map(x=>({...x,cs:rptCatShareMonth(x.ym)})).filter(x=>x.cs.tot>0);
     const curCS=rptCatShareMonth(ym);
@@ -941,18 +942,21 @@ async function makeReport(){
     if(!scols.length || !seasonCats.length){
       s.addText("カテゴリ明細データがないため集計できません。",{x:0.6,y:3.2,w:12,h:0.5,fontSize:14,color:MUT});
     }else{
-      const colW0=3.2, cw=(12.13-colW0)/scols.length;
-      const shHead=[th("カテゴリ")].concat(scols.map(c=>thR(c.lbl+"\n"+c.ym)));
+      const colW0=3.0, cw=(12.13-colW0)/scols.length;
+      const yColor=y2=>y2===yy?GOLD:ICE;   // 当年＝金 ／ 前年＝水色
+      const shHead=[th("カテゴリ")].concat(scols.map(c=>({text:(+c.ym.slice(5,7))+"月",options:{bold:true,color:yColor(c.ym.slice(0,4)),fill:{color:NAVY},align:"right"}})));
       const shBody=seasonCats.map(cat=>{
         return [{text:cat,options:{bold:true}}].concat(scols.map(c=>{ const v=c.cs.m.get(cat)||0; const pct=c.cs.tot>0?v/c.cs.tot*100:0;
           return {text:pct>0?pct.toFixed(1)+"%":"—",options:{align:"right"}}; }));
       });
       s.addTable([shHead].concat(shBody),{x:0.6,y:1.6,w:12.13,colW:[colW0].concat(scols.map(()=>cw)),fontSize:11,rowH:0.5,valign:"middle",border:{pt:0.5,color:LINE},fill:{color:"FFFFFF"}});
-      const missing=seasonDefs.filter(d=>!scols.some(c=>c.ym===d.ym)).map(d=>d.lbl+"("+d.ym+")");
-      const snote=[];
-      snote.push("構成比＝各月のカテゴリ別売上 ÷ その月のカテゴリ総売上（明細のある店の合計）。季節で売れ筋が動く点に注目。");
-      if(missing.length)snote.push("データ未取得の月："+missing.join("・")+"（取得でき次第、自動で表示されます）。");
-      s.addText(snote.map(t=>({text:t,options:{bullet:{code:"25AA"},color:INK,fontSize:11.5,paraSpaceAfter:5}})),{x:0.6,y:6.2,w:12.13,h:0.9});
+      const missing=seasonDefs.filter(d=>!scols.some(c=>c.ym===d.ym)).map(d=>d.ym);
+      // 凡例（列名の色＝年）
+      s.addText([{text:"列名の色：",options:{color:INK}},{text:yy+"年",options:{color:GOLD,bold:true}},
+        {text:" ／ ",options:{color:INK}},{text:lastY+"年",options:{color:"2E5AAC",bold:true}}],
+        {x:0.6,y:6.18,w:12.13,h:0.28,fontSize:11,bullet:{code:"25AA"}});
+      const snote2="構成比＝各月のカテゴリ別売上 ÷ その月のカテゴリ総売上（明細のある店の合計）。"+(missing.length?"データ未取得の月："+missing.join("・")+"。":"");
+      s.addText(snote2,{x:0.6,y:6.52,w:12.13,h:0.4,fontSize:11,color:INK,bullet:{code:"25AA"}});
     }
     foot(s,pg());
 
@@ -973,7 +977,7 @@ async function makeReport(){
         {text:man(tagg[k].a),options:{align:"right"}},{text:(tagg[k].a/tTotA*100).toFixed(1)+"%",options:{align:"right",bold:true}},
         {text:NUM(tagg[k].q)+"点",options:{align:"right"}},{text:(tTotQ>0?(tagg[k].q/tTotQ*100).toFixed(1):"—")+"%",options:{align:"right"}}]);
       tBody.push([{text:"合計",options:{bold:true,fill:{color:ICE}}},{text:man(tTotA),options:{align:"right",bold:true,fill:{color:ICE}}},{text:"100%",options:{align:"right",bold:true,fill:{color:ICE}}},{text:NUM(tTotQ)+"点",options:{align:"right",bold:true,fill:{color:ICE}}},{text:"100%",options:{align:"right",bold:true,fill:{color:ICE}}}]);
-      s.addTable([tHead].concat(tBody),{x:0.6,y:1.6,w:12.13,colW:[4.13,2.0,2.0,2.0,2.0],fontSize:12.5,rowH:0.6,valign:"middle",border:{pt:0.5,color:LINE},fill:{color:"FFFFFF"}});
+      s.addTable([tHead].concat(tBody),{x:0.6,y:1.6,w:12.13,colW:[4.13,2.0,2.0,2.0,2.0],fontSize:12.5,rowH:0.5,valign:"middle",border:{pt:0.5,color:LINE},fill:{color:"FFFFFF"}});
       s.addText("売上構成比",{x:0.6,y:4.35,w:6,h:0.3,fontSize:13,bold:true,color:NAVY});
       let tx0=0.6; const tbw=12.13;
       TKEYS.forEach((k,i)=>{ const frac=tagg[k].a/tTotA; const w=tbw*frac; if(w<=0)return;
