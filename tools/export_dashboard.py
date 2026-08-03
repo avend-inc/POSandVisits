@@ -138,7 +138,7 @@ def build_data(sb: Supabase) -> dict:
         # ex_est=税抜が元データに無く 税込÷1.1 で“近似”した分（デジテールの日次合計のみの店）。
         #   → 実額が1円も無く近似だけの店日は、税抜KPIを「—」にする（推定値を出さない）。
         return {"in": 0.0, "ex": 0.0, "ex_est": 0.0, "tx": 0, "it": 0.0, "v": None,
-                "bag_in": 0.0, "bag_ex": 0.0, "bag_q": 0.0, "reji_in": 0.0,
+                "bag_in": 0.0, "bag_ex": 0.0, "bag_q": 0.0, "reji_in": 0.0, "reji_ex": 0.0,
                 "coup_in": 0.0, "coup_q": 0.0}   # クーポン割引額・点数（レジ袋と分離）
 
     def _num(v):
@@ -196,6 +196,7 @@ def build_data(sb: Supabase) -> dict:
             rec["bag_q"] += qty
             if c == "レジ袋":                 # レジ袋売上は単体で（クーポン割引と混ぜない）
                 rec["reji_in"] += amt * ratio
+                rec["reji_ex"] += amt         # レジ袋の税抜（客単価・商品単価から差し引く用）
             if c == "クーポン":               # クーポン割引額・利用数を分離して記録
                 rec["coup_in"] += amt * ratio
                 rec["coup_q"] += qty
@@ -245,7 +246,7 @@ def build_data(sb: Supabase) -> dict:
          "tx": v["tx"],
          "it": (None if (v["ex"] <= 0 and v["ex_est"] > 0) else round(v["it"])),
          "v": v["v"],
-         "bag": round(v["reji_in"]), "bagq": round(v["bag_q"]),
+         "bag": round(v["reji_in"]), "bagEx": round(v["reji_ex"]), "bagq": round(v["bag_q"]),
          # クーポン：利用数(点数)と割引額（値引はマイナス金額で入ることが多い）
          "coup": round(v["coup_q"]), "coupAmt": round(v["coup_in"])}
         for (d, sid), v in sorted(daily.items())
