@@ -408,7 +408,7 @@ function periods(from,to,g,storeId){
 }
 function catIn(from,to,storeId){
   const map=new Map();
-  for(const r of DATA.cat){if(!storeMatch(r.s,storeId))continue;if(r.d<from||r.d>to)continue;
+  for(const r of DATA.cat){if(!storeMatch(r.s,storeId))continue;if(r.d<from||r.d>to)continue;if(isDropCat(r.c))continue; // セール（バンドル割引）は売上・販売数ランキングに入れない
     let c=map.get(r.c);if(!c){c={c:r.c,a:0,q:0};map.set(r.c,c);}c.a+=r.a||0;c.q+=r.q||0;}
   return [...map.values()];
 }
