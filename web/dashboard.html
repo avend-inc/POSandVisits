@@ -586,6 +586,21 @@ function rptBandAgg(from,to,pred){
     const i=rptBandIdx(r.p||0); bands[i].a+=r.a||0; bands[i].q+=r.q||0; ta+=r.a||0; tq+=r.q||0; }
   return {bands,ta,tq};
 }
+// 店舗idの集合を述語にして「ランク（グレード S/A/B/C/D）」別に集計（gradeOf を使用）※レポート専用
+function rptGradeAgg(from,to,pred){
+  const g={}; let ta=0,tq=0;
+  for(const r of (DATA.catp||[])){ if(!pred(r.s))continue; if(r.d<from||r.d>to)continue; if(isDropCat(r.c))continue;
+    const gr=gradeOf(r.c,r.p); if(!gr)continue;
+    const x=g[gr]||(g[gr]={grade:gr,a:0,q:0}); x.a+=r.a||0; x.q+=r.q||0; ta+=r.a||0; tq+=r.q||0; }
+  return {g,ta,tq};
+}
+// 設定済みのランクを高い順（S,A,B,C,D…）に並べて返す
+function rptRankOrder(){
+  const ord=["S","A","B","C","D","E","F"];
+  const all=[...new Set((DATA.gradeBands||[]).map(b=>b.grade))];
+  return all.sort((a,b)=>{const ia=ord.indexOf(a),ib=ord.indexOf(b);return (ia<0?99:ia)-(ib<0?99:ib);});
+}
+function rptHasGrades(){ return !!(DATA.gradeBands&&DATA.gradeBands.length&&DATA.catSeason&&DATA.catp&&DATA.catp.length); }
 // 合計値（sumRows の結果）→ 主要KPI
 function rptKpi(p){
   // 客単価・商品単価は「レジ袋」を除いた商品ぶんで算出（レジ袋は数点の付随手数料でKPIを歪めるため）。
@@ -849,30 +864,36 @@ async function makeReport(){
     s.addText(k5notes.map(t=>({text:t,options:{bullet:{code:"25AA"},color:INK,fontSize:12,paraSpaceAfter:5}})),{x:0.6,y:5.75,w:12.13,h:1.2});
     foot(s,pg());
 
-    // ================= Slide 6: カテゴリ・価格帯ランキング（ブランド別）=================
-    s=P.addSlide(); s.background={color:BG}; head(s,"カテゴリ・価格帯ランキング ｜ ブランド別","全体／NOTIME／SELFURUGI／SELFURUGI GARAGE の売れ筋（明細のある店・セール除く。各セル＝名称／売上比・販売点数）");
-    // 行＝全体＋存在するブランド（NOTIME／SELFURUGI／SELFURUGI GARAGE）
+    // ================= Slide 6: カテゴリ・ランク別ランキング（店舗ブランド別）=================
+    s=P.addSlide(); s.background={color:BG}; head(s,"カテゴリ・ランク別ランキング ｜ 店舗ブランド別","全体／NOTIME／SELFURUGI／SELFURUGI GARAGE の売れ筋（明細のある店・セール除く。比率＝販売点数比）");
+    // 行＝全体＋存在する店舗ブランド（NOTIME／SELFURUGI／SELFURUGI GARAGE）
     const brandRows=[{key:"全体",pred:()=>true}];
     ["NOTIME","SELFURUGI","SELFURUGI GARAGE"].forEach(b=>{ if(usableStores().some(st=>rptBrand3(st.id)===b))brandRows.push({key:b,pred:sid=>rptBrand3(sid)===b}); });
-    // セル：名称＋「売上比％ ・ 販売点数」
-    const rank2=(arr,i,tot,nameOf)=>{ const e=arr[i]; if(!e)return {text:"—",options:{align:"center",color:MUT}};
-      return {text:[{text:nameOf(e)+"\n",options:{bold:true,fontSize:11}},{text:(tot>0?(e.a/tot*100).toFixed(0):"—")+"% ・ "+NUM(e.q)+"点",options:{fontSize:9.5,color:MUT}}],options:{valign:"middle"}}; };
-    // 表1：カテゴリ
-    s.addText("売れ筋カテゴリ（ブランド別 1〜3位／売上比・販売点数）",{x:0.6,y:1.38,w:11,h:0.3,fontSize:13,bold:true,color:NAVY});
+    // セル：名称＋「販売点数比％ ・ 販売点数」（比率は販売点数ベース）
+    const rank2=(arr,i,totQ,nameOf)=>{ const e=arr[i]; if(!e)return {text:"—",options:{align:"center",color:MUT}};
+      return {text:[{text:nameOf(e)+"\n",options:{bold:true,fontSize:11}},{text:(totQ>0?(e.q/totQ*100).toFixed(0):"—")+"% ・ "+NUM(e.q)+"点",options:{fontSize:9.5,color:MUT}}],options:{valign:"middle"}}; };
+    // 表1：売れ筋カテゴリ（販売点数の多い順・販売点数比）
+    s.addText("売れ筋カテゴリ（店舗ブランド別 1〜3位／販売点数比・販売点数）",{x:0.6,y:1.38,w:11,h:0.3,fontSize:13,bold:true,color:NAVY});
     const catHead=[th("区分"),th("1位"),th("2位"),th("3位")];
-    const catBody=brandRows.map(br=>{ const cats=rptCatAgg(cf,ct,br.pred).sort((a,b)=>b.a-a.a); const tot=cats.reduce((x,c)=>x+c.a,0);
-      return [{text:br.key,options:{bold:true,fontSize:11}},rank2(cats,0,tot,e=>e.c),rank2(cats,1,tot,e=>e.c),rank2(cats,2,tot,e=>e.c)]; });
+    const catBody=brandRows.map(br=>{ const cats=rptCatAgg(cf,ct,br.pred).sort((a,b)=>b.q-a.q); const totQ=cats.reduce((x,c)=>x+c.q,0);
+      return [{text:br.key,options:{bold:true,fontSize:11}},rank2(cats,0,totQ,e=>e.c),rank2(cats,1,totQ,e=>e.c),rank2(cats,2,totQ,e=>e.c)]; });
     s.addTable([catHead].concat(catBody),{x:0.6,y:1.66,w:12.13,colW:[2.53,3.2,3.2,3.2],fontSize:11,rowH:0.44,valign:"middle",border:{pt:0.5,color:LINE},fill:{color:"FFFFFF"}});
-    // 表2：価格帯
-    s.addText("価格帯（税抜売価）ランキング（ブランド別 1〜3位／売上比・販売点数）",{x:0.6,y:3.92,w:11,h:0.3,fontSize:13,bold:true,color:NAVY});
-    const bandHead=[th("区分"),th("1位"),th("2位"),th("3位")];
-    const bandBody=brandRows.map(br=>{ const {bands,ta}=rptBandAgg(cf,ct,br.pred); const bs=[...bands].filter(b=>b.a>0).sort((a,b)=>b.a-a.a);
-      return [{text:br.key,options:{bold:true,fontSize:11}},rank2(bs,0,ta,e=>e.label),rank2(bs,1,ta,e=>e.label),rank2(bs,2,ta,e=>e.label)]; });
-    s.addTable([bandHead].concat(bandBody),{x:0.6,y:4.2,w:12.13,colW:[2.53,3.2,3.2,3.2],fontSize:11,rowH:0.44,valign:"middle",border:{pt:0.5,color:LINE},fill:{color:"FFFFFF"}});
-    // ブランド別・主力価格帯の一言（高単価S〜低単価C のどちらに寄るか）
-    const bnote=brandRows.filter(b=>b.key!=="全体").map(br=>{ const {bands,ta}=rptBandAgg(cf,ct,br.pred); const tb=[...bands].filter(b=>b.a>0).sort((a,b)=>b.a-a.a)[0]; return tb?br.key+"＝"+tb.label+"（"+(ta>0?(tb.a/ta*100).toFixed(0):"—")+"%）":null; }).filter(Boolean);
-    if(bnote.length)s.addText("主力価格帯："+bnote.join("　／　"),{x:0.6,y:6.46,w:12.13,h:0.28,fontSize:11,bold:true,color:INK});
-    s.addText("※ 価格帯は税抜売価（セール適用後）ベース。定価ベースは元データに定価が無いため未対応。",{x:0.6,y:6.84,w:12.13,h:0.2,fontSize:9,color:MUT});
+    // 表2：ランク（税抜単価グレード S/A/B/C/D）別の販売点数比
+    s.addText("ランク別（税抜単価グレード）の販売点数比 ｜ 店舗ブランド別",{x:0.6,y:3.92,w:11,h:0.3,fontSize:13,bold:true,color:NAVY});
+    if(rptHasGrades()){
+      const grades=rptRankOrder();
+      const gHead=[th("区分")].concat(grades.map(g=>thR("ランク"+g)));
+      const gBody=brandRows.map(br=>{ const {g,tq}=rptGradeAgg(cf,ct,br.pred);
+        return [{text:br.key,options:{bold:true,fontSize:11}}].concat(grades.map(gr=>{ const v=(g[gr]?g[gr].q:0); const pct=tq>0?v/tq*100:0;
+          return {text:pct>0?pct.toFixed(0)+"%":"—",options:{align:"right"}}; })); });
+      s.addTable([gHead].concat(gBody),{x:0.6,y:4.2,w:12.13,colW:[2.53].concat(grades.map(()=>(12.13-2.53)/grades.length)),fontSize:11,rowH:0.44,valign:"middle",border:{pt:0.5,color:LINE},fill:{color:"FFFFFF"}});
+      // 主力ランクの一言（各ブランドで最も点数の多いランク）
+      const bnote=brandRows.filter(b=>b.key!=="全体").map(br=>{ const {g,tq}=rptGradeAgg(cf,ct,br.pred); const top=Object.values(g).sort((a,b)=>b.q-a.q)[0]; return top?br.key+"＝ランク"+top.grade+"（"+(tq>0?(top.q/tq*100).toFixed(0):"—")+"%）":null; }).filter(Boolean);
+      if(bnote.length)s.addText("主力ランク："+bnote.join("　／　"),{x:0.6,y:6.46,w:12.13,h:0.28,fontSize:11,bold:true,color:INK});
+      s.addText("※ ランク＝カテゴリ（季節SS/AW）×税抜単価のグレード設定。比率＝各区分のランク対象点数に占める割合。",{x:0.6,y:6.84,w:12.13,h:0.2,fontSize:9,color:MUT});
+    }else{
+      s.addText("ランク（グレード）の設定が未登録のため表示できません。管理画面でカテゴリの季節とランク帯を設定してください。",{x:0.6,y:4.3,w:12.1,h:0.5,fontSize:12,color:MUT});
+    }
     foot(s,pg());
 
     // ================= Slide 7〜9: 注目3店の単点分析（深掘り）=================
@@ -910,17 +931,17 @@ async function makeReport(){
           [{text:"売上",options:{bold:true,fill:{color:ICE}}},{text:man(r.p.in),options:{align:"right",bold:true,fill:{color:ICE}}},{text:man(r.c.in),options:{align:"right",bold:true,fill:{color:ICE}}},{text:sy(dS.total),options:{align:"right",bold:true,color:clr(dS.total),fill:{color:ICE}}}],
         ],{x:6.5,y:1.77,w:6.2,colW:[1.5,1.6,1.6,1.5],fontSize:11,rowH:0.42,valign:"middle",border:{pt:0.5,color:LINE},fill:{color:"FFFFFF"}});
       }else{ s.addText("前月データなし（新規オープン等のため前月比は割愛）",{x:6.5,y:1.82,w:6.2,h:0.4,fontSize:11,color:MUT}); }
-      // 右下：カテゴリTOP3 ＋ 主力価格帯
-      const scats=rptCatAgg(cf,ct,sid=>String(sid)===String(r.id)).sort((a,b)=>b.a-a.a);
-      const {bands:sbands,ta:sta}=rptBandAgg(cf,ct,sid=>String(sid)===String(r.id));
-      s.addText("売れ筋カテゴリ / 主力価格帯",{x:6.5,y:3.55,w:6.2,h:0.3,fontSize:12,bold:true,color:NAVY});
+      // 右下：売れ筋カテゴリTOP3（販売点数比）＋ 主力ランク
+      const scats=rptCatAgg(cf,ct,sid=>String(sid)===String(r.id)).sort((a,b)=>b.q-a.q);
+      const {g:sg,tq:stq}=rptGradeAgg(cf,ct,sid=>String(sid)===String(r.id));
+      s.addText("売れ筋カテゴリ（販売点数）/ 主力ランク",{x:6.5,y:3.55,w:6.2,h:0.3,fontSize:12,bold:true,color:NAVY});
       if(scats.length){
-        const ctot=scats.reduce((x,c)=>x+c.a,0)||1;
-        const rows3=scats.slice(0,3).map((c,i)=>[{text:String(i+1),options:{align:"center",color:GOLD,bold:true}},{text:c.c},{text:man(c.a),options:{align:"right"}},{text:(c.a/ctot*100).toFixed(0)+"%",options:{align:"right"}}]);
-        s.addTable([[th("#"),th("カテゴリ"),thR("売上"),thR("比率")]].concat(rows3),{x:6.5,y:3.87,w:6.2,colW:[0.6,3.0,1.6,1.0],fontSize:11,rowH:0.4,valign:"middle",border:{pt:0.5,color:LINE},fill:{color:"FFFFFF"}});
-        const tb=[...sbands].sort((a,b)=>b.a-a.a)[0];
-        if(tb&&tb.a>0)s.addText("主力価格帯："+tb.label+"（この店の売上の "+(sta>0?(tb.a/sta*100).toFixed(0):"—")+"%）",{x:6.5,y:5.58,w:6.2,h:0.3,fontSize:11,bold:true,color:INK});
-      }else{ s.addText("明細（品目）データなし ＝ カテゴリ・価格帯は集計対象外",{x:6.5,y:3.9,w:6.2,h:0.4,fontSize:11,color:MUT}); }
+        const cq=scats.reduce((x,c)=>x+c.q,0)||1;
+        const rows3=scats.slice(0,3).map((c,i)=>[{text:String(i+1),options:{align:"center",color:GOLD,bold:true}},{text:c.c},{text:NUM(c.q)+"点",options:{align:"right"}},{text:(c.q/cq*100).toFixed(0)+"%",options:{align:"right"}}]);
+        s.addTable([[th("#"),th("カテゴリ"),thR("販売点数"),thR("点数比")]].concat(rows3),{x:6.5,y:3.87,w:6.2,colW:[0.6,3.0,1.6,1.0],fontSize:11,rowH:0.4,valign:"middle",border:{pt:0.5,color:LINE},fill:{color:"FFFFFF"}});
+        const tg=Object.values(sg).sort((a,b)=>b.q-a.q)[0];
+        if(tg)s.addText("主力ランク：ランク"+tg.grade+"（この店の点数の "+(stq>0?(tg.q/stq*100).toFixed(0):"—")+"%）",{x:6.5,y:5.58,w:6.2,h:0.3,fontSize:11,bold:true,color:INK});
+      }else{ s.addText("明細（品目）データなし ＝ カテゴリ・ランクは集計対象外",{x:6.5,y:3.9,w:6.2,h:0.4,fontSize:11,color:MUT}); }
       // 下：示唆
       const sb2=rptSpotInsight(r,kC,so.key);
       s.addText("示唆",{x:0.6,y:5.98,w:6,h:0.3,fontSize:13,bold:true,color:GOLD});
