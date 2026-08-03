@@ -86,6 +86,51 @@ function sumRows(rows){const p={in:0,ex:0,tx:0,txv:0,it:0,v:0,hasV:false};
 function prep(){const ds=DATA.daily.map(r=>r.d).sort();DATA._min=ds[0];DATA._max=ds[ds.length-1];
   const sd=DATA.daily.filter(r=>(r.tx||0)>0||(r.in||0)>0).map(r=>r.d).sort();DATA._salesMax=sd.length?sd[sd.length-1]:DATA._max;}
 
+// ---- 着地見込み（予実タブ pl.html と同じ計算） ----
+//  当月の税抜売上 着地見込は、予実タブ（🎯着地見込み）の計算・編集値と一致させる。
+//  経営レポート独自の日割り(proj)だと平日/土日の偏りを無視して当月頭で暴れるため、
+//  予実タブと同じ「平日/土日祝の1日平均 × 残日数 ＋ 締日までの実績」で出す。
+function _isWeekend(d){const g=new Date(d+"T00:00:00Z").getUTCDay();return g===0||g===6;}
+function _addDays(d,n){const t=new Date(d+"T00:00:00Z");t.setUTCDate(t.getUTCDate()+n);return t.toISOString().slice(0,10);}
+function _monthEnd(ym){const[y,m]=ym.split("-").map(Number);const last=new Date(Date.UTC(y,m,0)).getUTCDate();return `${ym}-${String(last).padStart(2,"0")}`;}
+// 予実タブが保存した着地見込みの上書き値（page="fc"）を読む。編集が全端末に反映される。
+async function planLoadFc(scope,ym){
+  if(SB){try{const {data}=await SB.from("plan_data").select("data").eq("page","fc").eq("scope",String(scope)).eq("ym",ym).maybeSingle();return data?(data.data||null):null;}catch(e){return null;}}
+  try{const s=localStorage.getItem(`notime-fc-${scope}-${ym}`);return s?JSON.parse(s):null;}catch(e){return null;}
+}
+// pl.html computeAuto 相当（税込 in／税抜 ex のみ）。締日までの実績・平日/土日祝1日平均・残日数を出す。
+function fcAuto(storeId,ym){
+  const ids=new Set([storeId]);
+  const mS=ym+"-01", mE=_monthEnd(ym), today=todayStr(), winStart=_addDays(mS,-56);
+  const byDate={};
+  for(const r of DATA.daily){ if(!ids.has(r.s))continue; if(r.d<winStart||r.d>mE)continue;
+    const a=byDate[r.d]||(byDate[r.d]={in:0,ex:0}); a.in+=r.in||0; a.ex+=(r.ex!=null?r.ex:0); }
+  const monthDates=Object.keys(byDate).filter(d=>d>=mS&&d<=mE).sort();
+  const closing=monthDates.filter(d=>d<=today).slice(-1)[0]||null;
+  let tdIn=0,tdEx=0; const wk={in:0,n:0}, we={in:0,n:0};
+  if(closing) for(const d of monthDates){ if(d>closing)continue; const a=byDate[d]; tdIn+=a.in; tdEx+=a.ex; const b=_isWeekend(d)?we:wk; b.in+=a.in; b.n++; }
+  const trWk={in:0,n:0}, trWe={in:0,n:0};
+  const trFrom=_addDays(closing||today,-56), trTo=closing||_addDays(today,-1);
+  for(const d of Object.keys(byDate)){ if(d<trFrom||d>trTo)continue; const a=byDate[d]; const b=_isWeekend(d)?trWe:trWk; b.in+=a.in; b.n++; }
+  const avgWk = wk.n? wk.in/wk.n : (trWk.n? trWk.in/trWk.n : 0);
+  const avgWe = we.n? we.in/we.n : (trWe.n? trWe.in/trWe.n : 0);
+  let remWk=0,remWe=0; const start=closing?_addDays(closing,1):mS;
+  for(let d=start; d<=mE; d=_addDays(d,1)){ if(_isWeekend(d))remWe++; else remWk++; }
+  const exRatio = tdIn? tdEx/tdIn : 0.91;
+  return {tdIn,tdEx,avgWk,avgWe,remWk,remWe,exRatio,closing};
+}
+// 予実タブと同じ税抜着地見込み（保存済み上書きがあれば反映）。戻り: {ex:税抜着地, inLand:税込着地}
+async function fcLandingEx(storeId,ym){
+  const A=fcAuto(storeId,ym), o=await planLoadFc(storeId,ym);
+  // v が未指定(null/undefined/空)なら既定値dへ。※Number(null)===0 の罠を避ける。
+  const num=(v,d)=>{if(v==null||v==="")return d;const n=Number(v);return Number.isFinite(n)?n:d;};
+  const remWk=num(o&&o.remWk,A.remWk), remWe=num(o&&o.remWe,A.remWe);
+  const avgWk=num(o&&o.avg&&o.avg.in&&o.avg.in.wk, Math.round(A.avgWk));
+  const avgWe=num(o&&o.avg&&o.avg.in&&o.avg.in.we, Math.round(A.avgWe));
+  const Lin = A.tdIn + remWk*avgWk + remWe*avgWe;
+  return {ex:Math.round(Lin*A.exRatio), inLand:Math.round(Lin), closing:A.closing};
+}
+
 // ---- 保存（mgmt_report：月ごとJSON。サーバー未整備時は端末にフォールバック）----
 async function keieiLoad(ym){
   try{ if(SB){ const {data}=await SB.from("mgmt_report").select("payload").eq("ym",ym).maybeSingle(); if(data&&data.payload)return {src:"server",p:data.payload}; } }catch(e){}
@@ -141,10 +186,12 @@ async function renderKeiei(){
   const grow=(a,b)=>(a>0&&b>0)?b/a:1;
   // 直営 各店 税抜売上
   const dstores=usableStores().filter(s=>ownOf(s.id)==="直営");
+  // 当月着地は「予実タブ（🎯着地見込み）」と同じ計算＝編集値も反映される。
+  const fcMap={}; for(const s of dstores){ try{fcMap[s.id]=await fcLandingEx(s.id,cur);}catch(e){fcMap[s.id]=null;} }
   const storeEx={};
   dstores.forEach(s=>{const idset=new Set([s.id]);
-    const pEx=sumIds(idset,pf,pt).ex||0, cSo=curEnd?(sumIds(idset,cf,curEnd).ex||0):0;
-    const cLand=elapsed>0?proj(cSo):pEx, g=grow(sumIds(idset,lcf,lct).ex||0,sumIds(idset,lnf,lnt).ex||0);
+    const pEx=sumIds(idset,pf,pt).ex||0;
+    const cLand=(elapsed>0&&fcMap[s.id])?fcMap[s.id].ex:pEx, g=grow(sumIds(idset,lcf,lct).ex||0,sumIds(idset,lnf,lnt).ex||0);
     storeEx[s.id]={prev:Math.round(pEx),cur:Math.round(cLand),next:Math.round(cLand*g)};});
   // 直営 全体KPI
   const dids=new Set(dstores.map(s=>s.id));
@@ -161,7 +208,8 @@ async function renderKeiei(){
   const auto={storeEx,kpi,roy:{base:fcLandIn,rate:6.8},wh:{NOTIME:{qty:0,unit:0},SELFURUGI:{qty:0,unit:0},GARAGE:{qty:0,unit:0},NEW:{qty:0,unit:0}},con:0};
   const loaded=await keieiLoad(cur), saved=loaded.p||{};
   const M=JSON.parse(JSON.stringify(auto));
-  if(saved.storeEx)for(const id in M.storeEx){if(saved.storeEx[id])["prev","cur","next"].forEach(c=>{if(saved.storeEx[id][c]!=null)M.storeEx[id][c]=saved.storeEx[id][c];});}
+  // 当月(cur)は予実タブの着地見込みが正（そちらで編集）。経営レポート保存の上書きは前月/来月のみ。
+  if(saved.storeEx)for(const id in M.storeEx){if(saved.storeEx[id])["prev","next"].forEach(c=>{if(saved.storeEx[id][c]!=null)M.storeEx[id][c]=saved.storeEx[id][c];});}
   if(saved.kpi)["prev","cur","next"].forEach(c=>{if(saved.kpi[c])Object.assign(M.kpi[c],saved.kpi[c]);});
   if(saved.roy)Object.assign(M.roy,saved.roy);
   if(saved.wh)for(const k in M.wh){if(saved.wh[k])Object.assign(M.wh[k],saved.wh[k]);}
@@ -185,13 +233,13 @@ async function renderKeiei(){
       const tg=T[tok][cur]||{}; const exT=tg.ex?Math.round(tg.ex):null, vT=tg.visitors?Math.round(tg.visitors):null;
       h+=`<tr><td>${esc(st.name)}</td><td>${exT?yf(exT):"—"}</td><td id="tex-${st.id}">${yf(exLand)}</td><td><b id="trate-${st.id}">${exT?rate(exLand,exT):"—"}</b></td><td>${vT?NUM(vT)+"人":"—"}</td><td>${vLand!=null?NUM(vLand)+"人":"—"}</td><td><b>${(vT&&vLand!=null)?rate(vLand,vT):"—"}</b></td></tr>`;
     });
-    h+=`</tbody></table></div><div class="note">目標＝月次予実「予算」（Excel取込）。税抜売上の着地見込＝上の「直営：各店の税抜売上 着地見込（当月）」の値と連動（編集・保存が反映）。来店＝当月実績の日割り。達成率＝着地÷目標。</div></div>`;
+    h+=`</tbody></table></div><div class="note">目標＝月次予実「予算」（Excel取込）。税抜売上の着地見込＝<b>予実タブ「🎯着地見込み」と同じ計算</b>（そこで編集した値もそのまま反映）。来店＝当月実績の日割り。達成率＝着地÷目標。</div></div>`;
   }
   // 直営 税抜売上
   h+=`<div class="panel"><h2>■ 直営：各店の税抜売上 着地見込</h2><div class="tblwrap"><table><thead><tr><th>店舗</th><th>${ml(prev)}</th><th>${ml(cur)}</th><th>${ml(next)}</th></tr></thead><tbody>`;
   dstores.forEach(s=>{const e=M.storeEx[s.id];h+=`<tr><td>${esc(s.name)}</td><td>${ni("sx|"+s.id+"|prev",e.prev)}</td><td>${ni("sx|"+s.id+"|cur",e.cur)}</td><td>${ni("sx|"+s.id+"|next",e.next)}</td></tr>`;});
   h+=`<tr class="total"><td>直営 計</td><td id="tot-prev"></td><td id="tot-cur"></td><td id="tot-next"></td></tr>`;
-  h+=`</tbody></table></div>`;
+  h+=`</tbody></table></div><div class="note">当月（${ml(cur)}）＝<b>予実タブ「🎯着地見込み」と同じ着地</b>を表示（残平日/土日祝×1日平均＋締日までの実績。予実タブでの編集が反映）。当月の恒久的な調整は予実タブで。前月＝実績確定／来月＝前年同月比で推定。</div>`;
   // 直営 KPI
   h+=`<div class="subhd">直営：主要KPI 着地見込（直営全体）</div><div class="tblwrap"><table><thead><tr><th>KPI</th><th>${ml(prev)}</th><th>${ml(cur)}</th><th>${ml(next)}</th></tr></thead><tbody>`;
   KPIS.forEach(m=>{h+=`<tr><td>${m.n}${m.u?`（${m.u}）`:''}</td>`+["prev","cur","next"].map(c=>`<td>${ni("kpi|"+c+"|"+m.k,M.kpi[c][m.k])}</td>`).join("")+`</tr>`;});
