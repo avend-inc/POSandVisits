@@ -181,6 +181,7 @@ function prep(){
   // デジテール（入店計測）が入っている店舗の集合。来店客数・購入率はこの店だけで計算する。
   DATA._visitStores=new Set(DATA.daily.filter(r=>r.v!=null).map(r=>r.s));
   const [tf,tt]=presetRange("thismonth"); state.from=tf; state.to=tt;  // 既定＝今月
+  const sv=loadSavedPeriod(); if(sv){state.from=sv[0]; state.to=sv[1];}  // 他タブで選んだ期間があれば引き継ぐ
 }
 
 function screen(html){document.getElementById("app").innerHTML=html;}
@@ -432,6 +433,17 @@ function syncDateInputs(){
   const f=document.getElementById("from"), t=document.getElementById("to");
   if(f)f.value=state.from; if(t)t.value=state.to;
 }
+// 期間を他タブ（推移・販促など別ページ）と共有する。localStorageに保存し、各ページの初期表示で読み込む。
+function savePeriod(){ try{localStorage.setItem("kpiPeriod",JSON.stringify({from:state.from,to:state.to}));}catch(e){} }
+function loadSavedPeriod(){
+  try{const s=JSON.parse(localStorage.getItem("kpiPeriod")||"null");
+    if(s&&s.from&&s.to){
+      let f=s.from<DATA._min?DATA._min:(s.from>DATA._max?DATA._max:s.from);
+      let t=s.to>DATA._max?DATA._max:(s.to<DATA._min?DATA._min:s.to);
+      if(f>t)f=t; return [f,t];
+    }}catch(e){}
+  return null;
+}
 
 function render(){
   syncAdminTab();
@@ -491,10 +503,10 @@ function render(){
     </div>`;
 
   document.getElementById("store").onchange=e=>{const v=e.target.value;state.store=AGG_SCOPES[v]?v:+v;draw();};
-  document.getElementById("from").onchange=e=>{state.from=clampLo(e.target.value||DATA._min);if(state.from>state.to)state.to=state.from;syncDateInputs();draw();};
-  document.getElementById("to").onchange=e=>{state.to=clampHi(e.target.value||DATA._max);if(state.to<state.from)state.from=state.to;syncDateInputs();draw();};
+  document.getElementById("from").onchange=e=>{state.from=clampLo(e.target.value||DATA._min);if(state.from>state.to)state.to=state.from;syncDateInputs();savePeriod();draw();};
+  document.getElementById("to").onchange=e=>{state.to=clampHi(e.target.value||DATA._max);if(state.to<state.from)state.from=state.to;syncDateInputs();savePeriod();draw();};
   document.querySelectorAll(".chip[data-preset]").forEach(b=>b.onclick=()=>{
-    const[f,t]=presetRange(b.dataset.preset);state.from=f;state.to=t;syncDateInputs();draw();});
+    const[f,t]=presetRange(b.dataset.preset);state.from=f;state.to=t;syncDateInputs();savePeriod();draw();});
   document.getElementById("themebtn").onclick=toggleTheme;
   const rb=document.getElementById("reportbtn"); if(rb)rb.onclick=makeReport;
   if(SB){const lb=document.getElementById("logoutbtn");if(lb)lb.onclick=doLogout;}
