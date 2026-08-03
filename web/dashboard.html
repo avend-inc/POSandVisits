@@ -139,14 +139,14 @@ const F2 =n=>(Math.round(n*100)/100).toLocaleString("ja-JP",{minimumFractionDigi
 
 const METRICS=[
   {key:"in", name:"税込売上",     fmt:v=>YEN(v)+"円", calc:p=>p.in},
-  {key:"ex", name:"税抜売上",     fmt:v=>YEN(v)+"円", calc:p=>p.ex},
+  {key:"ex", name:"税抜売上",     fmt:v=>YEN(v)+"円", calc:p=>p.hasEx?p.ex:null, note:"デジテール(合計のみ)店は非表示"},
   {key:"v",  name:"来店客数",     fmt:v=>NUM(v)+"人", calc:p=>p.hasV?p.v:null, note:"デジテール導入店のみ"},
   {key:"tx", name:"取引数",       fmt:v=>NUM(v)+"件", calc:p=>p.tx},
-  {key:"qty",name:"販売数",       fmt:v=>NUM(v)+"点", calc:p=>p.it},
+  {key:"qty",name:"販売数",       fmt:v=>NUM(v)+"点", calc:p=>p.hasIt?p.it:null},
   {key:"pr", name:"購入率",       fmt:v=>F1(v)+"%",   calc:p=>(p.hasV&&p.v>0)?(p.txv!=null?p.txv:p.tx)/p.v*100:null, note:"デジテール導入店のみ（来店÷取引）"},
   {key:"aov",name:"客単価（税込）",   fmt:v=>YEN(v)+"円", calc:p=>p.tx>0?p.in/p.tx:null},
-  {key:"upt",name:"平均購入数",   fmt:v=>F2(v)+"点",  calc:p=>p.tx>0?p.it/p.tx:null},
-  {key:"aup",name:"平均商品単価（税抜）", fmt:v=>YEN(v)+"円", calc:p=>p.it>0?p.ex/p.it:null},
+  {key:"upt",name:"平均購入数",   fmt:v=>F2(v)+"点",  calc:p=>(p.hasIt&&p.txIt>0)?p.it/p.txIt:null},
+  {key:"aup",name:"平均商品単価（税抜）", fmt:v=>YEN(v)+"円", calc:p=>(p.hasEx&&p.it>0)?p.ex/p.it:null},
 ];
 const M=k=>METRICS.find(m=>m.key===k);
 const KPI_ORDER=["in","ex","v","tx","qty","pr","aov","upt","aup"];
@@ -280,9 +280,11 @@ function sumRows(rows){
   // txv=購入率の分子（購入客数＝取引数）、v=分母（来店客数）。どちらも
   // 「デジテール（入店計測）が入っていて、かつKPIに来店を使う店」だけを対象にする
   //（＝来店の分母が無い店の取引を分子に混ぜない。POSだけの店は購入率に含めない）。
-  const p={in:0,ex:0,tx:0,txv:0,it:0,v:0,hasV:false};
+  const p={in:0,ex:0,tx:0,txv:0,it:0,txIt:0,v:0,hasV:false,hasEx:false,hasIt:false};
   const isVS=DATA._visitStores||new Set();
-  for(const r of rows){p.in+=r.in||0;p.ex+=r.ex||0;p.tx+=r.tx||0;p.it+=r.it||0;
+  for(const r of rows){p.in+=r.in||0;p.tx+=r.tx||0;
+    if(r.ex!=null){p.ex+=r.ex;p.hasEx=true;}   // 税抜は実額がある行だけ合計（近似店はnull）
+    if(r.it!=null){p.it+=r.it;p.hasIt=true;p.txIt+=r.tx||0;}  // 点数と、その分母となる取引数（明細のある店だけ）
     if(kvOf(r.s)&&isVS.has(r.s)){p.txv+=r.tx||0; if(r.v!=null){p.v+=r.v;p.hasV=true;}}}
   if(!p.hasV)p.v=0; return p;
 }
@@ -547,10 +549,10 @@ function rptBandAgg(from,to,pred){
 // 合計値（sumRows の結果）→ 主要KPI
 function rptKpi(p){
   return {
-    in:p.in, ex:p.ex, tx:p.tx, it:p.it,
+    in:p.in, ex:p.hasEx?p.ex:null, tx:p.tx, it:p.it,
     aov:p.tx>0?p.in/p.tx:null,          // 客単価（税込）
-    upt:p.tx>0?p.it/p.tx:null,          // 平均購入点数
-    aup:p.it>0?p.ex/p.it:null,          // 平均商品単価（税抜）
+    upt:(p.hasIt&&p.txIt>0)?p.it/p.txIt:null, // 平均購入点数（分母は明細のある取引数）
+    aup:(p.hasEx&&p.it>0)?p.ex/p.it:null, // 平均商品単価（税抜）
     pr :(p.hasV&&p.v>0)?(p.txv/p.v*100):null, // 購入率（デジテール店のみ）
   };
 }
