@@ -126,6 +126,7 @@
   <a href="promo.html"><span class="ic">🏷️</span>販促</a>
   <a href="stock.html"><span class="ic">📦</span>棚卸</a>
   <a href="ask.html"><span class="ic">🔍</span>分析AI</a>
+  <a href="keiei.html" id="tab-keiei" style="display:none"><span class="ic">🧮</span>経営</a>
   <a href="admin.html" id="tab-admin" style="display:none"><span class="ic">⚙️</span>管理</a>
 </div></nav>
 <script>
@@ -211,7 +212,7 @@ function aggScopeList(){
   if(us.some(s=>brandOf(s.id)==="NOTIME"))out.push({id:"nt",name:SCOPE_LABEL.nt});
   return out;
 }
-function syncAdminTab(){const t=document.getElementById("tab-admin");if(t)t.style.display=(ME&&ME.role==="admin")?"":"none";}
+function syncAdminTab(){const ad=!!(ME&&ME.role==="admin");const t=document.getElementById("tab-admin");if(t)t.style.display=ad?"":"none";const k=document.getElementById("tab-keiei");if(k)k.style.display=ad?"":"none";}
 function computeActual(store,ym){
   const ids=idsForScope(store);
   // in/ex/tx/it=売上系（全店）。txv=来店をKPIに使う店だけの取引（購入率の分子）、v=同店の来店（分母）。
