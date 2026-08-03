@@ -81,6 +81,40 @@ def main() -> int:
             except Exception:
                 return []
 
+        # 0) 実際の取り込みと同じロジック（discover_stores）で「拾えた店／取りこぼし
+        #    候補」を出す。ある店だけ来店客数が入らない不具合の原因究明・横展開用。
+        print("\n----- 取り込みロジックの判定（discover_stores）-----")
+        try:
+            raw_html = page.content().replace('\\"', '"')
+            kept, dropped = digitel_fetch.scan_store_pairs(raw_html)
+            print(f"  ✅ 拾えた店 {len(kept)}件:")
+            for nm, sl in sorted(kept.items()):
+                print(f"       {nm!r} → {sl!r}")
+            if dropped:
+                print(f"  ⚠️ 取りこぼし候補 {len(dropped)}件（来店データが入らない可能性）:")
+                for nm, sl in dropped:
+                    print(f"       {nm!r} → {sl!r}")
+            else:
+                print("  取りこぼし候補: なし")
+        except Exception as e:
+            print(f"  （判定に失敗: {e}）")
+
+        # 0b) 気になる店名キーワードが生HTMLのどこにどう入っているかを直接探す。
+        #     「徳島沖浜が来店に入らない」→ 名前の書かれ方／スラッグの形を目で確認する。
+        keywords = os.environ.get("PROBE_KEYWORDS", "徳島,沖浜,GARAGE").split(",")
+        print(f"\n----- キーワード探索（生HTML内）: {keywords} -----")
+        try:
+            hay = page.content()
+        except Exception:
+            hay = ""
+        for kw in [k.strip() for k in keywords if k.strip()]:
+            idx = hay.find(kw)
+            if idx < 0:
+                print(f"  「{kw}」: HTMLに見当たりません（この画面には出ていない）")
+                continue
+            seg = hay[max(0, idx - 120):idx + 120].replace("\n", " ")
+            print(f"  「{kw}」: …{seg}…")
+
         # 1) 一覧（名前）を取る。
         print("\n----- 店舗ドロップダウンの一覧 -----")
         open_dropdown()

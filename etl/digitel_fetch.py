@@ -69,6 +69,53 @@ def login(page, user: str | None = None, password: str | None = None) -> None:
     print("  ログイン成功")
 
 
+# 店名（NOTIME / SELFURUGI で始まる）のすぐ後ろに スラッグ（英小文字＋_）が続く並び
+_PRIMARY_STORE_RE = re.compile(
+    r'"((?:NOTIME|SELFURUGI)[^"]{0,30}?)"\s*,\s*"([a-z][a-z0-9_]{2,})"')
+# 「店らしい」名前（末尾が「店」／ブランド語を含む）＋スラッグらしき値の広めの網。
+# 診断専用：本来拾えているはずなのに拾えていない“取りこぼし候補”を可視化するために使う。
+_STORE_LIKE_RE = re.compile(
+    r'"([^"]*?(?:店|NOTIME|SELFURUGI|GARAGE)[^"]*?)"\s*,\s*"([a-z][a-z0-9_]{2,})"')
+
+
+def _is_headquarters(name: str) -> bool:
+    # 本部（ブランド名そのまま = アカウントの入れ物。slugは"code"等で店ではない）
+    return (not name) or name in ("NOTIME", "SELFURUGI") or "本部" in name
+
+
+def scan_store_pairs(html: str) -> tuple[dict[str, str], list[tuple[str, str]]]:
+    """
+    店舗一覧HTMLから (採用した店, 取りこぼし候補) を取り出す。
+
+    戻り値:
+      kept    : {"NOTIME鎌ヶ谷店": "notime_kamagaya", ...}  ← 従来どおり拾えた店
+      dropped : [("SELFURUGI GARAGE 静岡店", "sfg_shizuoka"), ...]
+                「店らしい名前＋スラッグ」なのに kept に入らなかったもの。
+                = 名前がブランド名で始まらない／スラッグの形が想定外 などで
+                  黙って落ちていた“来店データが入らない候補”。横展開チェック用。
+    """
+    kept: dict[str, str] = {}
+    for name, slug in _PRIMARY_STORE_RE.findall(html):
+        name = name.strip()
+        if _is_headquarters(name):
+            continue
+        kept.setdefault(name, slug)
+
+    kept_slugs = set(kept.values())
+    dropped: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for name, slug in _STORE_LIKE_RE.findall(html):
+        name = name.strip()
+        if _is_headquarters(name) or slug in kept_slugs or name in kept:
+            continue
+        key = (name, slug)
+        if key in seen:
+            continue
+        seen.add(key)
+        dropped.append(key)
+    return kept, dropped
+
+
 def discover_stores(page) -> dict[str, str]:
     """
     ログインしたアカウントが見られる“全店舗”とスラッグを、手入力なしで拾う。
@@ -78,24 +125,26 @@ def discover_stores(page) -> dict[str, str]:
     埋め込まれている（実データで確認済み）。ここではその並びを機械的に拾う。
 
     戻り値: {"NOTIME鎌ヶ谷店": "notime_kamagaya", ...}  ※本部などは除く
+
+    ⚠️ 名前がブランド名（NOTIME/SELFURUGI）で始まらない店・スラッグの形が想定外の
+       店は kept に入らない。以前はそれを“黙って”落としていたため、ある店だけ
+       来店客数が入らない、という不具合に気づけなかった。ここで取りこぼし候補を
+       ログに出して、必ず気づけるようにする（横展開の安全網）。
     """
     page.goto(DIGITEL_BASE_URL + "/", wait_until="domcontentloaded")
     page.wait_for_timeout(2500)
     # HTML内は \" とエスケープされていることがあるので素の " に戻してから拾う
     html = page.content().replace('\\"', '"')
 
-    # 店名（NOTIME / SELFURUGI で始まる）のすぐ後ろに スラッグ（英小文字＋_）が続く並び
-    pairs = re.findall(
-        r'"((?:NOTIME|SELFURUGI)[^"]{0,30}?)"\s*,\s*"([a-z][a-z0-9_]{2,})"', html)
-
-    out: dict[str, str] = {}
-    for name, slug in pairs:
-        name = name.strip()
-        # 本部（ブランド名そのまま = アカウントの入れ物。slugは"code"等で店ではない）は除く
-        if not name or name in ("NOTIME", "SELFURUGI") or "本部" in name:
-            continue
-        out.setdefault(name, slug)
-    return out
+    kept, dropped = scan_store_pairs(html)
+    if dropped:
+        print("  ⚠️ 来店データを取りこぼしている可能性のある“店らしい”項目があります "
+              "（名前がブランド名で始まらない/スラッグの形が想定外 など）:")
+        for name, slug in dropped:
+            print(f"       ・{name!r} → {slug!r}")
+        print("     ↑ この中に実在の店があれば、その店は来店客数が入りません。"
+              "名前の付け方（デジテール側）かスラッグ抽出の見直しが必要です。")
+    return kept
 
 
 def fetch_store_csv(context, slug: str, start: str, end: str) -> str:
