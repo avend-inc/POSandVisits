@@ -680,21 +680,85 @@ def debug_download(start_date: str = "2026-08-03", end_date: str | None = None,
         page.wait_for_timeout(1500)
         _dump_modal(page, "ジャーナル履歴モーダル")
 
-        okd = _set_modal_daterange(page, start_date, end_date)
-        print(f"\n=== ⑥ 期間設定({start_date}〜{end_date}) -> {'成功' if okd else '失敗'} ===")
-        prep = _click_by_text(page, PREP_TEXTS)
-        print(f"=== ⑦ 「準備を開始」クリック -> {prep!r} ===")
-        page.wait_for_timeout(6000)
-        _dump_modal(page, "準備開始後")
+        # 期間SELECTの選択肢＋日付入力欄の詳細（readonly? outerHTML）を採取
+        try:
+            meta = page.evaluate(r"""
+            () => {
+              const cut=(s,n=120)=>(s||'').toString().replace(/\s+/g,' ').trim().slice(0,n);
+              const sels=[...document.querySelectorAll('select')].map(s=>({
+                name:s.name, id:s.id, value:s.value,
+                options:[...s.options].map(o=>({v:o.value,t:cut(o.text,30),sel:o.selected}))}));
+              const ins=[...document.querySelectorAll('input[type=text]')].map(i=>({
+                value:cut(i.value,40), readonly:i.readOnly, name:i.name, id:i.id,
+                cls:cut(i.className,80), outer:cut(i.outerHTML,200)}));
+              return {selects:sels, textInputs:ins};
+            }""")
+            print("\n=== ⑥ 期間コントロール ===")
+            print(f"  SELECT: {meta.get('selects')}")
+            print(f"  text inputs: {meta.get('textInputs')}")
+        except Exception as e:
+            print(f"  期間コントロール採取失敗: {e}")
 
-        log = getattr(page, "_notime_requests", None) or []
-        hits = [e for e in log if any(k in e.lower()
-                                      for k in ("csv", "export", "download", "journal"))]
-        print(f"\n=== ⑧ csv/journal系の通信（{len(hits)}件） ===")
-        for e in hits[-20:]:
-            print(f"     {e}")
-        print("\n  → ここまでの各ステップの OK/❌ と、モーダル構造・通信URLで、"
-              "壊れ箇所（DLアイコン/ジャーナル押下/期間欄/準備ボタン/生成URL）を特定する。")
+        # exportJournalAPI の 送信ペイロード / 応答本文 / ダウンロードURL を採取
+        captured: list[str] = []
+
+        def _cap_req(req):
+            try:
+                if "exportJournalData" in req.url or "download" in req.url.lower():
+                    body = None
+                    try:
+                        body = req.post_data
+                    except Exception:
+                        body = None
+                    captured.append(f"REQ {req.method} {req.url}\n        body={(body or '')[:600]}")
+            except Exception:
+                pass
+
+        def _cap_resp(resp):
+            try:
+                if "exportJournalData" in resp.url:
+                    txt = ""
+                    try:
+                        txt = resp.text()[:600]
+                    except Exception:
+                        txt = "(本文取得不可)"
+                    captured.append(f"RESP {resp.status} {resp.url}\n        {txt}")
+            except Exception:
+                pass
+        try:
+            page.on("request", _cap_req)
+            page.on("response", _cap_resp)
+        except Exception:
+            pass
+
+        prep = _click_by_text(page, PREP_TEXTS)
+        print(f"\n=== ⑦ 「準備を開始」クリック -> {prep!r} ===")
+        page.wait_for_timeout(1500)
+        _dump_modal(page, "準備を開始 押下後（確認ダイアログ？）")
+        confirm = _click_by_text(page, ["開始する", "OK", "はい", "実行"])
+        print(f"=== ⑧ 確認「開始する」クリック -> {confirm!r} ===")
+
+        got = None
+        for i in range(20):   # 最大 ~40秒 生成待ち
+            page.wait_for_timeout(2000)
+            if downloads:
+                got = "download-event"
+                break
+            try:
+                btn = page.get_by_text("ダウンロードする").first
+                if btn and btn.is_visible():
+                    btn.click(timeout=3000)
+            except Exception:
+                pass
+        if downloads:
+            got = "download-event"
+        print(f"=== ⑨ 生成待ち結果 -> downloads={len(downloads)} ({got}) ===")
+
+        print(f"\n=== ⑩ exportJournalData 通信の中身（{len(captured)}件） ===")
+        for c in captured[-24:]:
+            print(f"  {c}")
+        print("\n  → SELECTの選択肢・APIペイロード・応答で、"
+              "最終修正（期間指定の入れ方 or API直叩き）を確定する。")
 
 
 def main() -> int:
