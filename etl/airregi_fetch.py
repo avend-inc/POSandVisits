@@ -524,8 +524,18 @@ def fetch_range(start_date: str, end_date: str, headless: bool = True) -> str:
                     discover(page)
                 try:
                     open_sales(page)
-                    return decode_csv(
+                    text = decode_csv(
                         download_csv(page, context, start_date, end_date))
+                    # 取得物がCSVか検証。Airレジがエラー時に返すJSON
+                    #   {"results":{"returnCode":"4001","errMsg":"システムエラー"...}}
+                    # を「売上0」と誤判定しないよう、CSVでなければ失敗として扱う。
+                    head = text.lstrip()[:1000]
+                    if head[:1] in ("{", "[") or ("取引No" not in head and "取引日" not in head):
+                        raise EtlError(
+                            "AirレジのCSVダウンロードに失敗しました"
+                            "（CSVではない応答＝ダウンロード導線の変更/システムエラーの可能性）。\n"
+                            f"  応答の先頭: {text[:200]!r}")
+                    return text
                 except Exception:
                     # 失敗時は画面構造をログに残して次の調整に使えるようにする。
                     try:
