@@ -138,6 +138,11 @@ const F2=n=>(Math.round(n*100)/100).toLocaleString("ja-JP",{minimumFractionDigit
 const state={store:"all",ym:null,view:"pl"};   // view: "pl"=月次予実 / "fc"=着地見込み / "ac"=打ち手
 let DATA=null, A=null, M={}, MALL={}, AUTO=null, fc=null, AC={items:[]};
 let CANEDIT=true, RT=null, DIRTY=false;   // 編集可否／リアルタイム購読／未保存フラグ
+// 月次予実「予算」（目標）。経営レポートと同じ targets.json を読む（KPIごとの予算表示に使う）。
+let TARGETS=null;
+async function loadTargets(){ if(TARGETS)return; if(window.__TARGETS__){TARGETS=window.__TARGETS__;return;} try{TARGETS=await (await fetch("targets.json",{cache:"no-store"})).json();}catch(e){TARGETS=null;} }
+// 店舗名に含まれる予算トークン（山形/福井/いわき）で、その月の予算オブジェクトを引く。
+function tgtOf(store,ym){const T=(TARGETS&&TARGETS.targets)||{};const nm=budStoreName(store)||"";for(const tok in T){if(nm.indexOf(tok)>=0&&T[tok][ym])return T[tok][ym];}return null;}
 
 const CONFIG_URL="https://rwfcsanmqvkxiuwdeddv.supabase.co/storage/v1/object/public/dashboard/config.json";
 let SB=null, ME={email:"",role:null};
@@ -261,8 +266,11 @@ function storeSeed(sid,ym){
   return o;
 }
 // 着地見込みの目標（税込予算）。総合は各店合計（登録のある店だけ）。
+//  予算は targets.json（月次予実「予算」）を優先。店名に含まれるトークンで照合するので
+//  「NOTIME福井店」でも「福井」の予算に当たる（旧BUDGETSは名前完全一致で外れていた）。
 function fcBudget(store,ym){
-  if(store==="all"){let sum=0;(DATA.stores||[]).forEach(s=>{const b=(BUDGETS[s.name]||{})[ym];if(b&&Number.isFinite(b.in))sum+=b.in;});return sum;}
+  if(store==="all"){let sum=0;(DATA.stores||[]).forEach(s=>{const t=tgtOf(s.id,ym);const inv=(t&&Number.isFinite(t.in))?t.in:((BUDGETS[s.name]||{})[ym]||{}).in;if(Number.isFinite(inv))sum+=inv;});return sum;}
+  const t=tgtOf(store,ym); if(t&&Number.isFinite(t.in))return t.in;
   const b=(BUDGETS[budStoreName(store)]||{})[ym]; return (b&&Number.isFinite(b.in))?b.in:0;
 }
 
@@ -376,13 +384,14 @@ function landing(){
   return L;
 }
 // 主要KPI(key)＝売上を動かす3要素、その他(sub)＝参考。売上(KGI)はヒーローに別表示。
+// tk=targets.json（予算）の対応キー。予算列・達成率の表示に使う。
 const FKPI=[
-  {k:"v",  name:"来店数",         tier:"key", fmt:v=>NUM(v)+"人", calc:t=>t.v},
-  {k:"pr", name:"購入率",         tier:"key", fmt:v=>F1(v)+"%",   calc:t=>t.v>0?(t.txv!=null?t.txv:t.tx)/t.v*100:null},
-  {k:"aov",name:"客単価（税込）",   tier:"key", fmt:v=>YEN(v)+"円", calc:t=>t.tx>0?t.in/t.tx:null},
-  {k:"ex", name:"税抜売上",       tier:"sub", fmt:v=>YEN(v)+"円", calc:t=>t.ex},
-  {k:"upt",name:"平均購入数",     tier:"sub", fmt:v=>F2(v)+"点", calc:t=>t.tx>0?t.it/t.tx:null},
-  {k:"aup",name:"平均商品単価（税抜）",tier:"sub",fmt:v=>YEN(v)+"円",calc:t=>t.it>0?t.ex/t.it:null},
+  {k:"v",  name:"来店数",         tier:"key", tk:"visitors", fmt:v=>NUM(v)+"人", calc:t=>t.v},
+  {k:"pr", name:"購入率",         tier:"key", tk:"pr",  fmt:v=>F1(v)+"%",   calc:t=>t.v>0?(t.txv!=null?t.txv:t.tx)/t.v*100:null},
+  {k:"aov",name:"客単価（税込）",   tier:"key", tk:"aov", fmt:v=>YEN(v)+"円", calc:t=>t.tx>0?t.in/t.tx:null},
+  {k:"ex", name:"税抜売上",       tier:"sub", tk:"ex",  fmt:v=>YEN(v)+"円", calc:t=>t.ex},
+  {k:"upt",name:"平均購入数",     tier:"sub", tk:"upt", fmt:v=>F2(v)+"点", calc:t=>t.tx>0?t.it/t.tx:null},
+  {k:"aup",name:"平均商品単価（税抜）",tier:"sub",tk:"aup",fmt:v=>YEN(v)+"円",calc:t=>t.it>0?t.ex/t.it:null},
 ];
 const DRIVERS=[
   {k:"in",name:"税込売上",fmt:v=>YEN(v),unit:"円",step:1000},
@@ -397,6 +406,7 @@ async function reload(){
   try{
     DIRTY=false;
     CANEDIT = !SB || ME.role==="editor" || ME.role==="admin";
+    await loadTargets();
     const months=monthsInData();
     if(!state.ym||!months.includes(state.ym)) state.ym=(DATA._salesMax||months[months.length-1]).slice(0,7);
     if(state.view==="fc"){ AUTO=computeAuto(state.store,state.ym); fc=await loadFcData(); }
@@ -641,12 +651,15 @@ function fcRecompute(){
     document.getElementById("land-vs").innerHTML="";
   }
   document.getElementById("pills").innerHTML=pills.join("");
-  const head=`<thead><tr><th>指標</th><th>締日まで(実績)</th><th>着地見込み</th></tr></thead>`;
+  const bud=tgtOf(state.store,state.ym);   // この店×月の予算（無ければ null）
+  const head=`<thead><tr><th>指標</th><th>締日まで(実績)</th><th>着地見込み</th><th>予算</th><th>達成率</th></tr></thead>`;
   const rowHtml=m=>{const tv=m.calc(td),lv=m.calc(L);
-    return `<tr class="${m.tier==="key"?"keyrow":"subrow"}"><td>${m.name}</td><td>${tv==null?"—":m.fmt(tv)}</td><td class="${m.tier==="key"?"big2":""}">${lv==null?"—":m.fmt(lv)}</td></tr>`;};
-  const body=`<tr class="tierhead"><td colspan="3">◆ 主要KPI（売上を動かす3要素：来店数 × 購入率 × 客単価）</td></tr>`
+    const bv=(bud&&m.tk&&Number.isFinite(bud[m.tk]))?bud[m.tk]:null;
+    const rate=(bv!=null&&lv!=null&&bv!==0)?Math.round(lv/bv*100)+"%":"—";
+    return `<tr class="${m.tier==="key"?"keyrow":"subrow"}"><td>${m.name}</td><td>${tv==null?"—":m.fmt(tv)}</td><td class="${m.tier==="key"?"big2":""}">${lv==null?"—":m.fmt(lv)}</td><td>${bv==null?"—":m.fmt(bv)}</td><td>${rate}</td></tr>`;};
+  const body=`<tr class="tierhead"><td colspan="5">◆ 主要KPI（売上を動かす3要素：来店数 × 購入率 × 客単価）</td></tr>`
     +FKPI.filter(m=>m.tier==="key").map(rowHtml).join("")
-    +`<tr class="tierhead"><td colspan="3">その他KPI（参考）</td></tr>`
+    +`<tr class="tierhead"><td colspan="5">その他KPI（参考）</td></tr>`
     +FKPI.filter(m=>m.tier==="sub").map(rowHtml).join("");
   document.getElementById("kpi").innerHTML=head+"<tbody>"+body+"</tbody>";
 }
