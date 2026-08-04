@@ -252,12 +252,14 @@ function compute(){
   return {kpi,openQ,openP,openAmt,recvQ,recvP,recvAmt,sumQ,sumAmt,avgP,outQ,theoQ,theoAmt,physQ,physK,gap,shelfAmt,hasPrev:!!prev};
 }
 
+// 棚卸テーブル名。会社Supabase(avend-inventory)では在庫アプリの既存 inventory と
+// 衝突するため nakano_inventory にリネームして運用（旧・個人プロジェクトは inventory だった）。
 async function loadMonth(){
   state.inv=null; state.prev=null; state.dirty=false;
   try{
-    const {data:cur}=await SB.from("inventory").select("*").eq("store_id",state.sid).eq("ym",state.ym).maybeSingle();
+    const {data:cur}=await SB.from("nakano_inventory").select("*").eq("store_id",state.sid).eq("ym",state.ym).maybeSingle();
     state.inv=cur||{store_id:state.sid,ym:state.ym,physical:{}};
-    const {data:pv}=await SB.from("inventory").select("*").eq("store_id",state.sid).eq("ym",prevYm(state.ym)).maybeSingle();
+    const {data:pv}=await SB.from("nakano_inventory").select("*").eq("store_id",state.sid).eq("ym",prevYm(state.ym)).maybeSingle();
     state.prev=pv||null;
   }catch(e){ state.inv=state.inv||{store_id:state.sid,ym:state.ym,physical:{}}; }
   if(!state.inv.physical)state.inv.physical={};
@@ -443,7 +445,7 @@ async function save(){
     opening_price:(inv.opening_price===undefined||inv.opening_price===null||inv.opening_price==="")?null:num(inv.opening_price),
     physical:inv.physical||{}, avg_price:c.avgP, updated_by:ME.email};
   try{
-    const {error}=await SB.from("inventory").upsert(payload,{onConflict:"store_id,ym"});
+    const {error}=await SB.from("nakano_inventory").upsert(payload,{onConflict:"store_id,ym"});
     if(error)throw error;
     state.dirty=false;
     const m=document.getElementById("savemsg");if(m)m.textContent="保存しました";
