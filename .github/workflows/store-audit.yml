@@ -1,0 +1,39 @@
+# ============================================================
+#  店舗×月 売上監査（数字が合わない時の切り分け）
+#
+#  Actions →「店舗×月 売上監査」→ Run workflow
+#    store : 店名の一部（例: いわき）
+#    month : 対象月 YYYY-MM（例: 2026-07）
+#  結果はログに出ます（税抜売上・商品販売数・小物/レジ袋・カテゴリ内訳・重複店の有無）。
+# ============================================================
+name: 店舗×月 売上監査
+
+on:
+  workflow_dispatch:
+    inputs:
+      store:
+        description: "店名の一部（例: いわき）"
+        required: true
+        default: "いわき"
+      month:
+        description: "対象月 YYYY-MM（例: 2026-07）"
+        required: true
+        default: "2026-07"
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TZ: Asia/Tokyo
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: 監査を実行
+        run: python -m tools.store_month_audit "${{ inputs.store }}" "${{ inputs.month }}"
