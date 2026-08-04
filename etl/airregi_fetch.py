@@ -689,7 +689,18 @@ def _download_via_ui(page, start_date: str, end_date: str) -> bytes:
     if not path:
         raise EtlError("Airレジのダウンロードファイルのパスが取得できませんでした。")
     with open(path, "rb") as fh:
-        return fh.read()
+        raw = fh.read()
+    # Airレジのダウンロードは ZIP（PK…）で「ジャーナル履歴_YYYYMMDD-YYYYMMDD.csv」を
+    # 内包する。ZIPなら展開して中のCSV(cp932)を返す。生CSVならそのまま返す。
+    if raw[:2] == b"PK":
+        import io
+        import zipfile
+        with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+            csv_names = [n for n in zf.namelist() if n.lower().endswith(".csv")]
+            if not csv_names:
+                raise EtlError(f"AirレジのZIPにCSVが見つかりません: {zf.namelist()}")
+            return zf.read(csv_names[0])
+    return raw
 
 
 # ------------------------------------------------------------
