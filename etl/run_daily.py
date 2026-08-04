@@ -467,6 +467,16 @@ def run_airregi(sb: Supabase, business_date: str, run_id: str,
         save_raw(csv_text, "airregi", "下北沢", business_date)
         df_in = pd.read_csv(StringIO(csv_text), dtype=str)
         common = adapters.adapt_airregi(df_in, AIRREGI_POS, AIRREGI_STORE_NAME)
+        # [診断] 取得CSVが「どの期間・何行」入っているかを見える化（0件の原因切り分け用）。
+        #   ・CSVがそもそも空か／別の期間になっていないか／会計行が残っているか。
+        try:
+            _date_hist = common["date"].value_counts().sort_index().to_dict() if len(common) else {}
+        except Exception:
+            _date_hist = {}
+        print(f"  [診断] 取得CSV={len(csv_text)}字 / 生データ行={len(df_in)} / 会計明細(adapt後)={len(common)}行")
+        print(f"  [診断] CSV先頭180字: {csv_text[:180]!r}")
+        print(f"  [診断] adapt後の日付内訳（対象日フィルタ前）: {_date_hist}")
+        print(f"  [診断] ← 対象営業日 {business_date} で絞り込みます")
         # 念のため対象営業日だけに絞る（取得CSVに前後日が混ざっても安全に）。
         common = common[common["date"] == business_date].copy()
         common = common[common["date"].notna()]
