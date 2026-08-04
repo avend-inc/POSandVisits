@@ -615,59 +615,81 @@ API_STATUS = "/api/exportJournalData/getStatus/"
 API_DOWNLOAD = "/api/exportJournalData/download/"
 
 
-def _export_via_api(context, start_date: str, end_date: str) -> bytes:
+def _download_via_ui(page, start_date: str, end_date: str) -> bytes:
+    """ジャーナルCSVを取得する。UI操作でSPA自身にexportさせるので、CSRFトークン等の
+    付随情報はブラウザが正しく付ける（raw APIの直叩きは returnCode 4001 で弾かれる）。
+
+    唯一の難所「対象期間がreadonlyの日付ピッカー」は、SPAが投げる
+      POST /CLP/api/exportJournalData/start/  (body: paramStr={"targetDateFrom","targetDateTo"})
+    を page.route で捕まえ、ペイロードの日付を希望の期間に書き換えて回避する。
+    手順: ダウンロードメニュー→ジャーナル履歴(CSV)→準備を開始する→(確認)開始する→
+          生成完了→ダウンロードする（downloadイベントでCSVを受け取る）。
+    """
     import json
+    import urllib.parse
     ymd_from = start_date.replace("-", "").replace("/", "")
     ymd_to = end_date.replace("-", "").replace("/", "")
-    headers = {
-        "X-Requested-With": "XMLHttpRequest",
-        "Referer": f"{API_BASE}/view/salesJournal/",
-        "Origin": "https://airregi.jp",
-    }
 
-    def _post(path: str, param):
-        r = context.request.post(API_BASE + path, form={"paramStr": param},
-                                 headers=headers, timeout=60_000)
-        return r
-
-    # 1) 生成開始（対象期間を指定）
-    start_param = json.dumps({"targetDateFrom": ymd_from, "targetDateTo": ymd_to})
-    r = _post(API_START, start_param)
-    body = ""
+    downloads: list = []
     try:
-        body = r.text()[:400]
+        page.on("download", lambda d: downloads.append(d))
     except Exception:
         pass
-    if not r.ok:
-        raise EtlError(f"Airレジ export start が失敗（HTTP {r.status}）: {body}")
-    if '"returnCode":"0000"' not in body.replace(" ", ""):
-        raise EtlError(f"Airレジ export start の応答が異常（returnCode≠0000）: {body}")
 
-    # 2) 生成完了を待つ（status=="02" & progressRate==100）。最大 ~120秒。
-    ready = False
-    last_rd = None
-    for _ in range(60):
-        s = _post(API_STATUS, "null")
-        rd = {}
+    # start/ のペイロードを希望日付へ書き換える（readonly日付ピッカーを回避）。
+    def _route_start(route):
         try:
-            rd = ((s.json().get("results") or {}).get("resultsData")) or {}
+            if route.request.method == "POST":
+                body = "paramStr=" + urllib.parse.quote(
+                    json.dumps({"targetDateFrom": ymd_from, "targetDateTo": ymd_to}))
+                route.continue_(post_data=body)
+                return
         except Exception:
-            rd = {}
-        last_rd = rd
-        status = str(rd.get("status") or "")
-        rate = rd.get("progressRate")
-        if status == "02" and str(rate) in ("100", "None"):
-            ready = True
-            break
-        time.sleep(2)
-    if not ready:
-        raise EtlError(f"Airレジ export の生成完了を待てませんでした（最後の状態: {last_rd}）。")
+            pass
+        try:
+            route.continue_()
+        except Exception:
+            pass
+    try:
+        page.route("**/exportJournalData/start/**", _route_start)
+    except Exception:
+        pass
 
-    # 3) ダウンロード（CSV本体）
-    d = _post(API_DOWNLOAD, "{}")
-    if not d.ok:
-        raise EtlError(f"Airレジ export download が失敗（HTTP {d.status}）")
-    return d.body()
+    if not _open_download_menu(page):
+        dump_page(page, "airregi_dl_icon_notfound")
+        raise EtlError("Airレジのダウンロードメニュー（ジャーナル履歴）を開けませんでした。")
+    if not _click_by_text(page, JOURNAL_MENU_TEXTS):
+        dump_page(page, "airregi_journal_menu_notfound")
+        raise EtlError("「ジャーナル履歴(CSV)」を押せませんでした。")
+    page.wait_for_timeout(1500)
+    if not _click_by_text(page, PREP_TEXTS):
+        dump_page(page, "airregi_prep_notfound")
+        raise EtlError("「ダウンロードの準備を開始する」を押せませんでした。")
+    page.wait_for_timeout(1200)
+    _click_exact(page, "開始する")   # 確認ダイアログ（完全一致で押す）
+
+    # 生成完了を待って「ダウンロードする」を押す（downloadイベントで受け取る）。
+    deadline = time.time() + 150
+    while time.time() < deadline and not downloads:
+        try:
+            btn = page.get_by_text("ダウンロードする").first
+            if btn and btn.is_visible():
+                btn.click(timeout=4000)
+        except Exception:
+            pass
+        for _ in range(6):
+            if downloads:
+                break
+            page.wait_for_timeout(500)
+
+    if not downloads:
+        dump_page(page, "airregi_download_not_fired")
+        raise EtlError("Airレジのダウンロードが発火しませんでした（生成待ちタイムアウト）。")
+    path = downloads[0].path()
+    if not path:
+        raise EtlError("Airレジのダウンロードファイルのパスが取得できませんでした。")
+    with open(path, "rb") as fh:
+        return fh.read()
 
 
 # ------------------------------------------------------------
@@ -696,8 +718,8 @@ def fetch_range(start_date: str, end_date: str, headless: bool = True) -> str:
                     page.wait_for_timeout(1500)
                 except Exception:
                     pass
-                # export API を直接叩いてCSVを取得（UI操作より堅牢）。
-                text = decode_csv(_export_via_api(context, start_date, end_date))
+                # UI操作でSPAにexportさせCSVを取得（start/のペイロードを書き換えて期間指定）。
+                text = decode_csv(_download_via_ui(page, start_date, end_date))
                 # 取得物がCSVか検証。エラー時のJSON {"results":{"returnCode":...}} を
                 # 「売上0」と誤判定しないよう、CSVでなければ失敗として扱う。
                 head = text.lstrip()[:1000]
