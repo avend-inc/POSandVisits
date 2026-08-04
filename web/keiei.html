@@ -230,7 +230,7 @@ async function renderKeiei(){
   // FC 税込着地（ロイヤリティ基礎）
   const fcIds=new Set(usableStores().filter(s=>ownOf(s.id)!=="直営").map(s=>s.id));
   const fcLandIn=Math.round(elapsed>0?proj(curEnd?sumIds(fcIds,cf,curEnd).in||0:0):0);
-  const auto={storeEx,kpi,roy:{base:fcLandIn,rate:6.8},wh:{NOTIME:{qty:0,unit:0},SELFURUGI:{qty:0,unit:0},GARAGE:{qty:0,unit:0},NEW:{qty:0,unit:0}},con:0};
+  const auto={storeEx,kpi,roy:{base:fcLandIn,rate:6.8},wh:{NOTIME:{qty:0,unit:0},SELFURUGI:{qty:0,unit:0},GARAGE:{qty:0,unit:0},NEW:{qty:0,unit:0}},con:{qty:0,price:0,rate:0}};
   const loaded=await keieiLoad(cur), saved=loaded.p||{};
   const M=JSON.parse(JSON.stringify(auto));
   // 当月(cur)は予実タブの着地見込みが正（そちらで編集）。経営レポート保存の上書きは前月/来月のみ。
@@ -238,7 +238,7 @@ async function renderKeiei(){
   if(saved.kpi)["prev","cur","next"].forEach(c=>{if(saved.kpi[c])Object.assign(M.kpi[c],saved.kpi[c]);});
   if(saved.roy)Object.assign(M.roy,saved.roy);
   if(saved.wh)for(const k in M.wh){if(saved.wh[k])Object.assign(M.wh[k],saved.wh[k]);}
-  if(saved.con!=null)M.con=saved.con;
+  if(saved.con&&typeof saved.con==="object")Object.assign(M.con,saved.con);   // 旧・数値保存は破棄（新: {qty,price,rate}）
   const ni=(k,v)=>`<input class="ki" data-k="${k}" value="${v}" inputmode="decimal">`;
   const niY=(k,v)=>`<span class="yenin">¥${ni(k,v)}</span>`;   // 円マーク付き入力
   const WH=[["NOTIME","NOTIME"],["SELFURUGI","SELFURUGI"],["GARAGE","SELFURUGI GARAGE"],["NEW","新店"]];
@@ -279,8 +279,10 @@ async function renderKeiei(){
   h+=`<div class="subhd">① ロイヤリティ</div><div class="krow">FC着地売上(税込) ${ni("roy|base",M.roy.base)} × 率 ${ni("roy|rate",M.roy.rate)}% ＝ <b id="roy-res" style="font-size:15px"></b></div>`;
   h+=`<div class="subhd">② 卸売上</div><div class="tblwrap"><table><thead><tr><th>区分</th><th>発送数</th><th>卸商品単価</th><th>小計</th></tr></thead><tbody>`;
   WH.forEach(([k,nm])=>{const w=M.wh[k];h+=`<tr><td>${nm}</td><td>${ni("wh|"+k+"|qty",w.qty)}</td><td>${ni("wh|"+k+"|unit",w.unit)}</td><td id="wsub-${k}"></td></tr>`;});
-  h+=`<tr class="total"><td>卸売上 合計</td><td></td><td></td><td id="wtot"></td></tr></tbody></table></div>`;
-  h+=`<div class="subhd">③ 委託店</div><div class="krow">卸売上見込み ${ni("con|val",M.con)}</div>`;
+  h+=`<tr class="total"><td>卸売上 合計</td><td id="wqty-tot"></td><td id="wunit-avg"></td><td id="wtot"></td></tr></tbody></table></div><div class="note">卸売上合計の「発送数」＝各区分の発送数の合計、「卸商品単価」＝加重平均（合計金額÷合計発送数）。</div>`;
+  h+=`<div class="subhd">③ 委託店</div><div class="tblwrap"><table><thead><tr><th>販売着数</th><th>売価</th><th>卸掛け率(%)</th><th>合計</th></tr></thead><tbody>`;
+  h+=`<tr><td>${ni("con|qty",M.con.qty)}</td><td>${niY("con|price",M.con.price)}</td><td>${ni("con|rate",M.con.rate)}</td><td id="con-res"></td></tr>`;
+  h+=`</tbody></table></div><div class="note">委託店の卸売上見込み＝販売着数 × 売価 × 卸掛け率(%)。</div>`;
   h+=`<div class="honbu"><span>本部売上見込 合計（① ロイヤリティ＋② 卸＋③ 委託）</span><span id="honbu" style="font-size:17px"></span></div></div>`;
   h+=`<div class="actions"><span id="ki-status" class="sub"></span><button id="ki-auto" class="themebtn">自動再計算</button><button id="ki-save" class="themebtn" style="background:var(--accent);color:#fff;border-color:var(--accent)">保存する</button></div>`;
   screen(h);
@@ -290,9 +292,11 @@ async function renderKeiei(){
     // 平均商品単価＝税抜売上÷商品販売数（売上の編集に追従）
     dstores.forEach(s=>["prev","cur","next"].forEach(c=>{const q=storeIt[s.id]?storeIt[s.id][c]:0;const ae=D.getElementById("aup-"+s.id+"-"+c);if(ae)ae.textContent=q>0?yf(Math.round(num("sx|"+s.id+"|"+c)/q)):"—";}));
     const roy=num("roy|base")*num("roy|rate")/100; D.getElementById("roy-res").textContent=yf(roy);
-    let wtot=0;WH.forEach(([k])=>{const sub=num("wh|"+k+"|qty")*num("wh|"+k+"|unit");wtot+=sub;const e=D.getElementById("wsub-"+k);if(e)e.textContent=yf(sub);});
+    let wtot=0,wqty=0;WH.forEach(([k])=>{const q=num("wh|"+k+"|qty"),u=num("wh|"+k+"|unit");const sub=q*u;wtot+=sub;wqty+=q;const e=D.getElementById("wsub-"+k);if(e)e.textContent=yf(sub);});
     D.getElementById("wtot").textContent=yf(wtot);
-    D.getElementById("honbu").textContent=yf(roy+wtot+num("con|val"));
+    {const qe=D.getElementById("wqty-tot");if(qe)qe.textContent=NUM(wqty);const ae=D.getElementById("wunit-avg");if(ae)ae.textContent=wqty>0?yf(Math.round(wtot/wqty)):"—";}
+    const con=num("con|qty")*num("con|price")*num("con|rate")/100; const ce=D.getElementById("con-res");if(ce)ce.textContent=yf(con);
+    D.getElementById("honbu").textContent=yf(roy+wtot+con);
     // 予算達成パネルの税抜売上着地＝直営の当月着地(編集値)と連動
     trows.forEach(({tok,st})=>{ if(ownOf(st.id)!=="直営")return; const land=num("sx|"+st.id+"|cur");
       const te=D.getElementById("tex-"+st.id); if(te)te.textContent=yf(land);
@@ -306,7 +310,7 @@ async function renderKeiei(){
     const rb=gel("roy|base");if(rb)rb.value=auto.roy.base; recalc();
   };
   D.getElementById("ki-save").onclick=async()=>{
-    const payload={storeEx:{},kpi:{prev:{},cur:{},next:{}},roy:{base:num("roy|base"),rate:num("roy|rate")},wh:{},con:num("con|val")};
+    const payload={storeEx:{},kpi:{prev:{},cur:{},next:{}},roy:{base:num("roy|base"),rate:num("roy|rate")},wh:{},con:{qty:num("con|qty"),price:num("con|price"),rate:num("con|rate")}};
     dstores.forEach(s=>{payload.storeEx[s.id]={prev:num("sx|"+s.id+"|prev"),cur:num("sx|"+s.id+"|cur"),next:num("sx|"+s.id+"|next")};});
     ["prev","cur","next"].forEach(c=>KPIS.forEach(m=>{payload.kpi[c][m.k]=num("kpi|"+c+"|"+m.k);}));
     WH.forEach(([k])=>{payload.wh[k]={qty:num("wh|"+k+"|qty"),unit:num("wh|"+k+"|unit")};});
