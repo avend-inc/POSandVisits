@@ -623,10 +623,86 @@ def fetch(business_date: str, headless: bool = True) -> str:
     return fetch_range(business_date, business_date, headless=headless)
 
 
+def _safe_url(page) -> str:
+    try:
+        return page.url or ""
+    except Exception:
+        return "(url取得不可)"
+
+
+def debug_download(start_date: str = "2026-08-03", end_date: str | None = None,
+                   headless: bool = True) -> None:
+    """高速診断：短timeout・リトライ無しで、ログイン→取引履歴→ダウンロード導線を
+    1ステップずつ試し、どこで壊れるかと画面構造を即ダンプして抜ける。
+
+    本番の fetch_range は既定60秒timeout×リトライで失敗時に十数分かかるため、
+    「壊れ箇所の特定」にはこちらを使う（Actions 1回 ≈ 1〜2分）。"""
+    from .browser import browser_page, dump_controls
+    end_date = end_date or start_date
+    airid = require_env("AIRREGI_ID", "Airレジ（AirID）のログインID")
+    password = require_env("AIRREGI_PW", "Airレジ（AirID）のパスワード")
+
+    with browser_page(headless=headless) as (page, context):
+        # 失敗を即座に返させる（60秒も粘らせない）。ログイン内部の明示waitはそのまま。
+        context.set_default_timeout(6000)
+
+        def step(name, fn) -> bool:
+            print(f"\n=== {name} ===")
+            try:
+                fn()
+                print(f"  ✅ OK  url={_safe_url(page)}")
+                return True
+            except Exception as e:
+                print(f"  ❌ {type(e).__name__}: {str(e)[:240]}")
+                return False
+
+        ok_login = step("① ログイン", lambda: login(page, airid, password))
+        print(f"  （ログイン後URL: {_safe_url(page)}）")
+        if not ok_login:
+            dump_controls(page, "ログイン画面")
+            print("  → ログインで停止。ID/PW誤り or 追加認証(2FA/CAPTCHA)の可能性。")
+            return
+        step("② 店舗選択（下北沢）", lambda: select_store(page))
+        step("③ 取引履歴へ移動", lambda: open_sales(page))
+
+        # 取引履歴画面の構造（ダウンロードアイコンの目印確定）
+        dump_controls(page, "取引履歴画面")
+
+        opened = _open_download_menu(page)
+        print(f"\n=== ④ ダウンロードメニューを開く -> {opened} ===")
+        dump_controls(page, "DLメニュー試行後")
+        if not opened:
+            print("  → ダウンロードアイコン/メニューが開けず。上のダンプで目印を確定する。")
+            return
+
+        clicked = _click_by_text(page, JOURNAL_MENU_TEXTS)
+        print(f"\n=== ⑤ 「ジャーナル履歴(CSV)」クリック -> {clicked!r} ===")
+        page.wait_for_timeout(1500)
+        _dump_modal(page, "ジャーナル履歴モーダル")
+
+        okd = _set_modal_daterange(page, start_date, end_date)
+        print(f"\n=== ⑥ 期間設定({start_date}〜{end_date}) -> {'成功' if okd else '失敗'} ===")
+        prep = _click_by_text(page, PREP_TEXTS)
+        print(f"=== ⑦ 「準備を開始」クリック -> {prep!r} ===")
+        page.wait_for_timeout(6000)
+        _dump_modal(page, "準備開始後")
+
+        log = getattr(page, "_notime_requests", None) or []
+        hits = [e for e in log if any(k in e.lower()
+                                      for k in ("csv", "export", "download", "journal"))]
+        print(f"\n=== ⑧ csv/journal系の通信（{len(hits)}件） ===")
+        for e in hits[-20:]:
+            print(f"     {e}")
+        print("\n  → ここまでの各ステップの OK/❌ と、モーダル構造・通信URLで、"
+              "壊れ箇所（DLアイコン/ジャーナル押下/期間欄/準備ボタン/生成URL）を特定する。")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Airレジ 会計明細CSVの自動取得")
     ap.add_argument("--discover", action="store_true",
                     help="ログイン後の画面構造を洗い出すだけ（目印確定用）")
+    ap.add_argument("--debug-dl", action="store_true",
+                    help="高速診断：短timeout・リトライ無しでDL導線を1ステップずつ試して即ダンプ")
     ap.add_argument("--date", help="1日ぶん取得（YYYY-MM-DD）")
     ap.add_argument("--from", dest="date_from", help="期間の開始（YYYY-MM-DD）")
     ap.add_argument("--to", dest="date_to", help="期間の終了（YYYY-MM-DD）")
@@ -635,6 +711,12 @@ def main() -> int:
 
     load_dotenv()
     headless = not args.headful
+
+    if args.debug_dl:
+        start = args.date or args.date_from or "2026-08-03"
+        end = args.date_to or start
+        debug_download(start, end, headless=headless)
+        return 0
 
     if args.discover:
         airid = require_env("AIRREGI_ID", "Airレジ（AirID）のログインID")

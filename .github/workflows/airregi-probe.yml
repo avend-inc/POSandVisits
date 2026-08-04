@@ -13,6 +13,12 @@ name: Airレジ 調査
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: "調査モード"
+        required: false
+        default: "debug-dl"
+        type: choice
+        options: [debug-dl, discover]
       sales_url:
         description: "会計明細画面のURL（分かっていれば。空なら既定を試す）"
         required: false
@@ -48,8 +54,13 @@ jobs:
           if [ -z "$AIRREGI_ID" ] || [ -z "$AIRREGI_PW" ]; then
             echo "::error::AIRREGI_ID / AIRREGI_PW が未登録です（Settings → Secrets → Actions）"; exit 1
           fi
-      - name: 調査（ログイン→画面構造ダンプ）
-        run: python -m etl.airregi_fetch --discover
+      - name: 調査（DL導線の高速診断 / 画面構造ダンプ）
+        run: |
+          if [ "${{ inputs.mode }}" = "discover" ]; then
+            python -m etl.airregi_fetch --discover
+          else
+            python -m etl.airregi_fetch --debug-dl
+          fi
       - name: 調査ファイルを保存（debug/）
         if: always()
         uses: actions/upload-artifact@v4
