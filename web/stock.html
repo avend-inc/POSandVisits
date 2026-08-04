@@ -117,7 +117,7 @@ const NUM=n=>Math.round(n||0).toLocaleString("ja-JP");
 const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const num=v=>{const n=parseFloat(String(v==null?"":v).replace(/[,¥\s]/g,""));return isFinite(n)?n:0;};
 
-const CONFIG_URL="https://rwfcsanmqvkxiuwdeddv.supabase.co/storage/v1/object/public/dashboard/config.json";
+const CONFIG_URL="https://qcdxhsrnlsgpntbiellh.supabase.co/storage/v1/object/public/dashboard/config.json";
 let SB=null, ME={email:"",role:null}, DATA=null;
 
 // 実地棚卸のカテゴリ。着数（服）に数える標準カテゴリ ＋ 小物（着数に含めない）。

@@ -69,7 +69,7 @@
 <script>
 "use strict";
 const NUM=n=>Math.round(n).toLocaleString("ja-JP");
-const CONFIG_URL="https://rwfcsanmqvkxiuwdeddv.supabase.co/storage/v1/object/public/dashboard/config.json";
+const CONFIG_URL="https://qcdxhsrnlsgpntbiellh.supabase.co/storage/v1/object/public/dashboard/config.json";
 let SB=null, DATA=null, ME={email:"",role:null}, TARGETS=null;
 async function loadTargets(){ if(window.__TARGETS__){TARGETS=window.__TARGETS__;return;} try{TARGETS=await (await fetch("targets.json",{cache:"no-store"})).json();}catch(e){TARGETS=null;} }
 

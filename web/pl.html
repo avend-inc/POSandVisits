@@ -144,7 +144,7 @@ async function loadTargets(){ if(TARGETS)return; if(window.__TARGETS__){TARGETS=
 // 店舗名に含まれる予算トークン（山形/福井/いわき）で、その月の予算オブジェクトを引く。
 function tgtOf(store,ym){const T=(TARGETS&&TARGETS.targets)||{};const nm=budStoreName(store)||"";for(const tok in T){if(nm.indexOf(tok)>=0&&T[tok][ym])return T[tok][ym];}return null;}
 
-const CONFIG_URL="https://rwfcsanmqvkxiuwdeddv.supabase.co/storage/v1/object/public/dashboard/config.json";
+const CONFIG_URL="https://qcdxhsrnlsgpntbiellh.supabase.co/storage/v1/object/public/dashboard/config.json";
 let SB=null, ME={email:"",role:null};
 function screen(h){document.getElementById("app").innerHTML=h;}
 function showError(e){screen('<div class="err">データを読み込めませんでした：'+esc(String(e&&e.message||e))+'</div>');}
