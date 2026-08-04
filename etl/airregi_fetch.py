@@ -100,6 +100,40 @@ def _first_visible(page, selectors: list[str]):
     return None
 
 
+def _click_exact(page, label: str, timeout: int = 4000) -> bool:
+    """innerText/valueが「完全一致」する可視要素をクリックする。
+    部分一致だと『ダウンロードの準備を開始する』が『開始する』に引っかかる等の
+    取り違えが起きるため、確認ダイアログのボタン等はこちらで正確に押す。"""
+    try:
+        loc = page.get_by_role("button", name=label, exact=True)
+        n = loc.count()
+        for i in range(n):
+            el = loc.nth(i)
+            if el.is_visible():
+                el.click(timeout=timeout)
+                return True
+    except Exception:
+        pass
+    # role で当たらない場合の保険：厳密テキスト一致で走査
+    try:
+        loc = page.locator(
+            f'button, a, [role=button]'
+        ).filter(has_text=_re_exact(label))
+        n = loc.count()
+        for i in range(min(n, 8)):
+            el = loc.nth(i)
+            if el.is_visible():
+                el.click(timeout=timeout)
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _re_exact(label: str):
+    return re.compile(r"^\s*" + re.escape(label) + r"\s*$")
+
+
 def _click_by_text(page, texts: list[str]) -> str | None:
     """文字を含むボタン/リンクを押す。押した文字を返す。無ければ None。"""
     for t in texts:
@@ -645,6 +679,11 @@ def debug_download(start_date: str = "2026-08-03", end_date: str | None = None,
     with browser_page(headless=headless) as (page, context):
         # 失敗を即座に返させる（60秒も粘らせない）。ログイン内部の明示waitはそのまま。
         context.set_default_timeout(6000)
+        downloads: list = []
+        try:
+            page.on("download", lambda d: downloads.append(d))
+        except Exception:
+            pass
 
         def step(name, fn) -> bool:
             print(f"\n=== {name} ===")
@@ -735,8 +774,8 @@ def debug_download(start_date: str = "2026-08-03", end_date: str | None = None,
         print(f"\n=== ⑦ 「準備を開始」クリック -> {prep!r} ===")
         page.wait_for_timeout(1500)
         _dump_modal(page, "準備を開始 押下後（確認ダイアログ？）")
-        confirm = _click_by_text(page, ["開始する", "OK", "はい", "実行"])
-        print(f"=== ⑧ 確認「開始する」クリック -> {confirm!r} ===")
+        confirm = _click_exact(page, "開始する")   # 完全一致で確認ボタンを押す
+        print(f"=== ⑧ 確認「開始する」（完全一致）クリック -> {confirm} ===")
 
         got = None
         for i in range(20):   # 最大 ~40秒 生成待ち
