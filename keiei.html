@@ -96,10 +96,13 @@ function prep(){const ds=DATA.daily.map(r=>r.d).sort();DATA._min=ds[0];DATA._max
 function _isWeekend(d){const g=new Date(d+"T00:00:00Z").getUTCDay();return g===0||g===6;}
 function _addDays(d,n){const t=new Date(d+"T00:00:00Z");t.setUTCDate(t.getUTCDate()+n);return t.toISOString().slice(0,10);}
 function _monthEnd(ym){const[y,m]=ym.split("-").map(Number);const last=new Date(Date.UTC(y,m,0)).getUTCDate();return `${ym}-${String(last).padStart(2,"0")}`;}
-// 予実タブが保存した着地見込みの上書き値（page="fc"）を読む。編集が全端末に反映される。
-async function planLoadFc(scope,ym){
-  if(SB){try{const {data}=await SB.from("plan_data").select("data").eq("page","fc").eq("scope",String(scope)).eq("ym",ym).maybeSingle();return data?(data.data||null):null;}catch(e){return null;}}
-  try{const s=localStorage.getItem(`notime-fc-${scope}-${ym}`);return s?JSON.parse(s):null;}catch(e){return null;}
+// 予実タブが保存した着地見込みの上書き値（page="fc"）を、その月ぶん“1回のクエリ”で全店まとめて読む。
+// （店舗ごとに問い合わせると直営店の数だけ往復が発生して遅い。1回に集約して高速化）
+async function planLoadAllFc(ym){
+  const m={};
+  if(SB){try{const {data}=await SB.from("plan_data").select("scope,data").eq("page","fc").eq("ym",ym);(data||[]).forEach(r=>{m[String(r.scope)]=r.data||null;});return m;}catch(e){return m;}}
+  try{for(const s of usableStores()){const x=localStorage.getItem(`notime-fc-${s.id}-${ym}`);if(x)m[String(s.id)]=JSON.parse(x);}}catch(e){}
+  return m;
 }
 // pl.html computeAuto 相当（税込 in／税抜 ex のみ）。締日までの実績・平日/土日祝1日平均・残日数を出す。
 function fcAuto(storeId,ym){
@@ -124,10 +127,10 @@ function fcAuto(storeId,ym){
   const exRatio = tdIn? tdEx/tdIn : 0.91;
   return {tdIn,tdEx,tdIt,avgWk,avgWe,avgItWk,avgItWe,remWk,remWe,exRatio,closing};
 }
-// 予実タブと同じ着地見込み（保存済み上書きがあれば反映）。
+// 予実タブと同じ着地見込み（保存済み上書き o があれば反映）。o は planLoadAllFc の該当店ぶん。
 // 戻り: {ex:税抜売上着地, inLand:税込着地, it:商品販売数着地}
-async function fcLandingEx(storeId,ym){
-  const A=fcAuto(storeId,ym), o=await planLoadFc(storeId,ym);
+function fcLandingEx(storeId,ym,o){
+  const A=fcAuto(storeId,ym);
   // v が未指定(null/undefined/空)なら既定値dへ。※Number(null)===0 の罠を避ける。
   const num=(v,d)=>{if(v==null||v==="")return d;const n=Number(v);return Number.isFinite(n)?n:d;};
   const remWk=num(o&&o.remWk,A.remWk), remWe=num(o&&o.remWe,A.remWe);
@@ -201,7 +204,9 @@ async function renderKeiei(){
   const tgtEx=(sid,ym)=>{const v=tgtField(sid,ym,"ex");return v!=null?Math.round(v):null;};
   const tgtQty=(sid,ym)=>{const v=tgtField(sid,ym,"qty");return v!=null?Math.round(v):null;};
   // 当月着地は「予実タブ（🎯着地見込み）」と同じ計算＝編集値も反映される。
-  const fcMap={}; for(const s of dstores){ try{fcMap[s.id]=await fcLandingEx(s.id,cur);}catch(e){fcMap[s.id]=null;} }
+  // 予実タブ保存値は1回のクエリで全店まとめて取得（往復を店舗数ぶん→1回に短縮）。
+  const fcAll=await planLoadAllFc(cur);
+  const fcMap={}; dstores.forEach(s=>{ try{fcMap[s.id]=fcLandingEx(s.id,cur,fcAll[String(s.id)]);}catch(e){fcMap[s.id]=null;} });
   const storeEx={}, storeIt={};
   dstores.forEach(s=>{const idset=new Set([s.id]);
     const pAgg=sumIds(idset,pf,pt); const pEx=pAgg.ex||0, pIt=pAgg.it||0;
