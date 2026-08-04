@@ -600,10 +600,81 @@ def decode_csv(data: bytes) -> str:
 
 
 # ------------------------------------------------------------
+# ジャーナルCSVの取得（export API 直叩き。UI操作より堅牢）
+# ------------------------------------------------------------
+#  実通信で確定した手順（2026-08）:
+#    1) POST /CLP/api/exportJournalData/start/
+#         paramStr={"targetDateFrom":"YYYYMMDD","targetDateTo":"YYYYMMDD"}  → returnCode 0000
+#    2) POST /CLP/api/exportJournalData/getStatus/  paramStr=null
+#         → results.resultsData.status=="02" & progressRate==100 で生成完了
+#    3) POST /CLP/api/exportJournalData/download/   paramStr={}  → CSV本体(cp932, bytes)
+#  セッション(cookie/店舗コンテキスト)は login→select_store→salesJournal表示で確立する。
+API_BASE = "https://airregi.jp/CLP"
+API_START = "/api/exportJournalData/start/"
+API_STATUS = "/api/exportJournalData/getStatus/"
+API_DOWNLOAD = "/api/exportJournalData/download/"
+
+
+def _export_via_api(context, start_date: str, end_date: str) -> bytes:
+    import json
+    ymd_from = start_date.replace("-", "").replace("/", "")
+    ymd_to = end_date.replace("-", "").replace("/", "")
+    headers = {
+        "X-Requested-With": "XMLHttpRequest",
+        "Referer": f"{API_BASE}/view/salesJournal/",
+        "Origin": "https://airregi.jp",
+    }
+
+    def _post(path: str, param):
+        r = context.request.post(API_BASE + path, form={"paramStr": param},
+                                 headers=headers, timeout=60_000)
+        return r
+
+    # 1) 生成開始（対象期間を指定）
+    start_param = json.dumps({"targetDateFrom": ymd_from, "targetDateTo": ymd_to})
+    r = _post(API_START, start_param)
+    body = ""
+    try:
+        body = r.text()[:400]
+    except Exception:
+        pass
+    if not r.ok:
+        raise EtlError(f"Airレジ export start が失敗（HTTP {r.status}）: {body}")
+    if '"returnCode":"0000"' not in body.replace(" ", ""):
+        raise EtlError(f"Airレジ export start の応答が異常（returnCode≠0000）: {body}")
+
+    # 2) 生成完了を待つ（status=="02" & progressRate==100）。最大 ~120秒。
+    ready = False
+    last_rd = None
+    for _ in range(60):
+        s = _post(API_STATUS, "null")
+        rd = {}
+        try:
+            rd = ((s.json().get("results") or {}).get("resultsData")) or {}
+        except Exception:
+            rd = {}
+        last_rd = rd
+        status = str(rd.get("status") or "")
+        rate = rd.get("progressRate")
+        if status == "02" and str(rate) in ("100", "None"):
+            ready = True
+            break
+        time.sleep(2)
+    if not ready:
+        raise EtlError(f"Airレジ export の生成完了を待てませんでした（最後の状態: {last_rd}）。")
+
+    # 3) ダウンロード（CSV本体）
+    d = _post(API_DOWNLOAD, "{}")
+    if not d.ok:
+        raise EtlError(f"Airレジ export download が失敗（HTTP {d.status}）")
+    return d.body()
+
+
+# ------------------------------------------------------------
 # まとめ
 # ------------------------------------------------------------
 def fetch_range(start_date: str, end_date: str, headless: bool = True) -> str:
-    """start_date〜end_date の会計明細CSVを取得して文字列で返す。失敗時3回まで再試行。"""
+    """start_date〜end_date の会計明細CSVを取得して文字列で返す。失敗時は再試行。"""
     airid = require_env("AIRREGI_ID", "Airレジ（AirID）のログインID")
     password = require_env("AIRREGI_PW", "Airレジ（AirID）のパスワード")
 
@@ -619,30 +690,22 @@ def fetch_range(start_date: str, end_date: str, headless: bool = True) -> str:
             with browser_page(headless=headless) as (page, context):
                 login(page, airid, password)
                 select_store(page)   # 複数店アカウント→下北沢を選ぶ
-                if _env("AIRREGI_DEBUG"):
-                    discover(page)
+                # 取引履歴画面を開いてセッションに「対象店舗」を固定させる。
                 try:
                     open_sales(page)
-                    text = decode_csv(
-                        download_csv(page, context, start_date, end_date))
-                    # 取得物がCSVか検証。Airレジがエラー時に返すJSON
-                    #   {"results":{"returnCode":"4001","errMsg":"システムエラー"...}}
-                    # を「売上0」と誤判定しないよう、CSVでなければ失敗として扱う。
-                    head = text.lstrip()[:1000]
-                    if head[:1] in ("{", "[") or ("取引No" not in head and "取引日" not in head):
-                        raise EtlError(
-                            "AirレジのCSVダウンロードに失敗しました"
-                            "（CSVではない応答＝ダウンロード導線の変更/システムエラーの可能性）。\n"
-                            f"  応答の先頭: {text[:200]!r}")
-                    return text
+                    page.wait_for_timeout(1500)
                 except Exception:
-                    # 失敗時は画面構造をログに残して次の調整に使えるようにする。
-                    try:
-                        print("  ⚠️ 会計明細/CSV取得で失敗。画面構造を洗い出します（調査用）:")
-                        discover(page)
-                    except Exception:
-                        pass
-                    raise
+                    pass
+                # export API を直接叩いてCSVを取得（UI操作より堅牢）。
+                text = decode_csv(_export_via_api(context, start_date, end_date))
+                # 取得物がCSVか検証。エラー時のJSON {"results":{"returnCode":...}} を
+                # 「売上0」と誤判定しないよう、CSVでなければ失敗として扱う。
+                head = text.lstrip()[:1000]
+                if head[:1] in ("{", "[") or ("取引No" not in head and "取引日" not in head):
+                    raise EtlError(
+                        "AirレジのCSV取得に失敗しました（CSVではない応答）。\n"
+                        f"  応答の先頭: {text[:200]!r}")
+                return text
         except Exception as e:
             last_error = e
             if attempt < max_try:
