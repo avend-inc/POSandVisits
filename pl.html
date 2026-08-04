@@ -362,14 +362,14 @@ function fcKey(){return `notime-fc-${state.store}-${state.ym}`;}
 function fcNum(v,d){const n=Number(v);return Number.isFinite(n)?n:d;}
 function fcMrg(o,def,k){const a=(o.avg&&o.avg[k])||{};return {wk:fcNum(a.wk,def.avg[k].wk),we:fcNum(a.we,def.avg[k].we)};}
 async function loadFcData(){
-  const def={remWk:AUTO.remWk, remWe:AUTO.remWe, budget:fcBudget(state.store,state.ym),
+  const def={remWk:AUTO.remWk, remWe:AUTO.remWe, budget:fcBudget(state.store,state.ym), aup:0,
     avg:{in:{wk:Math.round(AUTO.avg.in.wk),we:Math.round(AUTO.avg.in.we)},
          v:{wk:Math.round(AUTO.avg.v.wk),we:Math.round(AUTO.avg.v.we)},
          tx:{wk:Math.round(AUTO.avg.tx.wk),we:Math.round(AUTO.avg.tx.we)},
          it:{wk:Math.round(AUTO.avg.it.wk),we:Math.round(AUTO.avg.it.we)}}};
   const o=await planLoad("fc",state.store,state.ym);
   if(o&&Object.keys(o).length){
-    return {remWk:fcNum(o.remWk,def.remWk),remWe:fcNum(o.remWe,def.remWe),budget:fcNum(o.budget,def.budget),
+    return {remWk:fcNum(o.remWk,def.remWk),remWe:fcNum(o.remWe,def.remWe),budget:fcNum(o.budget,def.budget),aup:fcNum(o.aup,0),
       avg:{in:fcMrg(o,def,"in"),v:fcMrg(o,def,"v"),tx:fcMrg(o,def,"tx"),it:fcMrg(o,def,"it")}};}
   return def;
 }
@@ -380,7 +380,9 @@ function landing(){
   METS.forEach(k=>{ if(k==="ex")return;
     const a=(fc.avg&&fc.avg[k])||(AUTO.avg&&AUTO.avg[k])||{wk:0,we:0};   // txv等の未編集項目はAUTO平均で補完
     L[k]=AUTO.td[k] + fc.remWk*(a.wk||0) + fc.remWe*(a.we||0); });
-  L.ex=L.in*AUTO.exRatio;
+  // 税抜売上の着地：見込み商品単価(fc.aup)が入っていれば「販売点数 × 商品単価」で出す。
+  //  未入力(0)なら従来どおり 税込 × 実績税率。
+  L.ex=(fc.aup>0)?L.it*fc.aup:L.in*AUTO.exRatio;
   return L;
 }
 // 主要KPI(key)＝売上を動かす3要素、その他(sub)＝参考。売上(KGI)はヒーローに別表示。
@@ -594,9 +596,10 @@ function fcBody(monthLabel,storeName){
         <div class="field"><label>残 平日日数</label><input class="num" id="remWk" type="number" min="0" step="1" value="${fc.remWk}" style="width:70px"${CANEDIT?"":" disabled"}></div>
         <div class="field"><label>残 土日祝日数</label><input class="num" id="remWe" type="number" min="0" step="1" value="${fc.remWe}" style="width:70px"${CANEDIT?"":" disabled"}></div>
         <div class="field"><label>目標（税込予算）</label><input class="num" id="budget" type="number" min="0" step="10000" value="${fc.budget||""}" placeholder="未登録"${CANEDIT?"":" disabled"}></div>
+        <div class="field"><label>見込み 商品単価（税抜／点）</label><input class="num" id="fcaup" type="number" min="0" step="10" value="${fc.aup||""}" placeholder="自動 ${AUTO.td.it>0?YEN(AUTO.td.ex/AUTO.td.it):"—"}"${CANEDIT?"":" disabled"}></div>
         ${CANEDIT?'<button class="chip" id="fcreset">自動見込みに戻す</button>':'<span class="note">閲覧のみ（編集は権限者）</span>'}
       </div>
-      <p class="note">土日祝の残日数は「土日」を自動で数えています。<b>祝日がある月は手で足して</b>ください。目標（税込予算）は<b>月次予実シートから自動表示</b>。違っていれば上書きできます（進捗率・計画比・差額が出ます）。</p>
+      <p class="note">土日祝の残日数は「土日」を自動で数えています。<b>祝日がある月は手で足して</b>ください。目標（税込予算）は<b>月次予実シートから自動表示</b>。違っていれば上書きできます（進捗率・計画比・差額が出ます）。<b>見込み商品単価</b>を入れると、税抜売上の着地を「販売点数 × 商品単価」で計算します（空欄なら税込×実績税率）。</p>
       <div class="tblwrap"><table id="driver"></table></div>
     </div>
     <div class="panel">
@@ -612,6 +615,7 @@ function bindFc(){
   bindFcInput("remWk",v=>fc.remWk=Math.max(0,Math.round(v)));
   bindFcInput("remWe",v=>fc.remWe=Math.max(0,Math.round(v)));
   bindFcInput("budget",v=>fc.budget=Math.max(0,v));
+  bindFcInput("fcaup",v=>fc.aup=Math.max(0,v));
 }
 function bindFcInput(id,setter){const el=document.getElementById(id);if(!el)return;
   el.oninput=()=>{const v=Number(el.value); if(el.value===""){setter(0);}else if(Number.isFinite(v)){setter(v);} el.classList.remove("saved");el.classList.add("editing"); markDirty(); fcRecompute();};}
