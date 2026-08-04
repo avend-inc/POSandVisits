@@ -426,11 +426,56 @@ def _set_modal_daterange(page, start_date: str, end_date: str) -> bool:
     return False
 
 
+def _dump_modal(page, tag: str) -> None:
+    """開いているモーダル/ダイアログの入力欄・ボタンを洗い出して表示（期間設定の目印確定用）。"""
+    js = r"""
+    () => {
+      const cut=(s,n=50)=>(s||'').toString().replace(/\s+/g,' ').trim().slice(0,n);
+      const roots=[...document.querySelectorAll('[role=dialog],[class*="modal" i],[class*="Modal"],[class*="dialog" i],[class*="drawer" i]')];
+      const root=roots.find(r=>{const b=r.getBoundingClientRect();return b.width>100&&b.height>60;})||document.body;
+      const inputs=[...root.querySelectorAll('input,select,textarea')].map(i=>({
+        tag:i.tagName,name:i.name,id:i.id,type:i.type,ph:cut(i.placeholder,24),val:cut(i.value,30)}));
+      const btns=[...root.querySelectorAll('button,a,[role=button]')].map(b=>({
+        text:cut(b.innerText||b.value,40),dis:b.disabled===true,tid:b.getAttribute&&b.getAttribute('data-testid')}))
+        .filter(x=>x.text||x.tid);
+      return {inputs, btns, n:roots.length};
+    }"""
+    try:
+        info = page.evaluate(js)
+    except Exception as e:
+        print(f"  [DL診断:{tag}] モーダル構造の取得に失敗: {e}")
+        return
+    print(f"  [DL診断:{tag}] ダイアログ数={info.get('n')}")
+    print(f"  [DL診断:{tag}] 入力欄: {info.get('inputs')}")
+    print(f"  [DL診断:{tag}] ボタン: {info.get('btns')}")
+
+
 def download_csv(page, context, start_date: str | None = None,
                  end_date: str | None = None) -> bytes:
     downloads: list = []
+    resp_log: list[str] = []   # csv/journal/export系レスポンスの (status, url, 本文先頭)
     try:
         page.on("download", lambda d: downloads.append(d))
+    except Exception:
+        pass
+
+    def _on_resp(resp):
+        try:
+            u = resp.url
+            if not any(k in u.lower() for k in ("csv", "journal", "export", "download")):
+                return
+            body = ""
+            try:
+                ct = (resp.headers or {}).get("content-type", "")
+                if int(resp.status) >= 400 or "json" in ct or "html" in ct:
+                    body = resp.text()[:300]
+            except Exception:
+                body = "(本文取得不可)"
+            resp_log.append(f"{resp.status} {u}  ->  {body}")
+        except Exception:
+            pass
+    try:
+        page.on("response", _on_resp)
     except Exception:
         pass
 
@@ -446,11 +491,14 @@ def download_csv(page, context, start_date: str | None = None,
         raise EtlError("「ジャーナル履歴(CSV)」が押せませんでした。"
                        "debug/airregi_journal_menu_notfound を確認してください。")
     page.wait_for_timeout(1500)
+    _dump_modal(page, "モーダル表示直後")   # 期間欄・ボタンの現状を1回で可視化
     # 3) 対象期間を設定（既定は当日範囲。指定があれば入れる）
     if start_date:
-        _set_modal_daterange(page, start_date, end_date or start_date)
+        ok_date = _set_modal_daterange(page, start_date, end_date or start_date)
+        print(f"  [DL診断] 期間設定({start_date}〜{end_date or start_date})の実行: {'成功' if ok_date else '失敗（欄が見つからず既定期間のまま）'}")
     # 4) 「ダウンロードの準備を開始する」（サーバ側で非同期生成）
-    _click_by_text(page, PREP_TEXTS)
+    prep = _click_by_text(page, PREP_TEXTS)
+    print(f"  [DL診断] 「準備を開始」ボタン押下: {prep!r}")
     # 5) 生成完了を待って、最新の「ダウンロードする」を押す
     page.wait_for_timeout(8000)   # 新しい準備済みファイルが一覧の先頭に出るのを待つ
     deadline = time.time() + 150
@@ -472,8 +520,20 @@ def download_csv(page, context, start_date: str | None = None,
             with open(path, "rb") as fh:
                 return fh.read()
 
-    # フォールバック: 通信ログからCSVらしきURLを直接GET
+    # ここに来た＝UIからのダウンロードが発火しなかった。原因究明のため、
+    # モーダルの現状・csv/journal系レスポンス・通信URLを1回で全部出す。
+    print("  [DL診断] UIダウンロードが発火せず。以下を確認してください:")
+    _dump_modal(page, "ダウンロード不発時")
+    print(f"  [DL診断] csv/journal/export系レスポンス（{len(resp_log)}件）:")
+    for line in resp_log[-12:]:
+        print(f"      {line}")
     log = getattr(page, "_notime_requests", None) or []
+    hits = [e for e in log if any(k in e.lower() for k in ("csv", "export", "download", "journal"))]
+    print(f"  [DL診断] csv/journal系リクエストURL（{len(hits)}件）:")
+    for e in hits[-12:]:
+        print(f"      {e}")
+
+    # フォールバック: 通信ログからCSVらしきURLを直接GET（ただし“本物のCSV”のみ採用）。
     for entry in reversed(log):
         m = re.search(r"(https?://\S+)", entry)
         if not m:
@@ -482,13 +542,18 @@ def download_csv(page, context, start_date: str | None = None,
         if any(k in u.lower() for k in ("csv", "export", "download", "journal")):
             try:
                 resp = context.request.get(u)
-                if resp.ok:
-                    return resp.body()
+                if not resp.ok:
+                    continue
+                body = resp.body()
+                head = body[:400].decode("cp932", errors="replace")
+                if ("取引No" in head or "取引日" in head) and head.lstrip()[:1] not in ("{", "["):
+                    return body        # 本物のCSVだけ返す
             except Exception:
                 continue
     dump_page(page, "airregi_csv_download_failed")
-    raise EtlError("Airレジの明細CSVをダウンロードできませんでした。"
-                   "debug/airregi_csv_download_failed の通信記録を確認してください。")
+    raise EtlError("Airレジの明細CSVをダウンロードできませんでした"
+                   "（UIのダウンロードが発火せず、通信ログにも有効なCSVがありません）。\n"
+                   "  上の [DL診断] のレスポンス/URL/モーダル構造を確認してください。")
 
 
 def decode_csv(data: bytes) -> str:
