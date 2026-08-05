@@ -135,7 +135,7 @@ const F2 =n=>(Math.round(n*100)/100).toLocaleString("ja-JP",{minimumFractionDigi
 // 売上はすべて「税抜」で語る（税込売上は表示しない）。税抜の実額が無い店（デジテールの
 // 日次合計のみ）は税込÷1.1で近似し、常に税抜で並べられるようにする（p.ex に集約）。
 const METRICS=[
-  {key:"ex", name:"税抜売上",   fmt:v=>YEN(v)+"円", calc:p=>p.ex},
+  {key:"ex", name:"税抜売上",   fmt:v=>YEN(v)+"円", calc:p=>(p.exDisp!=null?p.exDisp:p.ex)},
   {key:"v",  name:"来店客数",   fmt:v=>NUM(v)+"人", calc:p=>p.hasV?p.v:null},
   {key:"pr", name:"購入率",     fmt:v=>F1(v)+"%",   calc:p=>(p.hasV&&p.v>0)?(p.txv!=null?p.txv:p.tx)/p.v*100:null},
   {key:"aov",name:"客単価",     fmt:v=>YEN(v)+"円", calc:p=>p.tx>0?p.ex/p.tx:null},
@@ -288,6 +288,37 @@ function primaryIds(){
   return [Number(state.view)];
 }
 
+// ---- 月別の「着地見込み」（税抜売上）: 締日を含む月は月末までを予測する ----
+function exOfRow(r){return r.ex!=null?r.ex:(r.in||0)/1.1;}
+function curMonthKey(){return (DATA._salesMax||DATA._max||"").slice(0,7);}
+function daysInMonthYm(ym){const[y,m]=ym.split("-").map(Number);return new Date(Date.UTC(y,m,0)).getUTCDate();}
+function isWeekendD(d){const g=new Date(d+"T00:00:00Z").getUTCDay();return g===0||g===6;}
+// 平日/土日祝の平均×残日数 ＋ 実績 で月末を予測（dashboardの着地見込みと同方式・税抜）。
+function monthLandingEx(idset,ym){
+  const mS=ym+"-01",mE=`${ym}-${String(daysInMonthYm(ym)).padStart(2,"0")}`,winStart=addDays(mS,-56);
+  const byDate={};
+  for(const r of DATA.daily){ if(!idset.has(r.s))continue; if(r.d<winStart||r.d>mE)continue;
+    byDate[r.d]=(byDate[r.d]||0)+exOfRow(r); }
+  const monthDates=Object.keys(byDate).filter(d=>d>=mS&&d<=mE).sort();
+  const closing=monthDates.length?monthDates[monthDates.length-1]:null;
+  if(!closing)return 0;
+  let td=0,wk=0,wkN=0,we=0,weN=0;
+  for(const d of monthDates){const v=byDate[d];td+=v;if(isWeekendD(d)){we+=v;weN++;}else{wk+=v;wkN++;}}
+  let twk=0,twkN=0,twe=0,tweN=0;const trFrom=addDays(closing,-56);
+  for(const d of Object.keys(byDate)){if(d<trFrom||d>closing)continue;const v=byDate[d];if(isWeekendD(d)){twe+=v;tweN++;}else{twk+=v;twkN++;}}
+  const wkAvg=wkN?wk/wkN:(twkN?twk/twkN:0),weAvg=weN?we/weN:(tweN?twe/tweN:0);
+  let remWk=0,remWe=0;for(let d=addDays(closing,1);d<=mE;d=addDays(d,1)){if(isWeekendD(d))remWe++;else remWk++;}
+  return td+remWk*wkAvg+remWe*weAvg;
+}
+// 月別表示のとき、締日を含む月の p に着地見込み(税抜)を exDisp として付ける（税抜売上のみ）。
+function annotateLanding(map,idset){
+  if(state.grain!=="month")return map;
+  const cm=curMonthKey(),p=map.get(cm);
+  if(p)p.exDisp=monthLandingEx(idset,cm);
+  return map;
+}
+function isForecastKey(k){return state.grain==="month"&&k===curMonthKey();}
+
 function render(){
   syncAdminTab();
   const groups=groupList();
@@ -324,9 +355,10 @@ function render(){
       <button class="chip" data-preset="all">全期間</button>
     </div>
     <div class="legend" id="legend"></div>
-    <div class="cards" id="cards"></div>
     <h2 class="sec" id="tbl-h"></h2>
     <div class="tblwrap" id="tbl"></div>
+    <h2 class="sec" id="chart-h" style="margin-top:22px">推移グラフ</h2>
+    <div class="cards" id="cards"></div>
     <div class="foot">
       各グラフは「${state.grain==="day"?"日別":state.grain==="week"?"週別":"月別"}」の推移。「店舗別に比較」を選ぶと店舗ごとの折れ線が色分けで重なります。
       右上の数字は対象期間ぜんぶの合計／平均（比較時は総合）。前日比・前週比・前月比は直前の同じ長さの期間との増減（対象期間の選び方で自動表示。比べた期間は数字にマウスを合わせると出ます）。
@@ -339,7 +371,15 @@ function render(){
     state.own=b.dataset.own;
     if(!["total","compare"].includes(state.view)&&!allowedStores().some(s=>String(s.id)===String(state.view)))state.view="total";
     render();});
-  document.querySelectorAll("#grain button").forEach(b=>b.onclick=()=>{state.grain=b.dataset.g;render();});
+  document.querySelectorAll("#grain button").forEach(b=>b.onclick=()=>{
+    state.grain=b.dataset.g;
+    if(state.grain==="month"){  // 月別は「直近6ヶ月＋締日月(見込み)」＝7ヶ月ぶんを表示
+      const cm=curMonthKey();let[cy,cmn]=cm.split("-").map(Number);
+      let sm=cmn-6,sy=cy;while(sm<=0){sm+=12;sy--;}
+      state.from=clampLo(`${sy}-${String(sm).padStart(2,"0")}-01`);
+      state.to=clampHi(DATA._salesMax||DATA._max);savePeriod();
+    }
+    render();});
   document.getElementById("from").onchange=e=>{state.from=clampLo(e.target.value||DATA._min);if(state.from>state.to)state.to=state.from;savePeriod();draw();};
   document.getElementById("to").onchange=e=>{state.to=clampHi(e.target.value||DATA._max);if(state.to<state.from)state.from=state.to;savePeriod();draw();};
   document.querySelectorAll(".chip[data-preset]").forEach(b=>b.onclick=()=>{const[f,t]=presetRange(b.dataset.preset);state.from=f;state.to=t;savePeriod();render();});
@@ -359,13 +399,15 @@ function draw(){
 
   // 期間キー（棒の並び）は主対象の行から作る
   const prows=rowsForIds(state.from,state.to,idset);
-  const pm=pmap(prows,g);
+  const pm=annotateLanding(pmap(prows,g),idset);
   const keys=[...pm.keys()].sort();
-  const labels=keys.map(k=>pLabel(k,g));
+  // 月別のときは締日を含む月に「（見込）」を付ける（着地見込み）。
+  const labels=keys.map(k=>pLabel(k,g)+(isForecastKey(k)?"（見込）":""));
 
   let series;
   if(state.view==="compare"){
-    series=allowed.map(s=>{const sm=pmap(rowsForIds(state.from,state.to,new Set([s.id])),g);
+    series=allowed.map(s=>{const sid=new Set([s.id]);
+      const sm=annotateLanding(pmap(rowsForIds(state.from,state.to,sid),g),sid);
       return {name:s.name,color:cmap[s.id],area:false,vals:keys.map(k=>sm.get(k)||null)};});
   }else{
     series=[{name:viewName,color:"var(--accent)",area:true,vals:keys.map(k=>pm.get(k)||null)}];
@@ -405,8 +447,9 @@ function drawTable(keys,labels){
   if(isStore){
     const sid=Number(state.view);
     const sname=(usableStores().find(s=>s.id===sid)||{}).name||"";
-    const sm=pmap(rowsForIds(state.from,state.to,new Set([sid])),g);
-    const tot=sumRows(rowsForIds(state.from,state.to,new Set([sid])));
+    const sidSet=new Set([sid]);
+    const sm=annotateLanding(pmap(rowsForIds(state.from,state.to,sidSet),g),sidSet);
+    const tot=sumRows(rowsForIds(state.from,state.to,sidSet));
     const mets=STORE_KPIS.map(k=>METRICS.find(m=>m.key===k));
     hEl.innerHTML=`<span class="store" style="color:var(--accent)">${esc(sname)}</span> のKPI推移（${gname}）`
       +`<button class="backchip" id="back">← 店舗一覧へ戻る</button>`;
@@ -414,7 +457,7 @@ function drawTable(keys,labels){
       +keys.map((k,i)=>`<th>${esc(labels[i])}</th>`).join("")+'<th>期間計</th></tr></thead><tbody>';
     for(const m of mets){
       html+=`<tr><td>${m.name}</td>`+keys.map(k=>{const p=sm.get(k);const v=p?m.calc(p):null;
-        return `<td>${v==null?"—":m.fmt(v)}</td>`;}).join("");
+        return `<td${isForecastKey(k)?' class="now"':''}>${v==null?"—":m.fmt(v)}</td>`;}).join("");
       const tv=m.calc(tot);html+=`<td class="now">${tv==null?"—":m.fmt(tv)}</td></tr>`;
     }
     box.innerHTML=html+'</tbody></table>';
@@ -426,11 +469,12 @@ function drawTable(keys,labels){
       +labels.map(l=>`<th>${esc(l)}</th>`).join("")+'<th>期間計</th></tr></thead><tbody>';
     const colTot=new Array(keys.length).fill(0);let grand=0;
     for(const s of stores){
-      const sm=pmap(rowsForIds(state.from,state.to,new Set([s.id])),g);
+      const sidSet=new Set([s.id]);
+      const sm=annotateLanding(pmap(rowsForIds(state.from,state.to,sidSet),g),sidSet);
       let rowTot=0;
       html+=`<tr><td><button class="slink" data-id="${s.id}">${esc(s.name)}</button></td>`;
-      keys.forEach((k,i)=>{const p=sm.get(k);const v=p?p.ex:0;rowTot+=v;colTot[i]+=v;
-        html+=`<td>${v?YEN(v):"—"}</td>`;});
+      keys.forEach((k,i)=>{const p=sm.get(k);const v=p?(p.exDisp!=null?p.exDisp:p.ex):0;rowTot+=v;colTot[i]+=v;
+        html+=`<td${isForecastKey(k)?' class="now"':''}>${v?YEN(v):"—"}</td>`;});
       grand+=rowTot;html+=`<td class="now">${rowTot?YEN(rowTot):"—"}</td></tr>`;
     }
     html+=`<tr class="tot"><td>総合</td>`+colTot.map(v=>`<td>${v?YEN(v):"—"}</td>`).join("")
