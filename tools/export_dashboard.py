@@ -504,6 +504,17 @@ def main() -> int:
         # index.html は常に公開バケット（URLを変えないため）
         _ensure_bucket(sb, BUCKET_PUBLIC, public=True)
 
+        # 静的サブページ（推移・予実・販促・棚卸・分析AI・経営・管理）も毎回配信する。
+        # これらは実行時に config.json を自分で読むため設定の埋め込みは不要（そのまま配信）。
+        # → dashboard.html だけでなく trends.html 等の更新も、この集計・配信で反映される。
+        for _pg in ("trends.html", "pl.html", "promo.html", "stock.html",
+                    "ask.html", "keiei.html", "admin.html", "forecast.html"):
+            _fp = ROOT / "web" / _pg
+            if _fp.exists():
+                _upload(sb, BUCKET_PUBLIC, _pg,
+                        _fp.read_text(encoding="utf-8").encode("utf-8"),
+                        "text/html; charset=utf-8", public=True)
+
         if auth_mode:
             # data.json は非公開バケットへ。HTMLに公開情報を埋め込む。
             _ensure_bucket(sb, BUCKET_PRIVATE, public=False)

@@ -85,6 +85,21 @@
   svg{display:block;width:100%;height:auto;overflow:visible;}
   .tip{position:absolute;pointer-events:none;background:var(--ink);color:var(--surface);font-size:11.5px;line-height:1.4;
     padding:6px 8px;border-radius:8px;white-space:nowrap;transform:translate(-50%,-115%);opacity:0;transition:opacity .08s;z-index:5;box-shadow:var(--shadow);}
+  h2.sec{font-size:15px;margin:20px 2px 4px;font-weight:700;letter-spacing:.01em;}
+  h2.sec .sub{font-weight:600;}
+  .tblwrap{overflow-x:auto;border:1px solid var(--border);border-radius:12px;background:var(--surface);box-shadow:var(--shadow);-webkit-overflow-scrolling:touch;}
+  table.grid{border-collapse:separate;border-spacing:0;font-size:12.5px;min-width:100%;white-space:nowrap;}
+  table.grid th,table.grid td{padding:8px 12px;text-align:right;border-bottom:1px solid var(--border);}
+  table.grid thead th{color:var(--ink2);font-weight:700;background:var(--surface2);position:sticky;top:0;}
+  table.grid th:first-child,table.grid td:first-child{text-align:left;position:sticky;left:0;background:var(--surface);z-index:2;box-shadow:1px 0 0 var(--border);}
+  table.grid thead th:first-child{background:var(--surface2);z-index:3;}
+  table.grid tbody tr:last-child td{border-bottom:0;}
+  table.grid tr.tot td{font-weight:750;background:var(--surface2);}
+  table.grid td.now{color:var(--ink);font-weight:700;}
+  button.slink{border:0;background:transparent;color:var(--accent);font-weight:700;cursor:pointer;font-size:12.5px;padding:0;text-align:left;font-family:inherit;}
+  button.slink:hover{text-decoration:underline;}
+  .backchip{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:9px;padding:6px 11px;font-size:12px;font-weight:700;cursor:pointer;margin-left:8px;}
+  .backchip:hover{border-color:var(--accent);color:var(--accent);}
   .foot{color:var(--muted);font-size:11px;margin-top:18px;line-height:1.7;}
   .err{padding:20px;color:var(--bad);font-weight:600;}
   .gate{max-width:440px;margin:14vh auto;text-align:center;padding:0 22px;}
@@ -117,17 +132,20 @@ const NUM=n=>Math.round(n).toLocaleString("ja-JP");
 const F1 =n=>(Math.round(n*10)/10).toLocaleString("ja-JP",{minimumFractionDigits:1,maximumFractionDigits:1});
 const F2 =n=>(Math.round(n*100)/100).toLocaleString("ja-JP",{minimumFractionDigits:2,maximumFractionDigits:2});
 
+// 売上はすべて「税抜」で語る（税込売上は表示しない）。税抜の実額が無い店（デジテールの
+// 日次合計のみ）は税込÷1.1で近似し、常に税抜で並べられるようにする（p.ex に集約）。
 const METRICS=[
-  {key:"in", name:"税込売上",     fmt:v=>YEN(v)+"円", calc:p=>p.in},
-  {key:"ex", name:"税抜売上",     fmt:v=>YEN(v)+"円", calc:p=>p.ex},
-  {key:"v",  name:"来店客数",     fmt:v=>NUM(v)+"人", calc:p=>p.hasV?p.v:null},
-  {key:"tx", name:"取引数",       fmt:v=>NUM(v)+"件", calc:p=>p.tx},
-  {key:"qty",name:"販売数",       fmt:v=>NUM(v)+"点", calc:p=>p.it},
-  {key:"pr", name:"購入率",       fmt:v=>F1(v)+"%",   calc:p=>(p.hasV&&p.v>0)?(p.txv!=null?p.txv:p.tx)/p.v*100:null},
-  {key:"aov",name:"客単価（税込）",   fmt:v=>YEN(v)+"円", calc:p=>p.tx>0?p.in/p.tx:null},
-  {key:"upt",name:"平均購入数",   fmt:v=>F2(v)+"点",  calc:p=>p.tx>0?p.it/p.tx:null},
-  {key:"aup",name:"平均商品単価（税抜）", fmt:v=>YEN(v)+"円", calc:p=>p.it>0?p.ex/p.it:null},
+  {key:"ex", name:"税抜売上",   fmt:v=>YEN(v)+"円", calc:p=>p.ex},
+  {key:"v",  name:"来店客数",   fmt:v=>NUM(v)+"人", calc:p=>p.hasV?p.v:null},
+  {key:"pr", name:"購入率",     fmt:v=>F1(v)+"%",   calc:p=>(p.hasV&&p.v>0)?(p.txv!=null?p.txv:p.tx)/p.v*100:null},
+  {key:"aov",name:"客単価",     fmt:v=>YEN(v)+"円", calc:p=>p.tx>0?p.ex/p.tx:null},
+  {key:"upt",name:"平均購入数", fmt:v=>F2(v)+"点",  calc:p=>p.tx>0?p.it/p.tx:null},
+  {key:"aup",name:"商品単価",   fmt:v=>YEN(v)+"円", calc:p=>p.it>0?p.ex/p.it:null},
+  {key:"tx", name:"取引数",     fmt:v=>NUM(v)+"件", calc:p=>p.tx},
+  {key:"qty",name:"販売数",     fmt:v=>NUM(v)+"点", calc:p=>p.it},
 ];
+// 店舗ボタンで表示する6KPI（税抜売上・来店客数・購入率・客単価・平均購入数・商品単価）
+const STORE_KPIS=["ex","v","pr","aov","upt","aup"];
 const state={view:"total",own:"all",grain:"week",from:null,to:null};
 let DATA=null;
 // 比較ラベル：対象期間の長さで 前日比／前週比／前月比 を出し分ける。比較先は直前の同じ長さの期間。
@@ -217,7 +235,8 @@ function daysBetween(a,b){return Math.round((Date.parse(b)-Date.parse(a))/864000
 function clampLo(d){return d<DATA._min?DATA._min:d;} function clampHi(d){return d>DATA._max?DATA._max:d;}
 function kvOf(sid){const s=(DATA.stores||[]).find(x=>String(x.id)===String(sid));return s?(s.kv!==false):true;} // 来店をKPIに使うか
 function sumRows(rows){const p={in:0,ex:0,tx:0,txv:0,it:0,v:0,hasV:false};
-  for(const r of rows){p.in+=r.in||0;p.ex+=r.ex||0;p.tx+=r.tx||0;p.it+=r.it||0;if(kvOf(r.s)){p.txv+=r.tx||0;if(r.v!=null){p.v+=r.v;p.hasV=true;}}}
+  // 税抜(ex)は実額があればそれを、無ければ税込÷1.1で近似（売上は全て税抜で語るため常に値を出す）。
+  for(const r of rows){p.in+=r.in||0;p.ex+=(r.ex!=null?r.ex:(r.in||0)/1.1);p.tx+=r.tx||0;p.it+=r.it||0;if(kvOf(r.s)){p.txv+=r.tx||0;if(r.v!=null){p.v+=r.v;p.hasV=true;}}}
   if(!p.hasV)p.v=0;return p;}
 function rowsIn(from,to,storeId){return DATA.daily.filter(r=>(storeId==="all"||r.s===storeId)&&r.d>=from&&r.d<=to);}
 function periods(from,to,g,storeId){
@@ -306,10 +325,12 @@ function render(){
     </div>
     <div class="legend" id="legend"></div>
     <div class="cards" id="cards"></div>
+    <h2 class="sec" id="tbl-h"></h2>
+    <div class="tblwrap" id="tbl"></div>
     <div class="foot">
       各グラフは「${state.grain==="day"?"日別":state.grain==="week"?"週別":"月別"}」の推移。「店舗別に比較」を選ぶと店舗ごとの折れ線が色分けで重なります。
       右上の数字は対象期間ぜんぶの合計／平均（比較時は総合）。前日比・前週比・前月比は直前の同じ長さの期間との増減（対象期間の選び方で自動表示。比べた期間は数字にマウスを合わせると出ます）。
-      指標：購入率＝取引数÷来店客数／客単価＝税込売上÷取引数／平均購入数＝総点数÷取引数／平均商品単価＝税抜売上÷総点数。
+      指標（すべて税抜）：客単価＝税抜売上÷取引数／購入率＝取引数÷来店客数／平均購入数＝総点数÷取引数／商品単価＝税抜売上÷総点数。税抜が無い一部店舗は概算値。
       週別は月曜〜日曜。レジ袋・クーポンは売上・点数・カテゴリから除外。いわきは2店舗ぶんを合算。${groups.length>2?"「区分」で直営／FC／ブランド別を切替。":"（FC店を追加すると区分の切替が出ます）"}
     </div>`;
 
@@ -371,6 +392,53 @@ function draw(){
       <div class="chart" data-k="${m.key}"></div></div>`;
   }).join("");
   METRICS.forEach(m=>drawMiniMulti(box.querySelector(`.chart[data-k="${m.key}"]`),labels,series,m));
+  drawTable(keys,labels);
+}
+
+// 数字が並ぶ表。
+//  ・総合／比較 → 行=店舗（名前ボタン）×列=期間 の「税抜売上」。店舗名タップでその店のKPIへ。
+//  ・単店 → 行=6KPI×列=期間 の推移（税抜売上・来店客数・購入率・客単価・平均購入数・商品単価）。
+function drawTable(keys,labels){
+  const g=state.grain, gname=g==="day"?"日別":g==="week"?"週別":"月別";
+  const hEl=document.getElementById("tbl-h"), box=document.getElementById("tbl");
+  const isStore=!["total","compare"].includes(state.view);
+  if(isStore){
+    const sid=Number(state.view);
+    const sname=(usableStores().find(s=>s.id===sid)||{}).name||"";
+    const sm=pmap(rowsForIds(state.from,state.to,new Set([sid])),g);
+    const tot=sumRows(rowsForIds(state.from,state.to,new Set([sid])));
+    const mets=STORE_KPIS.map(k=>METRICS.find(m=>m.key===k));
+    hEl.innerHTML=`<span class="store" style="color:var(--accent)">${esc(sname)}</span> のKPI推移（${gname}）`
+      +`<button class="backchip" id="back">← 店舗一覧へ戻る</button>`;
+    let html='<table class="grid"><thead><tr><th>KPI</th>'
+      +keys.map((k,i)=>`<th>${esc(labels[i])}</th>`).join("")+'<th>期間計</th></tr></thead><tbody>';
+    for(const m of mets){
+      html+=`<tr><td>${m.name}</td>`+keys.map(k=>{const p=sm.get(k);const v=p?m.calc(p):null;
+        return `<td>${v==null?"—":m.fmt(v)}</td>`;}).join("");
+      const tv=m.calc(tot);html+=`<td class="now">${tv==null?"—":m.fmt(tv)}</td></tr>`;
+    }
+    box.innerHTML=html+'</tbody></table>';
+    const bk=document.getElementById("back");if(bk)bk.onclick=()=>{state.view="total";render();};
+  }else{
+    const stores=allowedStores();
+    hEl.innerHTML=`店舗別 税抜売上の推移（${gname}）　<span class="sub" style="color:var(--muted);font-size:12px">店舗名をタップでその店のKPI詳細へ</span>`;
+    let html='<table class="grid"><thead><tr><th>店舗</th>'
+      +labels.map(l=>`<th>${esc(l)}</th>`).join("")+'<th>期間計</th></tr></thead><tbody>';
+    const colTot=new Array(keys.length).fill(0);let grand=0;
+    for(const s of stores){
+      const sm=pmap(rowsForIds(state.from,state.to,new Set([s.id])),g);
+      let rowTot=0;
+      html+=`<tr><td><button class="slink" data-id="${s.id}">${esc(s.name)}</button></td>`;
+      keys.forEach((k,i)=>{const p=sm.get(k);const v=p?p.ex:0;rowTot+=v;colTot[i]+=v;
+        html+=`<td>${v?YEN(v):"—"}</td>`;});
+      grand+=rowTot;html+=`<td class="now">${rowTot?YEN(rowTot):"—"}</td></tr>`;
+    }
+    html+=`<tr class="tot"><td>総合</td>`+colTot.map(v=>`<td>${v?YEN(v):"—"}</td>`).join("")
+      +`<td>${grand?YEN(grand):"—"}</td></tr>`;
+    box.innerHTML=html+'</tbody></table>';
+    box.querySelectorAll("button.slink").forEach(b=>b.onclick=()=>{
+      state.view=b.dataset.id;render();window.scrollTo({top:0,behavior:"smooth"});});
+  }
 }
 
 function shortNum(v){if(Math.abs(v)>=1e8)return(v/1e8).toFixed(1)+"億";if(Math.abs(v)>=1e4)return(v/1e4).toFixed(v>=1e5?0:1)+"万";
