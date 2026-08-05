@@ -612,12 +612,15 @@ function rptKpi(p){
   return {
     in:p.in, ex:p.hasEx?p.ex:null, tx:p.tx, it:p.it,
     inNet, exNet, v:p.hasV?p.v:null, hasV:p.hasV, txv:p.txv,
-    aov:p.tx>0?inNet/p.tx:null,          // 客単価（税込・レジ袋除く）
+    // 客単価は税抜で語る（税抜売上÷取引数、レジ袋除く）。税抜の実額が無い店は税込÷1.1で近似。
+    aov:p.tx>0?((exNet!=null?exNet:inNet/1.1)/p.tx):null,
     upt:(p.hasIt&&p.txIt>0)?p.it/p.txIt:null, // 平均購入点数（分母は明細のある取引数）
     aup:(p.hasEx&&p.it>0)?exNet/p.it:null, // 平均商品単価（税抜・レジ袋除く）
     pr :(p.hasV&&p.v>0)?(p.txv/p.v*100):null, // 購入率（デジテール店のみ）
   };
 }
+// 税抜売上（実額があればそれ、無ければ税込÷1.1で近似）。売上は全て税抜で語るため。
+function rptEx(p){return (p&&p.hasEx)?p.ex:(((p&&p.in)||0)/1.1);}
 // 2要素の中点（Shapley）分解： 積 A×B の増減を A要因/B要因に厳密配分（合計＝Δ(A×B)）
 function rptDecomp(aC,bC,aP,bP){
   return { a:(aC-aP)*(bC+bP)/2, b:(bC-bP)*(aC+aP)/2, total:aC*bC-aP*bP };
@@ -785,7 +788,7 @@ async function makeReport(ymArg){
     s.addTable([
       [th("指標"),thR(mlbl(monAgg[0].m)),thR(mlbl(monAgg[1].m)),thR(mlbl(monAgg[2].m)),thR("前月差")],
       trow("来店客数 ※ﾃﾞｼﾞﾃｰﾙ店",k=>k.v,v=>NUM(v)+"人",false),
-      trow("客単価（税込）",k=>k.aov,v=>yen(v),false),
+      trow("客単価",k=>k.aov,v=>yen(v),false),
       trow("平均購入点数",k=>k.upt,v=>v.toFixed(2)+"点",false),
       trow("商品単価（税抜）",k=>k.aup,v=>yen(v),false),
       trow("購入率 ※ﾃﾞｼﾞﾃｰﾙ店（前月差はpt）",k=>k.pr,v=>v.toFixed(1)+"%",true),
@@ -812,7 +815,7 @@ async function makeReport(ymArg){
     const decoTbl=(rows2)=>[[th("要因"),thR(pM),thR(cM),thR("売上への寄与")]].concat(rows2);
     const rA=[
       [{text:"取引数（客数）"},{text:NUM(totEP2.tx)+"件",options:{align:"right"}},{text:NUM(totEC2.tx)+"件",options:{align:"right"}},{text:sy(dTx.a),options:{align:"right",bold:true,color:clr(dTx.a)}}],
-      [{text:"客単価（税込）"},{text:yen(kP2.aov||0),options:{align:"right"}},{text:yen(kC2.aov||0),options:{align:"right"}},{text:sy(dTx.b),options:{align:"right",bold:true,color:clr(dTx.b)}}],
+      [{text:"客単価"},{text:yen(kP2.aov||0),options:{align:"right"}},{text:yen(kC2.aov||0),options:{align:"right"}},{text:sy(dTx.b),options:{align:"right",bold:true,color:clr(dTx.b)}}],
       [{text:"差（"+pM+"→"+cM+"）",options:{bold:true,fill:{color:ICE}}},{text:"",options:{fill:{color:ICE}}},{text:"",options:{fill:{color:ICE}}},{text:sy(dTx.total),options:{align:"right",bold:true,color:clr(dTx.total),fill:{color:ICE}}}],
     ];
     s.addTable(decoTbl(rA),{x:0.6,y:1.85,w:6.0,colW:[1.9,1.35,1.35,1.4],fontSize:11.5,rowH:0.5,valign:"middle",border:{pt:0.5,color:LINE},fill:{color:"FFFFFF"}});
@@ -964,9 +967,9 @@ async function makeReport(ymArg){
       head(s,"注目店舗 単点分析 ｜ "+r.name, so.icon+" "+so.badge+"　—　"+so.reason);
       // 左上：売上カード
       s.addShape(P.ShapeType.rect,{x:0.6,y:1.45,w:5.6,h:1.5,fill:{color:"FFFFFF"},line:{color:LINE,pt:1}});
-      s.addText("売上（税込）",{x:0.85,y:1.62,w:5.1,h:0.3,fontSize:12,color:MUT});
-      s.addText(man(r.c.in),{x:0.8,y:1.95,w:3.5,h:0.85,fontSize:34,bold:true,color:NAVY});
-      const smm=r.p.in>0?(r.c.in/r.p.in-1)*100:null;
+      s.addText("売上（税抜）",{x:0.85,y:1.62,w:5.1,h:0.3,fontSize:12,color:MUT});
+      s.addText(man(rptEx(r.c)),{x:0.8,y:1.95,w:3.5,h:0.85,fontSize:34,bold:true,color:NAVY});
+      const smm=rptEx(r.p)>0?(rptEx(r.c)/rptEx(r.p)-1)*100:null;
       s.addText(smm==null?"前月比 —":"前月比\n"+sp(smm),{x:4.25,y:2.0,w:1.9,h:0.8,fontSize:14,bold:true,color:clr(smm),align:"center",valign:"middle"});
       // 左下：主要KPI（前月 → 当月・前月比）※来店客数を含む
       s.addText("主要KPI（前月 → 当月）",{x:0.6,y:3.12,w:5.6,h:0.3,fontSize:12,bold:true,color:NAVY});
@@ -978,7 +981,7 @@ async function makeReport(ymArg){
       s.addTable([[th("指標"),thR("前月"),thR("当月"),thR("前月比")],
         kmom("来店客数", r.c.hasV?r.c.v:null, r.p.hasV?r.p.v:null, v=>NUM(v)+"人"),
         kmom("購入率※ﾃﾞｼﾞﾃｰﾙ店", k.pr, kp.pr, v=>v.toFixed(1)+"%", true),
-        kmom("客単価（税込）", k.aov, kp.aov, yen),
+        kmom("客単価", k.aov, kp.aov, yen),
         kmom("平均購入点数", k.upt, kp.upt, v=>v.toFixed(2)+"点"),
         kmom("商品単価（税抜）", k.aup, kp.aup, yen),
       ],{x:0.6,y:3.44,w:5.6,colW:[1.75,1.25,1.25,1.35],fontSize:10.5,rowH:0.4,valign:"middle",border:{pt:0.5,color:LINE},fill:{color:"FFFFFF"}});
@@ -1076,10 +1079,10 @@ async function makeReport(ymArg){
     foot(s,pg());
 
     // ================= Slide: 全店売上一覧（2列・構成比つき／本部用）=================
-    s=P.addSlide(); s.background={color:"FFFFFF"}; head(s,MO+"月 全店売上一覧 ｜ 構成比","【本部用】純売上（税込）／全店売上に占める構成比／前月比");
+    s=P.addSlide(); s.background={color:"FFFFFF"}; head(s,MO+"月 全店売上一覧 ｜ 構成比","【本部用】純売上（税抜）／全店売上に占める構成比／前月比");
     const mk=list=>[[th("#"),th("店舗名"),thR("売上"),thR("構成比"),thR("前月比")]].concat(list.map(r=>{
-      const d=r.p.in?(r.c.in/r.p.in-1)*100:null; const sh=totC.in>0?r.c.in/totC.in*100:0;
-      return [{text:r._rank},{text:r.name,options:{fontSize:9.5}},{text:yen(r.c.in),options:{align:"right"}},
+      const d=rptEx(r.p)?(rptEx(r.c)/rptEx(r.p)-1)*100:null; const sh=rptEx(totC)>0?rptEx(r.c)/rptEx(totC)*100:0;
+      return [{text:r._rank},{text:r.name,options:{fontSize:9.5}},{text:yen(rptEx(r.c)),options:{align:"right"}},
         {text:sh.toFixed(1)+"%",options:{align:"right"}},
         {text:d==null?"—":sp(d),options:{align:"right",color:clr(d)}}];
     }));
