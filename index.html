@@ -125,6 +125,7 @@
   <a href="pl.html"><span class="ic">📋</span>予実</a>
   <a href="trends.html"><span class="ic">📈</span>推移</a>
   <a href="promo.html"><span class="ic">🏷️</span>販促</a>
+  <a href="stock.html"><span class="ic">📦</span>棚卸</a>
   <a href="ask.html"><span class="ic">🔍</span>分析AI</a>
   <a href="keiei.html" id="tab-keiei" style="display:none"><span class="ic">🧮</span>経営</a>
   <a href="admin.html" id="tab-admin" style="display:none"><span class="ic">⚙️</span>管理</a>
@@ -137,19 +138,20 @@ const NUM=n=>Math.round(n).toLocaleString("ja-JP");
 const F1 =n=>(Math.round(n*10)/10).toLocaleString("ja-JP",{minimumFractionDigits:1,maximumFractionDigits:1});
 const F2 =n=>(Math.round(n*100)/100).toLocaleString("ja-JP",{minimumFractionDigits:2,maximumFractionDigits:2});
 
+// 売上はすべて「税抜」で語る（税込売上は画面に出さない）。税抜の実額が無い店（デジテールの
+// 日次合計のみ）は税込÷1.1で近似して常に税抜で表示する。
 const METRICS=[
-  {key:"in", name:"税込売上",     fmt:v=>YEN(v)+"円", calc:p=>p.in},
-  {key:"ex", name:"税抜売上",     fmt:v=>YEN(v)+"円", calc:p=>p.hasEx?p.ex:null, note:"デジテール(合計のみ)店は非表示"},
-  {key:"v",  name:"来店客数",     fmt:v=>NUM(v)+"人", calc:p=>p.hasV?p.v:null, note:"デジテール導入店のみ"},
-  {key:"tx", name:"取引数",       fmt:v=>NUM(v)+"件", calc:p=>p.tx},
-  {key:"qty",name:"販売数",       fmt:v=>NUM(v)+"点", calc:p=>p.hasIt?p.it:null},
-  {key:"pr", name:"購入率",       fmt:v=>F1(v)+"%",   calc:p=>(p.hasV&&p.v>0)?(p.txv!=null?p.txv:p.tx)/p.v*100:null, note:"デジテール導入店のみ（来店÷取引）"},
-  {key:"aov",name:"客単価（税込）",   fmt:v=>YEN(v)+"円", calc:p=>p.tx>0?p.in/p.tx:null},
-  {key:"upt",name:"平均購入数",   fmt:v=>F2(v)+"点",  calc:p=>(p.hasIt&&p.txIt>0)?p.it/p.txIt:null},
-  {key:"aup",name:"平均商品単価（税抜）", fmt:v=>YEN(v)+"円", calc:p=>(p.hasEx&&p.it>0)?p.ex/p.it:null},
+  {key:"ex", name:"税抜売上",   fmt:v=>YEN(v)+"円", calc:p=>p.hasEx?p.ex:(p.in!=null?p.in/1.1:null)},
+  {key:"v",  name:"来店客数",   fmt:v=>NUM(v)+"人", calc:p=>p.hasV?p.v:null, note:"デジテール導入店のみ"},
+  {key:"tx", name:"取引数",     fmt:v=>NUM(v)+"件", calc:p=>p.tx},
+  {key:"qty",name:"販売数",     fmt:v=>NUM(v)+"点", calc:p=>p.hasIt?p.it:null},
+  {key:"pr", name:"購入率",     fmt:v=>F1(v)+"%",   calc:p=>(p.hasV&&p.v>0)?(p.txv!=null?p.txv:p.tx)/p.v*100:null, note:"デジテール導入店のみ（来店÷取引）"},
+  {key:"aov",name:"客単価",     fmt:v=>YEN(v)+"円", calc:p=>p.tx>0?(p.hasEx?p.ex:(p.in||0)/1.1)/p.tx:null},
+  {key:"upt",name:"平均購入数", fmt:v=>F2(v)+"点",  calc:p=>(p.hasIt&&p.txIt>0)?p.it/p.txIt:null},
+  {key:"aup",name:"商品単価",   fmt:v=>YEN(v)+"円", calc:p=>(p.hasEx&&p.it>0)?p.ex/p.it:null},
 ];
 const M=k=>METRICS.find(m=>m.key===k);
-const KPI_ORDER=["in","ex","v","tx","qty","pr","aov","upt","aup"];
+const KPI_ORDER=["ex","v","tx","qty","pr","aov","upt","aup"];
 // 比較ラベル：対象期間の長さに合わせて 前日比／前週比／前月比 を出し分ける。
 // 比較先は「直前の同じ長さの期間」（実際の日付はマウスオーバーで表示）。
 function deltaLabel(n){ if(n<=1)return"前日比"; if(n<=7)return"前週比"; if(n<=31)return"前月比"; return "前"+n+"日比"; }
@@ -159,7 +161,7 @@ let GROUP=(new URLSearchParams(location.search).get("g")||"").toLowerCase();
 if(GROUP!=="own"&&GROUP!=="fc")GROUP="own";
 const GROUP_LABEL=(GROUP==="fc")?"FC店":"直営店";
 
-const state={store:GROUP,grain:"week",metric:"in",from:null,to:null};
+const state={store:GROUP,grain:"week",metric:"ex",from:null,to:null};
 let DATA=null;
 
 // ---- 配信設定 ----
@@ -362,7 +364,7 @@ function sumRowsForIds(from,to,idset){ return sumRows(DATA.daily.filter(r=>idset
 // 今月は末日がデータ最新日にクランプされる（例 7/31→7/29）ので、末日一致は要求しない。
 function isMonthPeriod(){ const ym=state.from.slice(0,7); return state.from===ym+"-01" && state.to.slice(0,7)===ym; }
 // KPIカード＆店舗比較で使う指標（取引数・販売数はカードに出さない）
-const KPI_CARDS=["in","ex","v","pr","aov","upt","aup"];
+const KPI_CARDS=["ex","v","pr","aov","upt","aup"];
 // ---- グレード（ランク帯）判定：カテゴリ→季節、税抜単価→帯（下限しきい値で下の帯に寄せる）----
 function gradeOf(category, price){
   const season=(DATA.catSeason||{})[category];
@@ -518,9 +520,9 @@ function render(){
       <div class="panel"><h2>カテゴリ別 販売数ランキング</h2><p class="note" id="cat-qty-note"></p><div class="tblwrap"><table id="cat-qty"></table></div></div>
     </div>
     <div class="foot">
-      「着地見込み」は<b>今月</b>を選んだときだけ表示します（月末までの予測・税込。日別・週別などでは非表示）。
+      「着地見込み」は<b>今月</b>を選んだときだけ表示します（月末までの予測・税抜。日別・週別などでは非表示）。
       このページは<b>${GROUP_LABEL}</b>のデータだけを表示します（下のタブで<b>直営</b>／<b>FC</b>を切り替えられます）。店舗比較は、<b>グループ全体</b>ではそのグループの店舗、<b>個別の店</b>ではその店と同じ分類の店舗を並べます。
-      指標：購入率＝取引数÷来店客数／客単価（税込）＝税込売上÷取引数／平均購入数＝総点数÷取引数／商品単価（税抜）＝税抜売上÷総点数。
+      指標（すべて税抜）：客単価＝税抜売上÷取引数／購入率＝取引数÷来店客数／平均購入数＝総点数÷取引数／商品単価＝税抜売上÷総点数。税抜が無い一部店舗は概算値。
       <b>来店客数・購入率は、デジテール（入店計測）が入っている店舗だけ</b>を対象に集計します（POSのみの店は購入率の分母・分子に含めません）。売上・取引数などは全店。カテゴリの割合は「全カテゴリ合計」に対する比率です。
     </div>`;
 
@@ -1274,7 +1276,7 @@ function draw(){
   const ptotal=hasPrev?sumRows(rowsIn(pFrom<DATA._min?DATA._min:pFrom,pTo,state.store)):null;
   let cards="";
   if(showLand){ const lv=computeAutoLandingIn(state.store,fym);
-    cards+=`<div class="card"><div class="k">着地見込み <span class="sub" style="font-weight:500">${+fym.split("-")[1]}月・税込</span></div><div class="val">${lv==null?"—":YEN(lv)+"円"}</div></div>`; }
+    cards+=`<div class="card"><div class="k">着地見込み <span class="sub" style="font-weight:500">${+fym.split("-")[1]}月・税抜</span></div><div class="val">${lv==null?"—":YEN(lv)+"円"}</div></div>`; }
   cards+=KPI_CARDS.map(k=>{
     const m=M(k),v=m.calc(total),pv=ptotal?m.calc(ptotal):null;let d="";
     if(v!=null&&pv!=null&&pv!==0){const pct=(v-pv)/Math.abs(pv)*100;
@@ -1369,7 +1371,7 @@ function computeAutoLandingForIds(ids,ym){
   const mS=ym+"-01",mE=fMonthEnd(ym),today=todayStr(),winStart=addDays(mS,-56);
   const byDate={};
   for(const r of DATA.daily){ if(!ids.has(r.s))continue; if(r.d<winStart||r.d>mE)continue;
-    (byDate[r.d]=byDate[r.d]||{in:0}).in+=r.in||0; }
+    (byDate[r.d]=byDate[r.d]||{in:0}).in+=(r.ex!=null?r.ex:(r.in||0)/1.1); }  // 税抜（無い店は税込÷1.1近似）
   const monthDates=Object.keys(byDate).filter(d=>d>=mS&&d<=mE).sort();
   const closing=monthDates.filter(d=>d<=today).slice(-1)[0]||null;
   let tdIn=0,wkIn=0,wkN=0,weIn=0,weN=0;
@@ -1385,7 +1387,7 @@ function computeAutoLandingForIds(ids,ym){
 }
 function drawCompare(rows,showLand){
   const cols=KPI_CARDS.map(M);
-  const landHead=showLand?`<th>着地見込み<br><span class="sub" style="font-weight:500">税込</span></th>`:"";
+  const landHead=showLand?`<th>着地見込み<br><span class="sub" style="font-weight:500">税抜</span></th>`:"";
   const head=`<thead><tr><th>店舗</th>${landHead}${cols.map(c=>`<th>${c.name}</th>`).join("")}</tr></thead>`;
   const body=rows.map(p=>{
     const st=p._agg?' style="font-weight:750"':(p._sel?' style="font-weight:700;background:var(--surface2)"':'');
