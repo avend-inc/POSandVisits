@@ -41,10 +41,15 @@ def main() -> int:
     data = r.json()
     stores = data.get("stores") or []
     print(f"現行 data.json stores: {len(stores)}店 / generated_at={data.get('generated_at')}")
+    n_noid = 0
     for s in stores:
         flag = "" if s.get("visible", True) else "  [非表示]"
-        susp = "  ← 怪しい" if re.search(r"[（(〜~]|[0-9]{4}", s.get("name", "")) else ""
-        print(f"  id={s.get('id'):>3} {s.get('name')}{flag}{susp}")
+        susp = "  ← 怪しい" if re.search(r"[（(〜~]|[0-9]{4}", s.get("name", "") or "") else ""
+        sid = s.get("id")
+        if sid is None:
+            n_noid += 1
+        print(f"  id={str(sid):>4} {s.get('name')}{flag}{susp}")
+    print(f"  （うち id=None の行: {n_noid}）")
 
     # 2) 長野など HIDE_IDS の現状
     ids = ",".join(str(int(x)) for x in HIDE_IDS)
