@@ -69,7 +69,10 @@ def _select_all(sb: Supabase, table: str, select: str,
 
 def build_data(sb: Supabase) -> dict:
     # "*" で全列取得。ownership 列が未追加でも動くよう .get で既定「直営」にする。
-    stores = sb.select("stores", {"select": "*", "order": "id"})
+    # id が NULL の行（＝共有storesに在庫アプリだけが持つ店。私たちのPOS対象外で
+    # 売上も無い）は、ダッシュボードの店舗リスト・選択肢に混ざらないよう除外する。
+    stores = [s for s in sb.select("stores", {"select": "*", "order": "id"})
+              if s.get("id") is not None]
     name_by_id = {s["id"]: s["name"] for s in stores}
     own_by_id = {s["id"]: (s.get("ownership") or "直営") for s in stores}
     # KPIに来店数を使うか（列が未追加でも既定 True）。False の店は来店・購入率をKPIから外す。
