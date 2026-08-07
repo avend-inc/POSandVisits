@@ -18,7 +18,7 @@ on:
         required: false
         default: "debug-dl"
         type: choice
-        options: [debug-dl, discover, fetch, db-probe]
+        options: [debug-dl, discover, fetch, db-probe, stores-dry, stores-apply]
       date_from:
         description: "fetchモードの開始日 (YYYY-MM-DD)"
         required: false
@@ -66,6 +66,10 @@ jobs:
         run: |
           if [ "${{ inputs.mode }}" = "db-probe" ]; then
             python -m tools.db_probe
+          elif [ "${{ inputs.mode }}" = "stores-dry" ]; then
+            python -m tools.stores_recover
+          elif [ "${{ inputs.mode }}" = "stores-apply" ]; then
+            APPLY=1 python -m tools.stores_recover
           elif [ "${{ inputs.mode }}" = "discover" ]; then
             python -m etl.airregi_fetch --discover
           elif [ "${{ inputs.mode }}" = "fetch" ]; then
