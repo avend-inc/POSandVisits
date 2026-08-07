@@ -18,7 +18,7 @@ on:
         required: false
         default: "debug-dl"
         type: choice
-        options: [debug-dl, discover, fetch]
+        options: [debug-dl, discover, fetch, db-probe]
       date_from:
         description: "fetchモードの開始日 (YYYY-MM-DD)"
         required: false
@@ -45,6 +45,10 @@ jobs:
       AIRREGI_ID: ${{ secrets.AIRREGI_ID }}
       AIRREGI_PW: ${{ secrets.AIRREGI_PW }}
       AIRREGI_SALES_URL: ${{ inputs.sales_url }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -56,15 +60,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       - name: ブラウザ(Chromium)を用意
+        if: ${{ inputs.mode != 'db-probe' }}
         run: python -m playwright install --with-deps chromium
-      - name: 設定確認
+      - name: 調査（DL導線 / 画面構造 / 実取得 / DB診断）
         run: |
-          if [ -z "$AIRREGI_ID" ] || [ -z "$AIRREGI_PW" ]; then
-            echo "::error::AIRREGI_ID / AIRREGI_PW が未登録です（Settings → Secrets → Actions）"; exit 1
-          fi
-      - name: 調査（DL導線の高速診断 / 画面構造ダンプ / 実取得）
-        run: |
-          if [ "${{ inputs.mode }}" = "discover" ]; then
+          if [ "${{ inputs.mode }}" = "db-probe" ]; then
+            python -m tools.db_probe
+          elif [ "${{ inputs.mode }}" = "discover" ]; then
             python -m etl.airregi_fetch --discover
           elif [ "${{ inputs.mode }}" = "fetch" ]; then
             python -m etl.airregi_fetch --from "${{ inputs.date_from }}" --to "${{ inputs.date_to }}"
