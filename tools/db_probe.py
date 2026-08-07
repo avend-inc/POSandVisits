@@ -46,6 +46,32 @@ def show(label: str, sql: str):
 def main() -> int:
     print(f"project ref = {REF}")
 
+    # ★全店の素性＋売上サマリ（phantom/重複店舗のあぶり出し）
+    show("全stores × 売上サマリ（id,name,visible,own,txn,期間,税抜合計）", """
+      select st.id, st.name, st.visible, st.ownership,
+             coalesce(d.txn,0) txn, d.f, d.t, coalesce(d.ex_tax,0) ex_tax
+      from public.stores st
+      left join (
+        select store_id, count(*) txn, min(business_date) f, max(business_date) t,
+               sum(sales_ex_tax) ex_tax
+        from (select distinct store_id,tx_id,business_date,sales_ex_tax from public.sales) x
+        group by store_id
+      ) d on d.store_id = st.id
+      order by ex_tax desc nulls last, st.id""")
+
+    # ★店名に「（」「〜」「~」「数字4桁」を含む＝期間ラベル混入の疑い
+    show("怪しい店名（期間ラベル混入の疑い）", r"""
+      select id, name, visible from public.stores
+      where name ~ '[（(〜~]' or name ~ '[0-9]{4}'
+      order by name""")
+
+    # ★store_key相当（末尾「店」除去・空白除去）で重複している実体を検出
+    show("同一店の重複（正規化名でグルーピング）", r"""
+      select regexp_replace(regexp_replace(name,'[[:space:]　]','','g'),'店$','') k,
+             count(*) n, array_agg(id order by id) ids, array_agg(name order by id) names
+      from public.stores
+      group by 1 having count(*) > 1 order by n desc, k""")
+
     # 直営として表示されている店（長野=50, 福井=3, 下北沢=4, いわき=2, 山形=1）の素性
     show("対象店の stores 行", """
       select id,name,ownership,visible,kpi_visitors,digitel_slug,digitel_sales
