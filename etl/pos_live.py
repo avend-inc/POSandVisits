@@ -234,24 +234,17 @@ def run_live_pos(sb, business_date: str, run_id: str,
                 continue
             common["line_no"] = common.groupby("tx_id").cumcount()
 
-            # 店舗の対応付け：
-            #  ・接続に store_id あり（1アカウント=1店）→ その店に固定。
-            #    ただしCSVに複数店舗が混在していたら“共通アカウント”なので警告する
-            #    （店舗分けが必要。store_pos.store_id を空にすると下の名前振り分けになる）。
-            #  ・store_id 無し（1アカウントで複数店＝Si等）→ 店舗名で振り分け。
-            #    その際は歴史データと同じ命名（ブランド名を残し、改名だけ最新へ）にそろえる。
+            # 店舗の対応付け【設計：接続＝オーナー単位アカウント】
+            #  cashier・SIPOS・Airレジ 等いずれも URL/ID/PW は「オーナー単位」で、その
+            #  オーナーが持つ全店が1アカウントに出てくる。よって取り込みは【常にCSVの
+            #  「店舗名」で振り分ける】。接続の store_id には固定しない
+            #  （＝1店に固定すると、そのアカウントの全店売上が1店に丸ごと化ける。
+            #    長野に山形＋いわき＋福井が入った事故がこれ）。
+            #  store_pos.store_id は取り込みを支配しない（参考情報／空でよい）。
+            #  店名は歴史データと同じ命名（ブランド名を残し、略称は STORE_NAME_ALIAS で
+            #  正式名へ寄せる）にそろえて既存 store_id に一致させる。
             csv_stores = [s for s in common["store"].astype(str).str.strip().unique() if s]
-            # SIPOS(ezregi)の購買情報明細は必ず「全店ぶん」が入るため、接続に store_id が
-            # 設定されていても“CSVの店舗名で振り分ける”（接続=1店に固定すると、テナント全店の
-            # 売上が1店に丸ごと入る誤りになる）。それ以外(store_id固定運用のPOS)は従来どおり。
-            if c.get("store_id") and c["pos_type"] != "ezregi":
-                if len(csv_stores) > 1:
-                    print(f"  ⚠️ {label}: 1アカウントに複数店舗（{', '.join(csv_stores[:10])}）。"
-                          "今は接続の店舗にまとめて記録します（正しく分けるには接続のstore_idを空にしてください）。")
-                fixed = int(c["store_id"])
-                store_id_of = lambda name, _sid=fixed: _sid       # 接続=1店に固定
-            else:
-                store_id_of = lambda name: sb.get_or_create_store(name, cache)  # CSV店舗名で振り分け
+            store_id_of = lambda name: sb.get_or_create_store(name, cache)
 
             payload = rows_mod.cashier_rows(common, store_id_of)
             inserted, duplicate = sb.insert_ignore_duplicates(

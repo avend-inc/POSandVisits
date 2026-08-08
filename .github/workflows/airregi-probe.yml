@@ -18,7 +18,7 @@ on:
         required: false
         default: "debug-dl"
         type: choice
-        options: [debug-dl, discover, fetch, db-probe, stores-dry, stores-apply, storefix-dry, storefix-apply, cashierfix-dry, cashierfix-apply]
+        options: [debug-dl, discover, fetch, db-probe, stores-dry, stores-apply, storefix-dry, storefix-apply, cashierfix-dry, cashierfix-apply, pos-split-probe]
       date_from:
         description: "fetchモードの開始日 (YYYY-MM-DD)"
         required: false
@@ -78,6 +78,8 @@ jobs:
             python -m tools.cashier_fix
           elif [ "${{ inputs.mode }}" = "cashierfix-apply" ]; then
             APPLY=1 python -m tools.cashier_fix
+          elif [ "${{ inputs.mode }}" = "pos-split-probe" ]; then
+            python -m tools.pos_split_probe
           elif [ "${{ inputs.mode }}" = "discover" ]; then
             python -m etl.airregi_fetch --discover
           elif [ "${{ inputs.mode }}" = "fetch" ]; then

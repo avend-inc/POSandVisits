@@ -100,11 +100,9 @@ def run_cashier_conn_backfill(sb: Supabase, start: str, end: str,
             if len(df) == 0:
                 print(f"  【{label}】対象期間の明細0行。")
                 continue
-            if c.get("store_id"):
-                fixed = int(c["store_id"])
-                store_id_of = lambda name, _s=fixed: _s
-            else:
-                store_id_of = lambda name: sb.get_or_create_store(name, store_cache)
+            # 接続＝オーナー単位アカウント。常にCSVの店舗名で振り分ける
+            # （store_idに固定しない＝全店が1店に化けるのを防ぐ。詳細は pos_live.py）。
+            store_id_of = lambda name: sb.get_or_create_store(name, store_cache)
             payload = rows_mod.cashier_rows(df, store_id_of)
             inserted, duplicate = sb.insert_ignore_duplicates(
                 "sales", payload, on_conflict="store_id,pos_name,tx_id,line_no")
