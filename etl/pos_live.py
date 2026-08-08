@@ -75,7 +75,7 @@ def _to_common(csv_text: str, pos_type: str, pos_name: str) -> pd.DataFrame:
         return common
     if pos_type == "airregi":
         df = pd.read_csv(io.StringIO(csv_text), dtype=str)
-        return adapters.adapt_airregi(df, pos_name, pos_name)
+        return rows_mod.airregi_common(df, pos_name)   # CSVの店舗名で振り分け
     # cashier フォーマットもCSV取り込み可能に（保険）
     df = pd.read_csv(io.StringIO(csv_text), dtype=str)
     return adapters.adapt_cashier(df, pos_name)

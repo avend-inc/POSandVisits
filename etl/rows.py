@@ -94,6 +94,33 @@ def parse_cashier_csv(csv_text: str, business_date: str | None) -> pd.DataFrame:
     return out
 
 
+def airregi_common(df_in: pd.DataFrame, pos_name: str) -> pd.DataFrame:
+    """Airレジのジャーナル → 共通スキーマ（店舗名で振り分けられる形）。
+
+    adapters.adapt_airregi は店舗名列を無視して固定名を振る（1アカウント=1店の前提）。
+    しかし Airレジも「オーナー単位アカウント」で複数店が1ファイルに出るため、CSVの
+    「店舗名」列で common['store'] を上書きし、店舗名で振り分けられるようにする。
+    （adapters.py は変更禁止のため、ここで上書きする。行の対応は 会計フィルタ後の
+      index で揃える＝ズレやNaN混入を防ぐ）。
+    """
+    common = adapters.adapt_airregi(df_in, pos_name, pos_name)  # store は仮
+    if "store" not in common.columns or len(common) == 0:
+        return common
+    d = df_in.copy()
+    d.columns = [str(c).strip() for c in d.columns]
+    if "取引種別" in d.columns:
+        d = d[d["取引種別"].astype(str).str.strip() == "会計"]
+    if "店舗名" not in d.columns:
+        return common  # 店舗名列が無ければ従来どおり（固定名）
+    names = d["店舗名"].astype(str).str.strip()
+    common = common.copy()
+    common["store"] = names.reindex(common.index)
+    common = common[common["store"].notna()].copy()
+    common["store"] = common["store"].astype(str).str.strip()
+    common = common[~common["store"].isin(["", "nan", "None"])].copy()
+    return common
+
+
 def cashier_rows(df: pd.DataFrame, store_id_of) -> list[dict]:
     """
     共通スキーマのDataFrame → sales テーブルに入れる行の一覧。

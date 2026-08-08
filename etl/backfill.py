@@ -298,10 +298,10 @@ def run_airregi_backfill(sb: Supabase, start: str, end: str,
     print(f"【4】Airレジ 会計明細（下北沢）  期間: {start} 〜 {end}")
     print("=" * 60)
 
-    store_id = sb.get_or_create_store(AIRREGI_STORE_NAME, store_cache)
+    # 接続＝オーナー単位。CSVの店舗名で振り分ける（airregi_common）。
     csv_text = airregi_fetch.fetch_range(start, end, headless=headless)
     df_in = pd.read_csv(StringIO(csv_text), dtype=str)
-    common = adapters.adapt_airregi(df_in, AIRREGI_POS, AIRREGI_STORE_NAME)
+    common = rows_mod.airregi_common(df_in, AIRREGI_POS)   # 店舗名で振り分け
     common = common[common["date"].notna()].copy()
     common = common[(common["date"] >= start) & (common["date"] <= end)].copy()
     if len(common) == 0:
@@ -309,19 +309,20 @@ def run_airregi_backfill(sb: Supabase, start: str, end: str,
         return
     common["line_no"] = common.groupby("tx_id").cumcount()
 
-    # 期間内の既存 AirREGI 売上を消してから入れ直す（再実行に強く）。
+    # 期間内の既存 AirREGI 売上を（全店ぶん）消してから入れ直す（再実行に強く）。
     sb.delete("sales", {
-        "store_id": f"eq.{store_id}",
         "pos_name": f"eq.{AIRREGI_POS}",
         "and": f"(business_date.gte.{start},business_date.lte.{end})"})
-    payload = rows_mod.cashier_rows(common, lambda name: store_id)
+    payload = rows_mod.cashier_rows(
+        common, lambda name: sb.get_or_create_store(name, store_cache))
     inserted, duplicate = sb.insert_ignore_duplicates(
         "sales", payload, on_conflict="store_id,pos_name,tx_id,line_no")
     dates = sorted(common["date"].unique().tolist())
+    stores = sorted(common["store"].astype(str).unique().tolist())
     txn = len({r["tx_id"] for r in payload})
     ssum = sum(r["sales_in_tax"] for r in payload if r["line_no"] == 0)
-    print(f"  【下北沢/Airレジ】{dates[0]}〜{dates[-1]}（{len(dates)}日） "
-          f"{txn}取引 / {int(ssum):,}円")
+    print(f"  【Airレジ】{dates[0]}〜{dates[-1]}（{len(dates)}日） "
+          f"{txn}取引 / {int(ssum):,}円（店舗: {', '.join(stores[:10])}）")
     print(f"  Supabaseへ保存: 新規 {inserted}行 / 既存で無視 {duplicate}行")
 
 

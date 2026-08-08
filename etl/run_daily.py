@@ -457,16 +457,16 @@ def run_airregi(sb: Supabase, business_date: str, run_id: str,
     print(f"【4】Airレジ 会計明細（下北沢）  対象営業日: {business_date}")
     print("=" * 60)
     try:
-        # 「下北沢」→ STORE_NAME_ALIAS で NOTIME下北沢店 に寄る（SIPOSと同じ店ID）。
-        store_id = sb.get_or_create_store(AIRREGI_STORE_NAME, store_cache)
-        if not force and sb.already_succeeded("airregi", business_date, store_id):
+        # 接続＝オーナー単位アカウント。取り込みはCSVの店舗名で振り分ける（airregi_common）。
+        # 取り込み済み判定はアカウント単位（store_id基準にしない＝全店で1本）。
+        if not force and sb.already_succeeded("airregi", business_date, None):
             print("  すでに取り込み済みのためスキップ（--force で解除）。")
             return [StepResult("airregi", "rejected_duplicate", "取り込み済み")]
 
         csv_text = airregi_fetch.fetch(business_date, headless=headless)
         save_raw(csv_text, "airregi", "下北沢", business_date)
         df_in = pd.read_csv(StringIO(csv_text), dtype=str)
-        common = adapters.adapt_airregi(df_in, AIRREGI_POS, AIRREGI_STORE_NAME)
+        common = rows_mod.airregi_common(df_in, AIRREGI_POS)   # CSVの店舗名で振り分け
         # [診断] 取得CSVが「どの期間・何行」入っているかを見える化（0件の原因切り分け用）。
         #   ・CSVがそもそも空か／別の期間になっていないか／会計行が残っているか。
         try:
@@ -482,27 +482,29 @@ def run_airregi(sb: Supabase, business_date: str, run_id: str,
         common = common[common["date"].notna()]
         common["line_no"] = common.groupby("tx_id").cumcount()
 
-        # 同じ日の AirREGI 売上を消してから入れ直す（再実行に強く）。
+        # 同じ日の AirREGI 売上を（全店ぶん）消してから入れ直す（再実行に強く）。
         sb.delete("sales", {
-            "store_id": f"eq.{store_id}",
             "pos_name": f"eq.{AIRREGI_POS}",
             "business_date": f"eq.{business_date}"})
         if len(common) == 0:
             sb.log(run_id=run_id, source="airregi", business_date=business_date,
-                   store_id=store_id, status="no_data", message="売上0",
+                   store_id=None, status="no_data", message="売上0",
                    started_at=started)
             print("  売上0（取り込むものなし）。")
             return [StepResult("airregi", "no_data", "売上0")]
 
-        payload = rows_mod.cashier_rows(common, lambda name: store_id)
+        store_id_of = lambda name: sb.get_or_create_store(name, store_cache)
+        payload = rows_mod.cashier_rows(common, store_id_of)
         ins, _ = sb.insert_ignore_duplicates(
             "sales", payload, on_conflict="store_id,pos_name,tx_id,line_no")
         txn = len({r["tx_id"] for r in payload})
         ssum = sum(r["sales_in_tax"] for r in payload if r["line_no"] == 0)
-        print(f"  【下北沢/Airレジ】{txn}取引 / {int(ssum):,}円 → 追加 {ins}行")
+        stores = sorted(common["store"].astype(str).unique().tolist())
+        print(f"  【Airレジ】{txn}取引 / {int(ssum):,}円 → 追加 {ins}行（店舗: {', '.join(stores[:10])}）")
         sb.log(run_id=run_id, source="airregi", business_date=business_date,
-               store_id=store_id, status="success", rows_fetched=len(payload),
-               rows_inserted=ins, message=f"{txn}取引 {int(ssum)}円", started_at=started)
+               store_id=None, status="success", rows_fetched=len(payload),
+               rows_inserted=ins, message=f"店舗: {', '.join(stores[:20])} / {txn}取引",
+               started_at=started)
         return [StepResult("airregi", "success", f"{txn}取引 {int(ssum):,}円", len(payload), ins)]
     except Exception as e:
         detail = f"{type(e).__name__}: {e}"
