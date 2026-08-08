@@ -580,29 +580,27 @@ function renderMain(){
     </div>
 
     <div class="panel">
-      <h2>③ 集計期間</h2>
-      <div style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 8px">
+      <h2>③ 店舗別KPI</h2>
+      <div class="sub" style="font-weight:700;margin:2px 0 4px">集計期間</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px">
         <button class="chip pchip" data-preset="thismonth">今月</button>
         <button class="chip pchip" data-preset="lastmonth">前月</button>
         <button class="chip pchip" data-preset="thisweek">今週</button>
         <button class="chip pchip" data-preset="lastweek">前週</button>
         <button class="chip pchip" data-preset="prevday">前日</button>
       </div>
-      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px">
         <input type="date" id="from" min="${DATA._min}" max="${DATA._max}" value="${state.from}">
         <span class="sub">〜</span>
         <input type="date" id="to" min="${DATA._min}" max="${DATA._max}" value="${state.to}">
         <span class="sub" id="periodlabel"></span>
       </div>
-    </div>
-
-    <div class="panel">
-      <h2>④ 店舗別KPI</h2><p class="note" id="storekpi-note"></p>
+      <p class="note" id="storekpi-note"></p>
       <div class="tblwrap"><table class="kmat" id="storekpi"></table></div>
     </div>
 
     <div class="panel">
-      <h2>⑤ 売上推移 <span class="sub" style="font-weight:500">税抜</span></h2>
+      <h2>④ 売上推移 <span class="sub" style="font-weight:500">税抜</span></h2>
       <div style="display:flex;align-items:center;gap:8px;margin:4px 0 8px;flex-wrap:wrap">
         <button class="gchip" data-grain="month">月</button>
         <button class="gchip" data-grain="week">週</button>
@@ -617,13 +615,13 @@ function renderMain(){
     </div>
 
     <div class="panel">
-      <h2>⑥ 販売数比率 <span class="sub" style="font-weight:500">（価格帯×カテゴリ）</span></h2>
+      <h2>⑤ 販売数比率 <span class="sub" style="font-weight:500">（価格帯×カテゴリ）</span></h2>
       <p class="note">縦=ランク帯(S〜D)／横=カテゴリ。緑=上位5。<b>青字の見出し・数字のマスをタップ</b>で内訳。</p>
       <div class="tblwrap"><table class="heat" id="heatQ"></table></div>
     </div>
     <div class="panel">
-      <h2>⑦ 税抜売上比率 <span class="sub" style="font-weight:500">（価格帯×カテゴリ）</span></h2>
-      <p class="note">⑥と同じ並びで、税抜売上ベース。</p>
+      <h2>⑥ 税抜売上比率 <span class="sub" style="font-weight:500">（価格帯×カテゴリ）</span></h2>
+      <p class="note">⑤と同じ並びで、税抜売上ベース。</p>
       <div class="tblwrap"><table class="heat" id="heatA"></table></div>
     </div>
     <div id="mdl-root"></div>
@@ -655,7 +653,6 @@ function renderDetail(){
     <div style="margin:2px 0 8px"><a href="index.html?g=${GROUP}" class="chip" style="text-decoration:none">◀ 一覧に戻る</a></div>
     <div class="panel">
       <h2>KPIまとめ <span class="sub" style="font-weight:500">（前日／今週／今月）</span></h2>
-      <p class="note">実績の横に「同ブランド平均（デジテール導入店）」と差分を表示。差分は平均より上=緑・下=赤（差が大きいほど濃色）。${ownOf(state.detail)==="直営"?"比較対象＝直営全店。":"比較対象＝同ブランド（直営含む）。"}</p>
       <div class="tblwrap"><table class="kmat" id="kpi2"></table></div>
     </div>
     <div class="panel">
@@ -698,7 +695,8 @@ function renderDetail(){
       <div class="tblwrap"><table class="heat" id="heatA"></table></div>
     </div>
     <div id="mdl-root"></div>
-    <div class="foot">この店舗（<b>${esc(nm)}</b>）だけの数字です。◀一覧に戻るで全店ビューへ。</div>`;
+    <div class="foot">この店舗（<b>${esc(nm)}</b>）だけの数字です。◀一覧に戻るで全店ビューへ。<br>
+      <b>${ownOf(state.detail)==="直営"?"直営":brandOf(state.detail)}平均※</b>＝${ownOf(state.detail)==="直営"?"直営店":brandOf(state.detail)+"（直営含む）"}のうち<b>※デジテール（入店計測）導入済み店舗のみ</b>の平均です。差分は平均より上＝緑・下＝赤で表示（差が大きいほど濃色）。</div>`;
   wireCommon();
   draw();
 }
@@ -1482,7 +1480,6 @@ function drawKpi2(){
     {label:"今週",from:mon,to:sd},
     {label:"今月",from:ym+"-01",to:sd},
   ];
-  if(state.detail){ drawKpi2Detail(el,cols); return; }
   const ps=cols.map(c=>sumRows(rowsIn(c.from,c.to,"__sel__")));
   const lv=landingMonth();
   let h=`<thead><tr><th></th>${cols.map(c=>`<th class="colhdr">${c.label}<small>${mdLabel(c.from,c.to)}</small></th>`).join("")}</tr></thead><tbody>`;
@@ -1493,27 +1490,6 @@ function drawKpi2(){
   el.innerHTML=h+`</tbody>`;
 }
 
-// 店舗詳細のKPIまとめ：各期間で［実績／同ブランド平均／差分］を並べる（差分は平均比で緑=上・赤=下、差が大きいほど濃く）
-function drawKpi2Detail(el,cols){
-  const id=state.detail, ids=peerIds(id);
-  const ps=cols.map(c=>sumRows(rowsIn(c.from,c.to,id)));
-  const trip=(k,ci)=>{
-    const m=M(k), cur=m.calc(ps[ci]);
-    const avg=peerAvg(k,cols[ci].from,cols[ci].to,ids);
-    const diff=(cur!=null&&avg!=null)?cur-avg:null;
-    const dtxt=diff==null?m.fmt(0):(diff>=0?"+":"−")+m.fmt(Math.abs(diff));
-    return `<td>${m.fmt(cur==null?0:cur)}</td>`+
-           `<td class="peer">${m.fmt(avg==null?0:avg)}</td>`+
-           `<td style="${diffColor(cur,avg)}">${dtxt}</td>`;
-  };
-  let h=`<thead><tr><th rowspan="2"></th>`+
-    cols.map(c=>`<th class="colhdr" colspan="3">${c.label}<small>${mdLabel(c.from,c.to)}</small></th>`).join("")+`</tr>`+
-    `<tr class="subhdr">`+cols.map(()=>`<th>実績</th><th>平均</th><th>差分</th>`).join("")+`</tr></thead><tbody>`;
-  for(const k of KPI2_COLS){
-    h+=`<tr><td>${kpiLabel(k)}</td>`+cols.map((_,ci)=>trip(k,ci)).join("")+`</tr>`;
-  }
-  el.innerHTML=h+`</tbody>`;
-}
 // 比較対象（同ブランド平均）の店舗ID：直営店→直営全店 / FC店→同ブランド（直営含む）。いずれも来店計測(デジテール)導入店のみ。
 function peerIds(detailId){
   const vs=DATA._visitStores||new Set(), own=ownOf(detailId), br=brandOf(detailId);
@@ -1541,9 +1517,31 @@ function drawPeriod(){
   document.querySelectorAll(".pchip").forEach(b=>b.classList.toggle("on",b.dataset.preset===state.kind));
 }
 
-// ④ 店舗別KPI（選択店舗を売上降順・合計/平均つき・店名ボタンで単店へ）
+// 店舗詳細のKPI（対象期間）：実績／同ブランド平均※（デジテール導入店）／差分（緑=上・赤=下）
+function drawStoreKpiDetail(el){
+  const id=state.detail, s=storeMeta(id), p=sumRows(rowsIn(state.from,state.to,id));
+  const ids=peerIds(id);
+  const blabel=(ownOf(id)==="直営"?"直営":brandOf(id))+"平均※";
+  const rl=document.getElementById("kpi-range"); if(rl)rl.textContent=mdLabel(state.from,state.to);   // タイトル「KPI（m/d〜m/d）」
+  let h=`<thead><tr><th></th>${KPI2_COLS.map(k=>`<th>${kpiLabel(k)}</th>`).join("")}</tr></thead><tbody>`;
+  // 実績
+  h+=`<tr><td>${esc((s&&s.name)||String(id))}</td>`+
+     KPI2_COLS.map(k=>{const v=M(k).calc(p);return `<td>${M(k).fmt(v==null?0:v)}</td>`;}).join("")+`</tr>`;
+  // 同ブランド平均（デジテール導入店のみ・同一期間）
+  h+=`<tr class="prow"><td>${esc(blabel)}</td>`+
+     KPI2_COLS.map(k=>{const av=peerAvg(k,state.from,state.to,ids);return `<td>${M(k).fmt(av==null?0:av)}</td>`;}).join("")+`</tr>`;
+  // 差分（実績−平均）：上回り緑・下回り赤、差が大きいほど濃色
+  h+=`<tr><td>差分</td>`+KPI2_COLS.map(k=>{
+      const cur=M(k).calc(p), av=peerAvg(k,state.from,state.to,ids);
+      const diff=(cur!=null&&av!=null)?cur-av:null;
+      const dt=diff==null?M(k).fmt(0):(diff>=0?"+":"−")+M(k).fmt(Math.abs(diff));
+      return `<td style="${diffColor(cur,av)}">${dt}</td>`;}).join("")+`</tr>`;
+  el.innerHTML=h+`</tbody>`;
+}
+// ③ 店舗別KPI（選択店舗を売上降順・合計/平均つき・店名ボタンで単店へ）
 function drawStoreKpi(){
   const el=document.getElementById("storekpi"); if(!el)return;
+  if(state.detail){ drawStoreKpiDetail(el); return; }
   const rows=[...state.sel].map(id=>{const p=sumRows(rowsIn(state.from,state.to,id));const s=storeMeta(id);
     p._id=id; p._name=(s&&s.name)||String(id); return p;});
   rows.sort((a,b)=>(M("ex").calc(b)||0)-(M("ex").calc(a)||0));
