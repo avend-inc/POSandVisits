@@ -160,9 +160,11 @@ function deltaLabel(n){ if(n<=1)return"前日比"; if(n<=7)return"前週比"; if
 let GROUP=(new URLSearchParams(location.search).get("g")||"").toLowerCase();
 if(GROUP!=="own"&&GROUP!=="fc")GROUP="own";
 const GROUP_LABEL=(GROUP==="fc")?"FC店":"直営店";
+// ?store=<id> があれば「店舗専用ページ」を表示（一覧の店名タップで遷移＝ブラウザ戻るで一覧へ）
+const DETAIL_ID=(function(){const v=new URLSearchParams(location.search).get("store");return v&&/^\d+$/.test(v)?+v:null;})();
 
 // sel=選択店舗ID(Set)。kind=③期間プリセット。grain=⑤推移の粒度。trendAnchor=⑤の＜＞位置。
-const state={store:"__sel__",sel:null,grain:"month",metric:"ex",from:null,to:null,kind:"thismonth",trendEnd:null};
+const state={store:"__sel__",sel:null,grain:"month",metric:"ex",from:null,to:null,kind:"thismonth",trendEnd:null,detail:DETAIL_ID};
 let DATA=null;
 // リロード／直アクセスか？（＝タブ移動でないか）。リロード時は選択・期間をデフォルトへ戻す。
 function navIsReload(){
@@ -209,6 +211,7 @@ function prep(){
   const [tf,tt]=presetRange("thismonth"); state.from=tf; state.to=tt; state.kind="thismonth";  // 既定＝今月
   const sp=loadPeriodSS(); if(sp){state.from=sp.from;state.to=sp.to;state.kind=sp.kind;}       // タブ移動での引き継ぎ
   state.sel=loadSel();                                   // 既定＝全選択／タブ移動で引き継ぎ
+  if(state.detail)state.sel=new Set([state.detail]);     // 店舗専用ページはその店だけ
   state.trendEnd=(DATA._salesMax||DATA._max).slice(0,7); // ⑤推移の初期アンカー（最新月）
 }
 
@@ -492,7 +495,20 @@ function loadSel(){
   return new Set(allIds);
 }
 
-function render(){
+function render(){ if(state.detail)renderDetail(); else renderMain(); }
+function wireCommon(){
+  const on=(id,ev,fn)=>{const el=document.getElementById(id);if(el)el[ev]=fn;};
+  on("from","onchange",e=>{state.from=clampLo(e.target.value||DATA._min);if(state.from>state.to)state.to=state.from;state.kind="custom";syncDateInputs();savePeriod();draw();});
+  on("to","onchange",e=>{state.to=clampHi(e.target.value||DATA._max);if(state.to<state.from)state.from=state.to;state.kind="custom";syncDateInputs();savePeriod();draw();});
+  document.querySelectorAll(".pchip").forEach(b=>b.onclick=()=>{const[f,t]=presetRange(b.dataset.preset);state.from=f;state.to=t;state.kind=b.dataset.preset;syncDateInputs();savePeriod();draw();});
+  document.querySelectorAll(".gchip").forEach(b=>b.onclick=()=>{state.grain=b.dataset.grain;state.trendEnd=trendLatestAnchor(state.grain);drawTrend2();});
+  on("tr-prev","onclick",()=>{trendShift(-1);drawTrend2();});
+  on("tr-next","onclick",()=>{trendShift(1);drawTrend2();});
+  on("themebtn","onclick",toggleTheme);
+  on("reportbtn","onclick",openReportDialog);
+  if(SB)on("logoutbtn","onclick",doLogout);
+}
+function renderMain(){
   syncAdminTab();
   syncGroupTab();
   document.getElementById("app").innerHTML=`
@@ -510,7 +526,7 @@ function render(){
       .schip{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:16px;padding:6px 11px;font-size:12.5px;font-weight:700;cursor:pointer;-webkit-tap-highlight-color:transparent}
       .schip.on{background:var(--accent);border-color:var(--accent);color:#fff}
       .kmat{width:100%;border-collapse:collapse;font-size:12.5px}
-      .kmat th,.kmat td{border-bottom:1px solid var(--border);padding:7px 8px;text-align:right;white-space:nowrap}
+      .kmat th,.kmat td{border-bottom:1px solid var(--border);padding:5px 7px;text-align:right;white-space:nowrap}
       .kmat th:first-child,.kmat td:first-child{text-align:left;position:sticky;left:0;background:var(--surface);z-index:1}
       .kmat thead th{color:var(--ink2);font-size:11.5px;font-weight:700}
       .kmat .colhdr small{display:block;color:var(--ink2);font-weight:500;font-size:10px}
@@ -526,16 +542,20 @@ function render(){
       .slicer{display:flex;flex-direction:column;gap:1px}
       .scheck{display:flex;align-items:center;gap:9px;padding:8px 6px;border-radius:8px;font-size:13px;cursor:pointer}
       .scheck input{width:18px;height:18px;flex:none}
-      .heat{width:100%;border-collapse:collapse;font-size:11px}
-      .heat th,.heat td{border:1px solid var(--border);padding:5px 6px;text-align:center;white-space:nowrap;line-height:1.25}
+      .heat{width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed}
+      .heat th,.heat td{border:1px solid var(--border);padding:5px 4px;text-align:center;white-space:nowrap;line-height:1.2;overflow:hidden;text-overflow:ellipsis}
+      .heat col.c-rank{width:64px} .heat col.c-tot{width:58px} .heat col.c-cat{width:62px}
       .heat th{color:var(--ink2);font-weight:700;font-size:10.5px}
       .heat td:first-child,.heat th:first-child{text-align:left;position:sticky;left:0;background:var(--surface);z-index:1}
+      .heat th.cbtn,.heat td.gtot.cbtn{color:var(--accent);text-decoration:underline;text-decoration-style:dotted;cursor:pointer}
       .heat td.cbtn{cursor:pointer}
+      .heat td.cbtn:not(.gtot) .pct{border-bottom:1px dotted var(--ink2)}
       .heat .g5{background:color-mix(in srgb,#22c55e 32%,transparent);font-weight:800}
       .heat tr.prow td,.heat td.gtot{font-weight:800;background:color-mix(in srgb,var(--accent) 8%,transparent)}
+      .delta-up{color:#16a34a} .delta-dn{color:#dc2626}
       .gchip{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:14px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer}
-      .mdlbg{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;display:flex;align-items:flex-end;justify-content:center}
-      .mdl{background:var(--surface);width:100%;max-width:600px;max-height:80vh;overflow:auto;border-radius:16px 16px 0 0;padding:16px}
+      .mdlbg{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;display:flex;align-items:center;justify-content:center;padding:16px}
+      .mdl{background:var(--surface);width:100%;max-width:520px;max-height:82vh;overflow:auto;border-radius:16px;padding:16px}
       .mdl h3{margin:0 0 8px;font-size:15px}
       .mdl .x{position:absolute;top:10px;right:14px;font-size:22px;color:var(--ink2);cursor:pointer;background:none;border:none}
     </style>
@@ -598,7 +618,7 @@ function render(){
 
     <div class="panel">
       <h2>⑥ 販売数比率 <span class="sub" style="font-weight:500">（価格帯×カテゴリ）</span></h2>
-      <p class="note">縦=ランク帯(S〜D)／横=カテゴリ。緑=上位5。セルを押すと内訳。</p>
+      <p class="note">縦=ランク帯(S〜D)／横=カテゴリ。緑=上位5。<b>青字の見出し・数字のマスをタップ</b>で内訳。</p>
       <div class="tblwrap"><table class="heat" id="heatQ"></table></div>
     </div>
     <div class="panel">
@@ -615,15 +635,69 @@ function render(){
 
   document.getElementById("sel-all").onclick=()=>{state.sel=new Set(allGroupIds());saveSel();draw();};
   document.getElementById("sel-none").onclick=()=>{state.sel=new Set();saveSel();draw();};
-  document.getElementById("from").onchange=e=>{state.from=clampLo(e.target.value||DATA._min);if(state.from>state.to)state.to=state.from;state.kind="custom";syncDateInputs();savePeriod();draw();};
-  document.getElementById("to").onchange=e=>{state.to=clampHi(e.target.value||DATA._max);if(state.to<state.from)state.from=state.to;state.kind="custom";syncDateInputs();savePeriod();draw();};
-  document.querySelectorAll(".pchip").forEach(b=>b.onclick=()=>{const[f,t]=presetRange(b.dataset.preset);state.from=f;state.to=t;state.kind=b.dataset.preset;syncDateInputs();savePeriod();draw();});
-  document.querySelectorAll(".gchip").forEach(b=>b.onclick=()=>{state.grain=b.dataset.grain;state.trendEnd=trendLatestAnchor(state.grain);drawTrend2();});
-  document.getElementById("tr-prev").onclick=()=>{trendShift(-1);drawTrend2();};
-  document.getElementById("tr-next").onclick=()=>{trendShift(1);drawTrend2();};
-  document.getElementById("themebtn").onclick=toggleTheme;
-  const rb=document.getElementById("reportbtn"); if(rb)rb.onclick=openReportDialog;
-  if(SB){const lb=document.getElementById("logoutbtn");if(lb)lb.onclick=doLogout;}
+  wireCommon();
+  draw();
+}
+
+// 店舗専用ページ（一覧の店名タップで ?store=<id> に遷移して表示。①店舗選択は出さない）
+function renderDetail(){
+  syncAdminTab(); syncGroupTab();
+  const s=storeMeta(state.detail); const nm=(s&&s.name)||("店舗"+state.detail);
+  document.getElementById("app").innerHTML=`
+    <header>
+      <h1>${esc(nm)} <span class="gbadge">店舗別</span></h1>
+      <button class="themebtn" id="themebtn" style="margin-left:auto">◐</button>
+      ${SB?'<button class="themebtn" id="logoutbtn" style="margin-left:6px">ログアウト</button>':''}
+    </header>
+    <div style="margin:2px 0 8px"><a href="index.html?g=${GROUP}" class="chip" style="text-decoration:none">◀ 一覧に戻る</a></div>
+    <div class="panel">
+      <h2>KPIまとめ <span class="sub" style="font-weight:500">（締日／今週／今月）</span></h2>
+      <div class="tblwrap"><table class="kmat" id="kpi2"></table></div>
+    </div>
+    <div class="panel">
+      <h2>集計期間</h2>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 8px">
+        <button class="chip pchip" data-preset="thismonth">今月</button>
+        <button class="chip pchip" data-preset="lastmonth">前月</button>
+        <button class="chip pchip" data-preset="thisweek">今週</button>
+        <button class="chip pchip" data-preset="lastweek">前週</button>
+        <button class="chip pchip" data-preset="prevday">前日</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        <input type="date" id="from" min="${DATA._min}" max="${DATA._max}" value="${state.from}">
+        <span class="sub">〜</span>
+        <input type="date" id="to" min="${DATA._min}" max="${DATA._max}" value="${state.to}">
+        <span class="sub" id="periodlabel"></span>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>KPI（対象期間）</h2><p class="note" id="storekpi-note" style="display:none"></p>
+      <div class="tblwrap"><table class="kmat" id="storekpi"></table></div>
+    </div>
+    <div class="panel">
+      <h2>売上推移 <span class="sub" style="font-weight:500">税抜</span></h2>
+      <div style="display:flex;align-items:center;gap:8px;margin:4px 0 8px;flex-wrap:wrap">
+        <button class="gchip" data-grain="month">月</button>
+        <button class="gchip" data-grain="week">週</button>
+        <button class="gchip" data-grain="day">日</button>
+        <span style="margin-left:auto;display:flex;align-items:center;gap:8px">
+          <button class="chip" id="tr-prev">◀</button><span class="sub" id="trend-range"></span><button class="chip" id="tr-next">▶</button>
+        </span>
+      </div>
+      <div class="tblwrap"><table class="kmat" id="trend"></table></div>
+    </div>
+    <div class="panel">
+      <h2>販売数比率 <span class="sub" style="font-weight:500">（価格帯×カテゴリ）</span></h2>
+      <p class="note">縦=ランク帯(S〜D)／横=カテゴリ。緑=上位5。見出し・マスをタップで内訳。</p>
+      <div class="tblwrap"><table class="heat" id="heatQ"></table></div>
+    </div>
+    <div class="panel">
+      <h2>税抜売上比率 <span class="sub" style="font-weight:500">（価格帯×カテゴリ）</span></h2>
+      <div class="tblwrap"><table class="heat" id="heatA"></table></div>
+    </div>
+    <div id="mdl-root"></div>
+    <div class="foot">この店舗（<b>${esc(nm)}</b>）だけの数字です。◀一覧に戻るで全店ビューへ。</div>`;
+  wireCommon();
   draw();
 }
 
@@ -1363,7 +1437,11 @@ function mdLabel(f,t){ const g=s=>`${+s.slice(5,7)}/${+s.slice(8,10)}`; return f
 
 function draw(){ drawSlicer(); drawPeriod(); refresh(); }
 // 選択・期間の変更でスライサー本体以外を描き直す（チェックのたびにリストを作り直さない）
-function refresh(){ drawKpi2(); drawStoreKpi(); drawTrend2(); drawHeat("heatQ","q"); drawHeat("heatA","a"); updateSelCount(); }
+function refresh(){ drawKpi2(); drawStoreKpi(); drawTrend2();
+  const D=heatData();                                    // ⑥⑦で同じ集計・同じ列順を使う
+  const cats=Object.keys(D.catTot).sort((a,b)=>D.catTot[b].a-D.catTot[a].a).slice(0,10);  // 売上降順・共通
+  drawHeat("heatQ","q",D,cats); drawHeat("heatA","a",D,cats);
+  updateSelCount(); }
 
 // ① 店舗選択（ドロップダウン内のチェックボックス）
 function drawSlicer(){
@@ -1421,8 +1499,6 @@ function drawPeriod(){
 // ④ 店舗別KPI（選択店舗を売上降順・合計/平均つき・店名ボタンで単店へ）
 function drawStoreKpi(){
   const el=document.getElementById("storekpi"); if(!el)return;
-  const note=document.getElementById("storekpi-note");
-  if(note)note.textContent=`選択店舗（${state.from}〜${state.to}）・税抜売上の高い順`;
   const rows=[...state.sel].map(id=>{const p=sumRows(rowsIn(state.from,state.to,id));const s=storeMeta(id);
     p._id=id; p._name=(s&&s.name)||String(id); return p;});
   rows.sort((a,b)=>(M("ex").calc(b)||0)-(M("ex").calc(a)||0));
@@ -1440,7 +1516,7 @@ function drawStoreKpi(){
       return `<td>${av==null?"—":M(k).fmt(av)}</td>`;}).join("")+`</tr>`;
   }else{ h+=`<tr><td colspan="${KPI2_COLS.length+1}" class="sub">店舗が選択されていません</td></tr>`; }
   el.innerHTML=h+`</tbody>`;
-  el.querySelectorAll(".stbtn").forEach(b=>b.onclick=()=>{state.sel=new Set([+b.dataset.sid]);saveSel();draw();window.scrollTo(0,0);});
+  el.querySelectorAll(".stbtn").forEach(b=>b.onclick=()=>{location.href="index.html?g="+GROUP+"&store="+b.dataset.sid;});
 }
 
 // ⑤ 売上推移（縦=選択店舗／横=期間。月/週/日、◀▶で移動。既定=月×直近6）
@@ -1475,9 +1551,14 @@ function drawTrend2(){
   const dk=keys.slice().reverse();                 // 最新を左に
   const idx=keys.reduce((m,k,i)=>{m[k]=i;return m;},{});
   const lab=k=>pLabel(k,g)+(k===fkey?"(見込)":"");
+  // 数字＋前期比（1つ古い期間との比較。プラス緑・マイナス赤）
+  const cellHtml=(cur,prev)=>{ if(!cur)return "—";
+    let d=""; if(prev){const pct=(cur-prev)/prev*100; d=`<br><span class="${pct>=0?"delta-up":"delta-dn"}" style="font-size:9.5px">${pct>=0?"+":""}${F1(pct)}%</span>`;}
+    return YEN(cur)+d; };
   let h=`<thead><tr><th>店舗</th>${dk.map(k=>`<th>${lab(k)}</th>`).join("")}</tr></thead><tbody>`;
-  for(const r of rows)h+=`<tr><td>${esc(r.name)}</td>${dk.map(k=>{const v=r.vals[idx[k]];return `<td>${v?YEN(v):"—"}</td>`;}).join("")}</tr>`;
-  if(rows.length)h+=`<tr class="prow"><td>合計</td>${dk.map(k=>{const v=rows.reduce((s,r)=>s+r.vals[idx[k]],0);return `<td>${v?YEN(v):"—"}</td>`;}).join("")}</tr>`;
+  for(const r of rows)h+=`<tr><td>${esc(r.name)}</td>${dk.map(k=>{const i=idx[k];return `<td>${cellHtml(r.vals[i], i>0?r.vals[i-1]:null)}</td>`;}).join("")}</tr>`;
+  if(rows.length){const tot=keys.map((_,i)=>rows.reduce((s,r)=>s+r.vals[i],0));
+    h+=`<tr class="prow"><td>合計</td>${dk.map(k=>{const i=idx[k];return `<td>${cellHtml(tot[i], i>0?tot[i-1]:null)}</td>`;}).join("")}</tr>`;}
   else h+=`<tr><td colspan="${keys.length+1}" class="sub">店舗が選択されていません</td></tr>`;
   el.innerHTML=h+`</tbody>`;
   const rl=document.getElementById("trend-range"); if(rl)rl.textContent=`${lab(dk[0])} 〜 ${pLabel(dk[dk.length-1],g)}`;
@@ -1498,20 +1579,20 @@ function heatData(){
   }
   return {cells,catTot,gradeTot,gQ,gA};
 }
-function drawHeat(elId,metric){   // metric: 'q'=販売数 / 'a'=税抜売上
+function drawHeat(elId,metric,D,cats){   // metric: 'q'=販売数 / 'a'=税抜売上。D/catsは⑥⑦共通
   const el=document.getElementById(elId); if(!el)return;
   if(!hasGrades()){ el.innerHTML='<tbody><tr><td class="sub" style="padding:8px">ランク帯データがありません。</td></tr></tbody>'; return; }
-  const D=heatData(), grand=metric==="q"?D.gQ:D.gA;
+  const grand=metric==="q"?D.gQ:D.gA;
   if(!grand){ el.innerHTML='<tbody><tr><td class="sub" style="padding:8px">対象期間・店舗に、ランク対象（SS/AW）の販売がありません。</td></tr></tbody>'; return; }
   const val=o=>o?(metric==="q"?o.q:o.a):0;
   const cnt=o=>metric==="q"?NUM(val(o))+"着":YEN(val(o))+"円";
   const grades=GRADE_ORDER.filter(g=>D.gradeTot[g]);
-  const cats=Object.keys(D.catTot).sort((a,b)=>val(D.catTot[b])-val(D.catTot[a])).slice(0,10);
-  const cell=o=>{const v=val(o);return v?`${F1(v/grand*100)}%<br><span class="sub" style="font-size:9.5px">${cnt(o)}</span>`:"";};
+  const cell=o=>{const v=val(o);return v?`<span class="pct">${F1(v/grand*100)}%</span><br><span class="sub" style="font-size:9.5px">${cnt(o)}</span>`:"";};
   const flat=[]; for(const g of grades)for(const c of cats){const o=D.cells[g]&&D.cells[g][c]; if(val(o)>0)flat.push({g,c,v:val(o)});}
   const top5=new Set(flat.sort((a,b)=>b.v-a.v).slice(0,5).map(x=>x.g+"|"+x.c));
   const ce=c=>encodeURIComponent(c);
-  let h=`<thead><tr><th>ランク＼カテゴリ</th><th>合計</th>${cats.map(c=>`<th class="cbtn" data-cat="${ce(c)}">${esc(c)}</th>`).join("")}</tr></thead><tbody>`;
+  let h=`<colgroup><col class="c-rank"><col class="c-tot">${cats.map(_=>'<col class="c-cat">').join("")}</colgroup>`;
+  h+=`<thead><tr><th>ランク＼カテゴリ</th><th>合計</th>${cats.map(c=>`<th class="cbtn" data-cat="${ce(c)}">${esc(c)}</th>`).join("")}</tr></thead><tbody>`;
   h+=`<tr class="prow"><td>合計</td><td>${metric==="q"?NUM(grand)+"着":YEN(grand)+"円"}<br><span class="sub" style="font-size:9.5px">100%</span></td>`+
      cats.map(c=>`<td class="cbtn" data-cat="${ce(c)}" title="${esc(c)}: ${cnt(D.catTot[c])}">${cell(D.catTot[c])}</td>`).join("")+`</tr>`;
   for(const g of grades){
