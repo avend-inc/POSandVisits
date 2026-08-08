@@ -1631,7 +1631,9 @@ function drawHeat(elId,metric,D,cats){   // metric: 'q'=販売数 / 'a'=税抜�
   if(!grand){ el.innerHTML='<tbody><tr><td class="sub" style="padding:8px">対象期間・店舗に、ランク対象（SS/AW）の販売がありません。</td></tr></tbody>'; return; }
   const val=o=>o?(metric==="q"?o.q:o.a):0;
   const cnt=o=>metric==="q"?NUM(val(o))+"着":YEN(val(o))+"円";
-  const grades=GRADE_ORDER.filter(g=>D.gradeTot[g]);
+  // 定義済みのランク帯(S〜D)は実績0でも常に行表示する（空セルは0%）。販売のあった帯だけに間引かない。
+  const defined=new Set((DATA.gradeBands||[]).map(b=>b.grade));
+  const grades=GRADE_ORDER.filter(g=>defined.has(g));
   // 空欄は作らず 0%（0着/0円）を薄く表示
   const cell=o=>{const v=val(o);return `<span class="pct">${F1(v/grand*100)}%</span><br><span class="sub" style="font-size:9.5px">${cnt(o)}</span>`;};
   const zc=o=>val(o)?"":" zc";   // 0のセルは薄く
