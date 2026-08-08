@@ -115,6 +115,45 @@
   .gbtn:hover{border-color:var(--accent);}
   .gbtn .g{width:18px;height:18px;display:inline-block;border-radius:50%;
     background:conic-gradient(#ea4335 0 25%,#fbbc05 0 50%,#34a853 0 75%,#4285f4 0);}
+  /* ---- 直営/FC・店舗詳細ページ 共通コンポーネント（両ページで使うため head に集約）---- */
+  .slicer{display:flex;flex-direction:column;gap:1px;margin-top:8px}
+  .schip{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:16px;padding:6px 11px;font-size:12.5px;font-weight:700;cursor:pointer;-webkit-tap-highlight-color:transparent}
+  .schip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  .kmat{width:100%;border-collapse:collapse;font-size:12.5px}
+  .kmat th,.kmat td{border-bottom:1px solid var(--border);padding:5px 7px;text-align:right;white-space:nowrap}
+  .kmat th:first-child,.kmat td:first-child{text-align:left;position:sticky;left:0;background:var(--surface);z-index:1}
+  .kmat thead th{color:var(--ink2);font-size:11.5px;font-weight:700}
+  .kmat .colhdr small{display:block;color:var(--ink2);font-weight:500;font-size:10px}
+  .kmat tr.subhdr th{font-size:10px;color:var(--ink2);font-weight:600;padding:2px 7px}
+  .kmat td.peer{color:var(--ink2)}
+  .kmat tr.land td{color:var(--accent);font-weight:800}
+  .kmat tr.prow td{font-weight:800;background:color-mix(in srgb,var(--accent) 8%,transparent)}
+  .stbtn{background:none;border:none;color:var(--accent);font-weight:800;text-decoration:underline;cursor:pointer;padding:0;font:inherit}
+  .pchip.on,.gchip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  .dd summary{list-style:none;display:flex;justify-content:space-between;align-items:center;border:1px solid var(--border);border-radius:10px;padding:11px 13px;background:var(--surface);font-weight:700;cursor:pointer;margin-top:4px}
+  .dd summary::-webkit-details-marker{display:none}
+  .dd .ddarrow{color:var(--ink2);transition:transform .15s}
+  .dd[open] .ddarrow{transform:rotate(180deg)}
+  .ddbody{border:1px solid var(--border);border-radius:10px;margin-top:6px;padding:8px;max-height:46vh;overflow:auto;background:var(--surface)}
+  .scheck{display:flex;align-items:center;gap:9px;padding:8px 6px;border-radius:8px;font-size:13px;cursor:pointer}
+  .scheck input{width:18px;height:18px;flex:none}
+  .heat{width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed}
+  .heat th,.heat td{border:1px solid var(--border);padding:5px 4px;text-align:center;white-space:nowrap;line-height:1.2;overflow:hidden;text-overflow:ellipsis}
+  .heat col.c-rank{width:64px} .heat col.c-tot{width:58px} .heat col.c-cat{width:62px}
+  .heat th{color:var(--ink2);font-weight:700;font-size:10.5px}
+  .heat td:first-child,.heat th:first-child{text-align:left;position:sticky;left:0;background:var(--surface);z-index:1}
+  .heat th.cbtn,.heat td.gtot.cbtn{color:var(--accent);text-decoration:underline;text-decoration-style:dotted;cursor:pointer}
+  .heat td.cbtn{cursor:pointer}
+  .heat td.cbtn:not(.gtot) .pct{border-bottom:1px dotted var(--ink2)}
+  .heat td.zc{color:var(--ink2);opacity:.42}
+  .heat .g5{background:color-mix(in srgb,#22c55e 32%,transparent);font-weight:800}
+  .heat tr.prow td,.heat td.gtot{font-weight:800;background:color-mix(in srgb,var(--accent) 8%,transparent)}
+  .delta-up{color:#16a34a} .delta-dn{color:#dc2626}
+  .gchip{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:14px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer}
+  .mdlbg{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;display:flex;align-items:center;justify-content:center;padding:16px}
+  .mdl{background:var(--surface);width:100%;max-width:520px;max-height:82vh;overflow:auto;border-radius:16px;padding:16px}
+  .mdl h3{margin:0 0 8px;font-size:15px}
+  .mdl .x{position:absolute;top:10px;right:14px;font-size:22px;color:var(--ink2);cursor:pointer;background:none;border:none}
 </style>
 </head>
 <body>
@@ -521,45 +560,6 @@ function renderMain(){
     <div class="sub" style="margin:2px 0 6px">
       最新データ 売上:<b style="color:var(--ink)">${DATA._salesMax}</b>／来店:<b style="color:var(--ink)">${DATA._visitMax}</b>　更新:${(DATA.generated_at||"").replace("T"," ").slice(5,16)}
     </div>
-    <style>
-      .slicer{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
-      .schip{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:16px;padding:6px 11px;font-size:12.5px;font-weight:700;cursor:pointer;-webkit-tap-highlight-color:transparent}
-      .schip.on{background:var(--accent);border-color:var(--accent);color:#fff}
-      .kmat{width:100%;border-collapse:collapse;font-size:12.5px}
-      .kmat th,.kmat td{border-bottom:1px solid var(--border);padding:5px 7px;text-align:right;white-space:nowrap}
-      .kmat th:first-child,.kmat td:first-child{text-align:left;position:sticky;left:0;background:var(--surface);z-index:1}
-      .kmat thead th{color:var(--ink2);font-size:11.5px;font-weight:700}
-      .kmat .colhdr small{display:block;color:var(--ink2);font-weight:500;font-size:10px}
-      .kmat tr.land td{color:var(--accent);font-weight:800}
-      .kmat tr.prow td{font-weight:800;background:color-mix(in srgb,var(--accent) 8%,transparent)}
-      .stbtn{background:none;border:none;color:var(--accent);font-weight:800;text-decoration:underline;cursor:pointer;padding:0;font:inherit}
-      .pchip.on,.gchip.on{background:var(--accent);border-color:var(--accent);color:#fff}
-      .dd summary{list-style:none;display:flex;justify-content:space-between;align-items:center;border:1px solid var(--border);border-radius:10px;padding:11px 13px;background:var(--surface);font-weight:700;cursor:pointer;margin-top:4px}
-      .dd summary::-webkit-details-marker{display:none}
-      .dd .ddarrow{color:var(--ink2);transition:transform .15s}
-      .dd[open] .ddarrow{transform:rotate(180deg)}
-      .ddbody{border:1px solid var(--border);border-radius:10px;margin-top:6px;padding:8px;max-height:46vh;overflow:auto;background:var(--surface)}
-      .slicer{display:flex;flex-direction:column;gap:1px}
-      .scheck{display:flex;align-items:center;gap:9px;padding:8px 6px;border-radius:8px;font-size:13px;cursor:pointer}
-      .scheck input{width:18px;height:18px;flex:none}
-      .heat{width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed}
-      .heat th,.heat td{border:1px solid var(--border);padding:5px 4px;text-align:center;white-space:nowrap;line-height:1.2;overflow:hidden;text-overflow:ellipsis}
-      .heat col.c-rank{width:64px} .heat col.c-tot{width:58px} .heat col.c-cat{width:62px}
-      .heat th{color:var(--ink2);font-weight:700;font-size:10.5px}
-      .heat td:first-child,.heat th:first-child{text-align:left;position:sticky;left:0;background:var(--surface);z-index:1}
-      .heat th.cbtn,.heat td.gtot.cbtn{color:var(--accent);text-decoration:underline;text-decoration-style:dotted;cursor:pointer}
-      .heat td.cbtn{cursor:pointer}
-      .heat td.cbtn:not(.gtot) .pct{border-bottom:1px dotted var(--ink2)}
-      .heat .g5{background:color-mix(in srgb,#22c55e 32%,transparent);font-weight:800}
-      .heat tr.prow td,.heat td.gtot{font-weight:800;background:color-mix(in srgb,var(--accent) 8%,transparent)}
-      .delta-up{color:#16a34a} .delta-dn{color:#dc2626}
-      .gchip{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:14px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer}
-      .mdlbg{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;display:flex;align-items:center;justify-content:center;padding:16px}
-      .mdl{background:var(--surface);width:100%;max-width:520px;max-height:82vh;overflow:auto;border-radius:16px;padding:16px}
-      .mdl h3{margin:0 0 8px;font-size:15px}
-      .mdl .x{position:absolute;top:10px;right:14px;font-size:22px;color:var(--ink2);cursor:pointer;background:none;border:none}
-    </style>
-
     <div class="panel">
       <h2>① 店舗選択</h2>
       <details class="dd" id="store-dd">
@@ -575,7 +575,7 @@ function renderMain(){
     </div>
 
     <div class="panel">
-      <h2>② KPIまとめ <span class="sub" style="font-weight:500">（締日／今週／今月）</span></h2>
+      <h2>② KPIまとめ <span class="sub" style="font-weight:500">（前日／今週／今月）</span></h2>
       <div class="tblwrap"><table class="kmat" id="kpi2"></table></div>
     </div>
 
@@ -629,7 +629,7 @@ function renderMain(){
     <div id="mdl-root"></div>
 
     <div class="foot">
-      すべて税抜。来店客数・購入率はデジテール（入店計測）導入店のみ。<b>着地見込み</b>＝当月実績÷締日までの経過日数×当月の日数。
+      すべて税抜。来店客数・購入率はデジテール（入店計測）導入店のみ。<b>着地見込み</b>＝当月実績÷当月の経過日数×当月の日数。
       店舗名を押すとその店だけに絞り込めます。表示は<b>${GROUP_LABEL}</b>（下タブで直営／FC切替）。
     </div>`;
 
@@ -649,13 +649,17 @@ function renderDetail(){
       <button class="themebtn" id="themebtn" style="margin-left:auto">◐</button>
       ${SB?'<button class="themebtn" id="logoutbtn" style="margin-left:6px">ログアウト</button>':''}
     </header>
+    <div class="sub" style="margin:2px 0 6px">
+      最新データ 売上:<b style="color:var(--ink)">${DATA._salesMax}</b>／来店:<b style="color:var(--ink)">${DATA._visitMax}</b>　更新:${(DATA.generated_at||"").replace("T"," ").slice(5,16)}
+    </div>
     <div style="margin:2px 0 8px"><a href="index.html?g=${GROUP}" class="chip" style="text-decoration:none">◀ 一覧に戻る</a></div>
     <div class="panel">
-      <h2>KPIまとめ <span class="sub" style="font-weight:500">（締日／今週／今月）</span></h2>
+      <h2>KPIまとめ <span class="sub" style="font-weight:500">（前日／今週／今月）</span></h2>
+      <p class="note">実績の横に「同ブランド平均（デジテール導入店）」と差分を表示。差分は平均より上=緑・下=赤（差が大きいほど濃色）。${ownOf(state.detail)==="直営"?"比較対象＝直営全店。":"比較対象＝同ブランド（直営含む）。"}</p>
       <div class="tblwrap"><table class="kmat" id="kpi2"></table></div>
     </div>
     <div class="panel">
-      <h2>集計期間</h2>
+      <h2>KPI（<span id="kpi-range"></span>）</h2>
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 8px">
         <button class="chip pchip" data-preset="thismonth">今月</button>
         <button class="chip pchip" data-preset="lastmonth">前月</button>
@@ -663,15 +667,13 @@ function renderDetail(){
         <button class="chip pchip" data-preset="lastweek">前週</button>
         <button class="chip pchip" data-preset="prevday">前日</button>
       </div>
-      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:8px">
         <input type="date" id="from" min="${DATA._min}" max="${DATA._max}" value="${state.from}">
         <span class="sub">〜</span>
         <input type="date" id="to" min="${DATA._min}" max="${DATA._max}" value="${state.to}">
         <span class="sub" id="periodlabel"></span>
       </div>
-    </div>
-    <div class="panel">
-      <h2>KPI（対象期間）</h2><p class="note" id="storekpi-note" style="display:none"></p>
+      <p class="note" id="storekpi-note" style="display:none"></p>
       <div class="tblwrap"><table class="kmat" id="storekpi"></table></div>
     </div>
     <div class="panel">
@@ -1476,17 +1478,60 @@ function drawKpi2(){
   const el=document.getElementById("kpi2"); if(!el)return;
   const sd=DATA._salesMax||DATA._max, ym=sd.slice(0,7), mon=mondayOf(sd);
   const cols=[
-    {label:"締日",from:sd,to:sd},
+    {label:"前日",from:sd,to:sd},
     {label:"今週",from:mon,to:sd},
     {label:"今月",from:ym+"-01",to:sd},
   ];
+  if(state.detail){ drawKpi2Detail(el,cols); return; }
   const ps=cols.map(c=>sumRows(rowsIn(c.from,c.to,"__sel__")));
   const lv=landingMonth();
   let h=`<thead><tr><th></th>${cols.map(c=>`<th class="colhdr">${c.label}<small>${mdLabel(c.from,c.to)}</small></th>`).join("")}</tr></thead><tbody>`;
-  h+=`<tr class="land"><td>着地見込み</td><td>—</td><td>—</td><td>${lv==null?"—":YEN(lv)+"円"}</td></tr>`;
+  // 着地見込みは当月のみ算出。前日/今週は概念上「対象外」なのでその旨を明示（0ではない）。
+  h+=`<tr class="land"><td>着地見込み <span class="sub" style="font-weight:500;font-size:9.5px">当月のみ</span></td><td>対象外</td><td>対象外</td><td>${YEN(lv||0)}円</td></tr>`;
   for(const k of KPI2_COLS){const m=M(k);
-    h+=`<tr><td>${kpiLabel(k)}</td>${ps.map(p=>{const v=m.calc(p);return `<td>${v==null?"—":m.fmt(v)}</td>`;}).join("")}</tr>`;}
+    h+=`<tr><td>${kpiLabel(k)}</td>${ps.map(p=>{const v=m.calc(p);return `<td>${m.fmt(v==null?0:v)}</td>`;}).join("")}</tr>`;}
   el.innerHTML=h+`</tbody>`;
+}
+
+// 店舗詳細のKPIまとめ：各期間で［実績／同ブランド平均／差分］を並べる（差分は平均比で緑=上・赤=下、差が大きいほど濃く）
+function drawKpi2Detail(el,cols){
+  const id=state.detail, ids=peerIds(id);
+  const ps=cols.map(c=>sumRows(rowsIn(c.from,c.to,id)));
+  const trip=(k,ci)=>{
+    const m=M(k), cur=m.calc(ps[ci]);
+    const avg=peerAvg(k,cols[ci].from,cols[ci].to,ids);
+    const diff=(cur!=null&&avg!=null)?cur-avg:null;
+    const dtxt=diff==null?m.fmt(0):(diff>=0?"+":"−")+m.fmt(Math.abs(diff));
+    return `<td>${m.fmt(cur==null?0:cur)}</td>`+
+           `<td class="peer">${m.fmt(avg==null?0:avg)}</td>`+
+           `<td style="${diffColor(cur,avg)}">${dtxt}</td>`;
+  };
+  let h=`<thead><tr><th rowspan="2"></th>`+
+    cols.map(c=>`<th class="colhdr" colspan="3">${c.label}<small>${mdLabel(c.from,c.to)}</small></th>`).join("")+`</tr>`+
+    `<tr class="subhdr">`+cols.map(()=>`<th>実績</th><th>平均</th><th>差分</th>`).join("")+`</tr></thead><tbody>`;
+  for(const k of KPI2_COLS){
+    h+=`<tr><td>${kpiLabel(k)}</td>`+cols.map((_,ci)=>trip(k,ci)).join("")+`</tr>`;
+  }
+  el.innerHTML=h+`</tbody>`;
+}
+// 比較対象（同ブランド平均）の店舗ID：直営店→直営全店 / FC店→同ブランド（直営含む）。いずれも来店計測(デジテール)導入店のみ。
+function peerIds(detailId){
+  const vs=DATA._visitStores||new Set(), own=ownOf(detailId), br=brandOf(detailId);
+  return usableStores().filter(s=>{
+    if(!vs.has(s.id))return false;
+    return own==="直営" ? ownOf(s.id)==="直営" : brandOf(s.id)===br;
+  }).map(s=>s.id);
+}
+// 各店KPIの単純平均（値が取れる店だけで平均）
+function peerAvg(k,from,to,ids){
+  const vs=ids.map(id=>M(k).calc(sumRows(rowsIn(from,to,id)))).filter(v=>v!=null);
+  return vs.length? vs.reduce((s,v)=>s+v,0)/vs.length : null;
+}
+// 平均比の差分色：上回り=緑・下回り=赤。差(絶対%)が大きいほど濃い（±50%で最濃）。
+function diffColor(cur,avg){
+  if(cur==null||avg==null||!avg)return "";
+  const pct=(cur-avg)/Math.abs(avg), up=pct>=0, r=Math.min(1,Math.abs(pct)/0.5);
+  return `color:hsl(${up?142:0} ${up?55:70}% ${Math.round(52-r*24)}%);font-weight:800`;
 }
 
 // ③ 期間：日付欄同期＋プリセットの点灯
@@ -1502,19 +1547,21 @@ function drawStoreKpi(){
   const rows=[...state.sel].map(id=>{const p=sumRows(rowsIn(state.from,state.to,id));const s=storeMeta(id);
     p._id=id; p._name=(s&&s.name)||String(id); return p;});
   rows.sort((a,b)=>(M("ex").calc(b)||0)-(M("ex").calc(a)||0));
+  const rl=document.getElementById("kpi-range"); if(rl)rl.textContent=mdLabel(state.from,state.to);   // ⑤ 店舗詳細のタイトル「KPI（m/d〜m/d）」
   let h=`<thead><tr><th>店舗</th>${KPI2_COLS.map(k=>`<th>${kpiLabel(k)}</th>`).join("")}</tr></thead><tbody>`;
   for(const p of rows){
     h+=`<tr><td><button class="stbtn" data-sid="${p._id}">${esc(p._name)}</button></td>`+
-       KPI2_COLS.map(k=>{const v=M(k).calc(p);return `<td>${v==null?"—":M(k).fmt(v)}</td>`;}).join("")+`</tr>`;
+       KPI2_COLS.map(k=>{const v=M(k).calc(p);return `<td>${M(k).fmt(v==null?0:v)}</td>`;}).join("")+`</tr>`;
   }
-  if(rows.length){
+  // 店舗詳細（単店）では合計/平均は実績と同じになるので出さない
+  if(rows.length&&!state.detail){
     const tot=sumRows(rowsIn(state.from,state.to,"__sel__"));
-    h+=`<tr class="prow"><td>合計</td>`+KPI2_COLS.map(k=>{const v=M(k).calc(tot);return `<td>${v==null?"—":M(k).fmt(v)}</td>`;}).join("")+`</tr>`;
+    h+=`<tr class="prow"><td>合計</td>`+KPI2_COLS.map(k=>{const v=M(k).calc(tot);return `<td>${M(k).fmt(v==null?0:v)}</td>`;}).join("")+`</tr>`;
     h+=`<tr class="prow"><td>平均</td>`+KPI2_COLS.map(k=>{
       const vs=rows.map(p=>M(k).calc(p)).filter(v=>v!=null);
       const av=vs.length?vs.reduce((s,v)=>s+v,0)/vs.length:null;
-      return `<td>${av==null?"—":M(k).fmt(av)}</td>`;}).join("")+`</tr>`;
-  }else{ h+=`<tr><td colspan="${KPI2_COLS.length+1}" class="sub">店舗が選択されていません</td></tr>`; }
+      return `<td>${M(k).fmt(av==null?0:av)}</td>`;}).join("")+`</tr>`;
+  }else if(!rows.length){ h+=`<tr><td colspan="${KPI2_COLS.length+1}" class="sub">店舗が選択されていません</td></tr>`; }
   el.innerHTML=h+`</tbody>`;
   el.querySelectorAll(".stbtn").forEach(b=>b.onclick=()=>{location.href="index.html?g="+GROUP+"&store="+b.dataset.sid;});
 }
@@ -1552,9 +1599,9 @@ function drawTrend2(){
   const idx=keys.reduce((m,k,i)=>{m[k]=i;return m;},{});
   const lab=k=>pLabel(k,g)+(k===fkey?"(見込)":"");
   // 数字＋前期比（1つ古い期間との比較。プラス緑・マイナス赤）
-  const cellHtml=(cur,prev)=>{ if(!cur)return "—";
+  const cellHtml=(cur,prev)=>{
     let d=""; if(prev){const pct=(cur-prev)/prev*100; d=`<br><span class="${pct>=0?"delta-up":"delta-dn"}" style="font-size:9.5px">${pct>=0?"+":""}${F1(pct)}%</span>`;}
-    return YEN(cur)+d; };
+    return YEN(cur||0)+d; };
   let h=`<thead><tr><th>店舗</th>${dk.map(k=>`<th>${lab(k)}</th>`).join("")}</tr></thead><tbody>`;
   for(const r of rows)h+=`<tr><td>${esc(r.name)}</td>${dk.map(k=>{const i=idx[k];return `<td>${cellHtml(r.vals[i], i>0?r.vals[i-1]:null)}</td>`;}).join("")}</tr>`;
   if(rows.length){const tot=keys.map((_,i)=>rows.reduce((s,r)=>s+r.vals[i],0));
@@ -1587,18 +1634,20 @@ function drawHeat(elId,metric,D,cats){   // metric: 'q'=販売数 / 'a'=税抜�
   const val=o=>o?(metric==="q"?o.q:o.a):0;
   const cnt=o=>metric==="q"?NUM(val(o))+"着":YEN(val(o))+"円";
   const grades=GRADE_ORDER.filter(g=>D.gradeTot[g]);
-  const cell=o=>{const v=val(o);return v?`<span class="pct">${F1(v/grand*100)}%</span><br><span class="sub" style="font-size:9.5px">${cnt(o)}</span>`:"";};
+  // 空欄は作らず 0%（0着/0円）を薄く表示
+  const cell=o=>{const v=val(o);return `<span class="pct">${F1(v/grand*100)}%</span><br><span class="sub" style="font-size:9.5px">${cnt(o)}</span>`;};
+  const zc=o=>val(o)?"":" zc";   // 0のセルは薄く
   const flat=[]; for(const g of grades)for(const c of cats){const o=D.cells[g]&&D.cells[g][c]; if(val(o)>0)flat.push({g,c,v:val(o)});}
   const top5=new Set(flat.sort((a,b)=>b.v-a.v).slice(0,5).map(x=>x.g+"|"+x.c));
   const ce=c=>encodeURIComponent(c);
   let h=`<colgroup><col class="c-rank"><col class="c-tot">${cats.map(_=>'<col class="c-cat">').join("")}</colgroup>`;
   h+=`<thead><tr><th>ランク＼カテゴリ</th><th>合計</th>${cats.map(c=>`<th class="cbtn" data-cat="${ce(c)}">${esc(c)}</th>`).join("")}</tr></thead><tbody>`;
-  h+=`<tr class="prow"><td>合計</td><td>${metric==="q"?NUM(grand)+"着":YEN(grand)+"円"}<br><span class="sub" style="font-size:9.5px">100%</span></td>`+
+  h+=`<tr class="prow"><td>合計</td><td>100%<br><span class="sub" style="font-size:9.5px">${metric==="q"?NUM(grand)+"着":YEN(grand)+"円"}</span></td>`+
      cats.map(c=>`<td class="cbtn" data-cat="${ce(c)}" title="${esc(c)}: ${cnt(D.catTot[c])}">${cell(D.catTot[c])}</td>`).join("")+`</tr>`;
   for(const g of grades){
     h+=`<tr><td class="cbtn gtot" data-grade="${g}">ランク${g}</td><td class="gtot">${cell(D.gradeTot[g])}</td>`+
       cats.map(c=>{const o=D.cells[g]&&D.cells[g][c]; const green=top5.has(g+"|"+c)?" g5":"";
-        return `<td class="cbtn${green}" data-grade="${g}" data-cat="${ce(c)}" title="ランク${g}×${esc(c)}: ${o?cnt(o):"0"}">${cell(o)}</td>`;}).join("")+`</tr>`;
+        return `<td class="cbtn${green}${zc(o)}" data-grade="${g}" data-cat="${ce(c)}" title="ランク${g}×${esc(c)}: ${cnt(o)}">${cell(o)}</td>`;}).join("")+`</tr>`;
   }
   el.innerHTML=h+`</tbody>`;
   el.querySelectorAll("th.cbtn[data-cat]").forEach(t=>t.onclick=()=>drillCategory(decodeURIComponent(t.dataset.cat),metric));
