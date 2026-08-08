@@ -1471,22 +1471,49 @@ function landingMonth(){
   return ex/dom*dim;
 }
 
-// ② KPIまとめ（締日／今週／今月 の3列 × 指標）
+// 日本の祝日（土日祝の判定用）。直近2週の平日/土日祝を分けるのに使う。年度が進んだら追記。
+const JP_HOLIDAYS=new Set([
+  "2025-08-11","2025-09-15","2025-09-23","2025-10-13","2025-11-03","2025-11-23","2025-11-24",
+  "2026-01-01","2026-01-12","2026-02-11","2026-02-23","2026-03-20","2026-04-29",
+  "2026-05-03","2026-05-04","2026-05-05","2026-05-06","2026-07-20","2026-08-11",
+  "2026-09-21","2026-09-22","2026-09-23","2026-10-12","2026-11-03","2026-11-23",
+  "2027-01-01","2027-01-11","2027-02-11","2027-02-23","2027-03-21","2027-03-22",
+]);
+function isWeekendOrHoliday(d){const wd=new Date(d+"T00:00:00Z").getUTCDay();return wd===0||wd===6||JP_HOLIDAYS.has(d);}
+function dayClass(d){return isWeekendOrHoliday(d)?"we":"wd";}      // 土日祝 / 平日
+function distDates(rows,pred){const s=new Set();for(const r of rows)if(pred(r))s.add(r.d);return s.size;}
+const VOL_METRICS=new Set(["ex","v","qty"]);   // 数量系＝平均列では「1日あたり」に割る
+
+// ② KPIまとめ（前日／今週／今月／平日平均／土日祝平均 × 指標）
 function drawKpi2(){
   const el=document.getElementById("kpi2"); if(!el)return;
-  const sd=DATA._salesMax||DATA._max, ym=sd.slice(0,7), mon=mondayOf(sd);
+  const sd=DATA._salesMax||DATA._max, ym=sd.slice(0,7), mon=mondayOf(sd), w2=addDays(sd,-13);
   const cols=[
-    {label:"前日",from:sd,to:sd},
-    {label:"今週",from:mon,to:sd},
-    {label:"今月",from:ym+"-01",to:sd},
+    {label:"前日",   sub:mdLabel(sd,sd),        from:sd,       to:sd},
+    {label:"今週",   sub:mdLabel(mon,sd),       from:mon,      to:sd},
+    {label:"今月",   sub:mdLabel(ym+"-01",sd),  from:ym+"-01", to:sd},
+    {label:"平日平均",  sub:"直近2週(1日あたり)", from:w2, to:sd, day:"wd"},
+    {label:"土日祝平均",sub:"直近2週(1日あたり)", from:w2, to:sd, day:"we"},
   ];
-  const ps=cols.map(c=>sumRows(rowsIn(c.from,c.to,"__sel__")));
+  // 列×指標のセル値。平均列は数量系を「その区分の日数」で割って1日あたりにする（比率系はそのまま）。
+  const cellVal=(c,k)=>{
+    let rws=rowsIn(c.from,c.to,"__sel__");
+    if(c.day) rws=rws.filter(r=>dayClass(r.d)===c.day);
+    let v=M(k).calc(sumRows(rws));
+    if(c.day && v!=null && VOL_METRICS.has(k)){
+      const div=(k==="v") ? distDates(rws,r=>r.v!=null)
+                          : distDates(rws,r=>(r.in||0)>0||(r.tx||0)>0);
+      v = div>0 ? v/div : null;
+    }
+    return v;
+  };
   const lv=landingMonth();
-  let h=`<thead><tr><th></th>${cols.map(c=>`<th class="colhdr">${c.label}<small>${mdLabel(c.from,c.to)}</small></th>`).join("")}</tr></thead><tbody>`;
-  // 着地見込みは当月のみ算出。前日/今週は概念上「対象外」なのでその旨を明示（0ではない）。
-  h+=`<tr class="land"><td>着地見込み <span class="sub" style="font-weight:500;font-size:9.5px">当月のみ</span></td><td>対象外</td><td>対象外</td><td>${YEN(lv||0)}円</td></tr>`;
+  let h=`<thead><tr><th></th>${cols.map(c=>`<th class="colhdr">${c.label}<small>${c.sub}</small></th>`).join("")}</tr></thead><tbody>`;
+  // 着地見込みは当月のみ算出。他列は概念上「対象外」（0ではない）。
+  h+=`<tr class="land"><td>着地見込み <span class="sub" style="font-weight:500;font-size:9.5px">当月のみ</span></td>`+
+     cols.map((c,i)=>`<td>${i===2?YEN(lv||0)+"円":"対象外"}</td>`).join("")+`</tr>`;
   for(const k of KPI2_COLS){const m=M(k);
-    h+=`<tr><td>${kpiLabel(k)}</td>${ps.map(p=>{const v=m.calc(p);return `<td>${m.fmt(v==null?0:v)}</td>`;}).join("")}</tr>`;}
+    h+=`<tr><td>${kpiLabel(k)}</td>`+cols.map(c=>{const v=cellVal(c,k);return `<td>${m.fmt(v==null?0:v)}</td>`;}).join("")+`</tr>`;}
   el.innerHTML=h+`</tbody>`;
 }
 
