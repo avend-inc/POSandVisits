@@ -597,13 +597,13 @@ function render(){
     </div>
 
     <div class="panel">
-      <h2>⑥ 価格帯×カテゴリ 比率 <span class="sub" style="font-weight:500">（販売数）</span></h2>
+      <h2>⑥ 販売数比率 <span class="sub" style="font-weight:500">（価格帯×カテゴリ）</span></h2>
       <p class="note">縦=ランク帯(S〜D)／横=カテゴリ。緑=上位5。セルを押すと内訳。</p>
       <div class="tblwrap"><table class="heat" id="heatQ"></table></div>
     </div>
     <div class="panel">
-      <h2>⑦ 価格帯×カテゴリ 比率 <span class="sub" style="font-weight:500">（税抜売上）</span></h2>
-      <p class="note">⑥と同じ並びで、売上ベース。</p>
+      <h2>⑦ 税抜売上比率 <span class="sub" style="font-weight:500">（価格帯×カテゴリ）</span></h2>
+      <p class="note">⑥と同じ並びで、税抜売上ベース。</p>
       <div class="tblwrap"><table class="heat" id="heatA"></table></div>
     </div>
     <div id="mdl-root"></div>
@@ -1465,15 +1465,22 @@ function drawTrend2(){
   const first=periodSpan(keys[0],g)[0], last=periodSpan(keys[keys.length-1],g)[1], map={};
   for(const r of DATA.daily){ if(!state.sel.has(r.s))continue; if(r.d<first||r.d>last)continue;
     const k=pKey(r.d,g); if(!kset.has(k))continue; (map[r.s]||(map[r.s]={}))[k]=(map[r.s][k]||0)+exOf(r);}
-  let rows=[...state.sel].map(id=>({name:(storeMeta(id)||{}).name||id,vals:keys.map(k=>(map[id]&&map[id][k])||0)}));
+  // 締日月（進行中で未完）は着地見込みで表示（月粒度のみ）：実績÷締日経過日数×当月日数
+  const sd=DATA._salesMax||DATA._max, sdym=sd.slice(0,7), dom=+sd.slice(8,10);
+  const [sy,sm]=sdym.split("-").map(Number), dim=new Date(Date.UTC(sy,sm,0)).getUTCDate();
+  const fkey=(g==="month"&&kset.has(sdym)&&dom<dim)?sdym:null;
+  const valOf=(id,k)=>{const a=(map[id]&&map[id][k])||0; return (k===fkey&&dom)?a/dom*dim:a;};
+  let rows=[...state.sel].map(id=>({name:(storeMeta(id)||{}).name||id,vals:keys.map(k=>valOf(id,k))}));
   rows.sort((a,b)=>b.vals.reduce((s,v)=>s+v,0)-a.vals.reduce((s,v)=>s+v,0));
-  let h=`<thead><tr><th>店舗</th>${keys.map(k=>`<th>${pLabel(k,g)}</th>`).join("")}</tr></thead><tbody>`;
-  for(const r of rows)h+=`<tr><td>${esc(r.name)}</td>${r.vals.map(v=>`<td>${v?YEN(v):"—"}</td>`).join("")}</tr>`;
-  if(rows.length){const tot=keys.map((_,i)=>rows.reduce((s,r)=>s+r.vals[i],0));
-    h+=`<tr class="prow"><td>合計</td>${tot.map(v=>`<td>${v?YEN(v):"—"}</td>`).join("")}</tr>`;}
+  const dk=keys.slice().reverse();                 // 最新を左に
+  const idx=keys.reduce((m,k,i)=>{m[k]=i;return m;},{});
+  const lab=k=>pLabel(k,g)+(k===fkey?"(見込)":"");
+  let h=`<thead><tr><th>店舗</th>${dk.map(k=>`<th>${lab(k)}</th>`).join("")}</tr></thead><tbody>`;
+  for(const r of rows)h+=`<tr><td>${esc(r.name)}</td>${dk.map(k=>{const v=r.vals[idx[k]];return `<td>${v?YEN(v):"—"}</td>`;}).join("")}</tr>`;
+  if(rows.length)h+=`<tr class="prow"><td>合計</td>${dk.map(k=>{const v=rows.reduce((s,r)=>s+r.vals[idx[k]],0);return `<td>${v?YEN(v):"—"}</td>`;}).join("")}</tr>`;
   else h+=`<tr><td colspan="${keys.length+1}" class="sub">店舗が選択されていません</td></tr>`;
   el.innerHTML=h+`</tbody>`;
-  const rl=document.getElementById("trend-range"); if(rl)rl.textContent=`${pLabel(keys[0],g)} 〜 ${pLabel(keys[keys.length-1],g)}`;
+  const rl=document.getElementById("trend-range"); if(rl)rl.textContent=`${lab(dk[0])} 〜 ${pLabel(dk[dk.length-1],g)}`;
   document.querySelectorAll(".gchip").forEach(b=>b.classList.toggle("on",b.dataset.grain===g));
 }
 
