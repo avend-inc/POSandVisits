@@ -67,6 +67,16 @@ STORE_NAME_ALIAS = {
     "いわき": "NOTIMEいわき店",
     "福井":   "NOTIME福井店",
     "下北沢": "NOTIME下北沢店",
+    # --- 業態転換・改名・誤称で「レジ/デジテールが吐く名前」と「表示したい正式名」がズレる店 ---
+    #   レジ側の登録名は変えられない（吐き続ける）ため、その名前を正式名へ寄せることで
+    #   表示名を正式名に統一しても、取込が同じ店idに一致し続けるようにする。
+    # 倉敷: SELFURUGI→NOTIME に業態転換。POS/SIPOSは旧名を吐き続けるため NOTIME倉敷店 へ寄せる。
+    "SELFURUGI倉敷":   "NOTIME倉敷店",
+    "SELFURUGI倉敷店": "NOTIME倉敷店",
+    # 池袋: POS登録名は「SELFURUGI本店」。正式名「SELFURUGI池袋店」へ寄せる。
+    "SELFURUGI本店":   "SELFURUGI池袋店",
+    # 赤羽: デジテールが「セルフルギ赤羽」と誤称して幽霊店を作るのを防ぐ（正式名 SELFURUGI GARAGE赤羽店 へ寄せる）。
+    "SELFURUGI赤羽":   "SELFURUGI GARAGE赤羽店",
 }
 
 
