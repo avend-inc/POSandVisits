@@ -109,6 +109,16 @@ def build_store_bundles(data: dict, today_str: str) -> dict:
             return "NOTIME"
         return "その他"
 
+    def rptbrand3(sid):   # 画面の rptBrand3 と一致（GARAGE を分離）
+        n = name_of(sid)
+        if "GARAGE" in n:
+            return "SELFURUGI GARAGE"
+        if "SELFURUGI" in n:
+            return "SELFURUGI"
+        if "NOTIME" in n:
+            return "NOTIME"
+        return "その他"
+
     usable = [s["id"] for s in stores if visible_of(s["id"]) and s["id"] in by_store]
 
     def rows_in(f, t, sid):
@@ -132,24 +142,22 @@ def build_store_bundles(data: dict, today_str: str) -> dict:
 
     def bundle_for(sid):
         own = own_of(sid)
-        br = brand_of(sid)
+        b3 = rptbrand3(sid)
         not_shimo = lambda i: "下北沢" not in name_of(i)
-        brand_members = [i for i in usable if not_shimo(i) and
-                         ((own_of(i) == "直営") if own == "直営" else (brand_of(i) == br))]
-        all_ids = [i for i in usable if not_shimo(i)]
-        fc_ids = [i for i in usable if not_shimo(i) and own_of(i) != "直営"]
+        # 画面 drawKpi2Detail と同じ比較対象：FC店→同ブランドのFC店のみ／直営店→直営どうし（下北沢除外）
+        members = [i for i in usable if not_shimo(i) and
+                   ((own_of(i) == "直営") if own == "直営"
+                    else (rptbrand3(i) == b3 and own_of(i) != "直営"))]
         bench = {}
         for key, (f, t) in presets.items():
-            br5 = top_by(brand_members, f, t, 5)
-            fc3 = top_by(fc_ids, f, t, 3)
-            grp = lambda ids: {k: peer_avg(k, f, t, ids) for k in KCOLS}
+            top3 = top_by(members, f, t, 3)
             bench[key] = {"from": f, "to": t,
-                          "brandTop5": grp(br5), "all": grp(all_ids), "fcTop3": grp(fc3)}
+                          "top3": {k: peer_avg(k, f, t, top3) for k in KCOLS}}
         return {
             "generated_at": data.get("generated_at"),
             "store": meta.get(sid),
             "stores": [meta.get(sid)],                # usableStores() がこの店だけを返すように
-            "brandLabel": ("直営" if own == "直営" else br),
+            "brandLabel": ("直営" if own == "直営" else b3),
             "daily": by_store.get(sid, []),
             "cat":  [r for r in data.get("cat", []) if r["s"] == sid],
             "catp": [r for r in data.get("catp", []) if r["s"] == sid],
