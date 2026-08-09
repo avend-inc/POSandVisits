@@ -8,7 +8,7 @@ URL=(os.environ.get("SUPABASE_URL") or "").strip().rstrip("/")
 TOKEN=(os.environ.get("SUPABASE_ACCESS_TOKEN") or "").strip()
 REF=re.sub(r"^https?://([^.]+)\..*$", r"\1", URL) if URL else ""
 APPLY=bool(os.environ.get("APPLY"))
-SETS=os.environ.get("SEASON_SET","アニメ/ミュージックTシャツ=SS")
+SETS=os.environ.get("SEASON_SET","アニメ/ミュージックTシャツ=SS,アニメ/ムービーTシャツ=SS")
 def run(sql):
     r=requests.post(f"https://api.supabase.com/v1/projects/{REF}/database/query",
         headers={"Authorization":f"Bearer {TOKEN}","Content-Type":"application/json"},json={"query":sql},timeout=60)
