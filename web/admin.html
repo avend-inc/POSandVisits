@@ -367,14 +367,19 @@ async function loadPos(){
   const tb=document.querySelector("#ptbl");
   if(error){tb.innerHTML=`<tbody><tr><td class="err">読み込み失敗：${esc(error.message)}</td></tr></tbody>`;return;}
   const nameById=Object.fromEntries((STORESCACHE||[]).map(s=>[String(s.id),s.name]));
+  // 店舗に紐づかない（store_id=null＝アカウント単位）接続の表示名。cashierは直営アカウントなので「直営 Cashier」。
+  const acctLabel=(p)=> p.pos_type!=="cashier" ? "（アカウント全体）"
+    : ((p.login_id||"").toLowerCase().includes("avend") ? "直営 Cashier" : (p.pos_name || "Cashier（別アカウント）"));
   const head=`<thead><tr><th>店舗</th><th>レジ</th><th>URL</th><th>ID</th><th>PW</th><th>稼働</th><th></th></tr></thead>`;
   const rows=(data||[]).map(p=>`<tr data-row="${p.id}" data-store="${p.store_id==null?'':p.store_id}">
-    <td>${esc(nameById[String(p.store_id)]||(p.store_id==null?"（アカウント全体）":p.store_id))}</td>
+    <td>${esc(nameById[String(p.store_id)]||(p.store_id==null?acctLabel(p):String(p.store_id)))}</td>
     <td><select data-id="${p.id}" class="ptype">${POS_TYPES.map(([v,t])=>`<option value="${v}" ${p.pos_type===v?"selected":""}>${t}</option>`).join("")}</select>
       <input data-id="${p.id}" class="pname" value="${esc(p.pos_name||"")}" placeholder="表示名" style="width:110px;margin-top:4px"></td>
     <td><input data-id="${p.id}" class="purl" value="${esc(p.url||"")}" style="width:180px"></td>
     <td><input data-id="${p.id}" class="pid" value="${esc(p.login_id||"")}" style="width:110px"></td>
-    <td><input data-id="${p.id}" class="ppw" type="password" placeholder="${p.pw_secret_id?"●●設定済み（変更時のみ）":"未設定"}" style="width:150px"></td>
+    <td>${p.pw_secret_id
+      ? `<span style="color:#16a34a;font-weight:700">✓ 設定済み</span> <button type="button" class="btn pwchg" data-id="${p.id}" style="padding:2px 9px;font-size:12px">変更</button> <input data-id="${p.id}" class="ppw" type="password" placeholder="新しいPW" style="width:130px;display:none;margin-left:4px">`
+      : `<span style="color:#dc2626;font-weight:700;margin-right:6px">未設定</span><input data-id="${p.id}" class="ppw" type="password" placeholder="PWを入力" style="width:130px">`}</td>
     <td style="text-align:center"><input type="checkbox" data-id="${p.id}" class="pact" ${p.active?"checked":""}></td>
     <td><button class="btn danger" data-pdel="${p.id}">削除</button></td></tr>`).join("");
   tb.innerHTML=head+"<tbody>"+(rows||'<tr><td class="sub" colspan="7">まだレジ接続がありません。下の行から追加してください。</td></tr>')+"</tbody>";
@@ -383,6 +388,12 @@ async function loadPos(){
     const {error}=await SB.rpc("admin_delete_pos",{p_id:Number(b.dataset.pdel)});
     msg("p_msg", error?("削除失敗："+error.message):"削除しました", !error);
     if(!error)loadPos();
+  });
+  // 「設定済み」行は［変更］を押した時だけPW入力欄を表示する（空のままなら既存PWは保持）
+  tb.querySelectorAll(".pwchg").forEach(b=>b.onclick=()=>{
+    const inp=tb.querySelector(`.ppw[data-id="${b.dataset.id}"]`);
+    if(inp){inp.style.display=""; inp.focus();}
+    b.style.display="none";
   });
   bindDirty("pos");
 }
