@@ -154,6 +154,14 @@
   .mdl{background:var(--surface);width:100%;max-width:520px;max-height:82vh;overflow:auto;border-radius:16px;padding:16px}
   .mdl h3{margin:0 0 8px;font-size:15px}
   .mdl .x{position:absolute;top:10px;right:14px;font-size:22px;color:var(--ink2);cursor:pointer;background:none;border:none}
+  /* 加盟店ログイン後の「自分の店舗」一覧 */
+  .frhome{display:flex;flex-direction:column;gap:10px;margin-top:8px}
+  .frcard{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;
+    background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px 18px;
+    box-shadow:var(--shadow);cursor:pointer;font:inherit;color:var(--ink);text-align:left}
+  .frcard:hover{border-color:var(--accent)}
+  .frcard .nm{font-size:16px;font-weight:750}
+  .frcard .go{font-size:22px;color:var(--accent);font-weight:800;line-height:1}
   /* 日別推移：直近7日ぶんの高さに収め、下スクロールで過去。見出し＋平均2行は上に固定 */
   .daywrap{max-height:295px;overflow:auto}
   .daykpi tr.avgrow th{font-size:11px;font-weight:700;text-align:right;color:var(--ink);
@@ -373,11 +381,34 @@ async function franchiseeBoot(ids){
   window.FRANCHISEE=true; window.FR_STORES=stores.map(s=>s.id); window.FR_BENCH=bench;
   DATA={generated_at:gen,stores,daily,cat,catp,bundles,bundleNames,catSeason,gradeBands};
   prep();
-  state.detail=(DETAIL_ID&&window.FR_STORES.includes(DETAIL_ID))?DETAIL_ID:window.FR_STORES[0];
-  state.sel=new Set([state.detail]);
-  const tm=(bench[state.detail]||{}).thismonth;                 // 初期表示は今月（焼込みレンジ）
+  // 割当が1店 or URLで店指定 → その店へ直行。複数店 → まず「自分の店舗」一覧を出す。
+  const pick=(DETAIL_ID&&window.FR_STORES.includes(DETAIL_ID))?DETAIL_ID
+            :(window.FR_STORES.length===1?window.FR_STORES[0]:null);
+  if(pick!=null)openFranchiseeStore(pick); else renderFranchiseeHome();
+}
+// 加盟店：許可された店舗の一覧（ログイン直後に表示）。名前をタップでその店へ。
+function renderFranchiseeHome(){
+  const tb=document.querySelector(".tabbar"); if(tb)tb.style.display="none";
+  const app=document.getElementById("app"); app.classList.remove("detail");
+  const ids=window.FR_STORES||[];
+  app.innerHTML=`
+    <header>
+      <h1>売上KPI管理 <span class="gbadge">加盟店</span></h1>
+      <button class="themebtn" id="themebtn" style="margin-left:auto">◐</button>
+      ${SB?'<button class="themebtn" id="logoutbtn" style="margin-left:6px">ログアウト</button>':''}
+    </header>
+    <div class="sub" style="margin:8px 0 12px">ご覧になる店舗を選んでください。</div>
+    <div class="frhome">${ids.map(id=>`<button class="frcard" data-sid="${id}"><span class="nm">${esc((storeMeta(id)||{}).name||("店舗"+id))}</span><span class="go">›</span></button>`).join("")||'<span class="sub">表示できる店舗がありません。管理者にお問い合わせください。</span>'}</div>`;
+  const el=document.getElementById("themebtn"); if(el)el.onclick=toggleTheme;
+  if(SB){const lo=document.getElementById("logoutbtn"); if(lo)lo.onclick=doLogout;}
+  app.querySelectorAll(".frcard").forEach(b=>b.onclick=()=>openFranchiseeStore(+b.dataset.sid));
+}
+// 加盟店：指定店の店舗ページを開く（期間は今月の焼込みレンジで初期化）
+function openFranchiseeStore(id){
+  state.detail=id; state.sel=new Set([id]);
+  const tm=(window.FR_BENCH[id]||{}).thismonth;
   if(tm){state.from=tm.from;state.to=tm.to;state.kind="thismonth";}
-  render();
+  renderDetail();
 }
 function showLogin(){
   screen(`<div class="gate">
@@ -750,9 +781,9 @@ function renderDetail(){
   if(FRAN){const tb=document.querySelector(".tabbar"); if(tb)tb.style.display="none";}   // 加盟店は他タブに行けない
   const s=storeMeta(state.detail); const nm=(s&&s.name)||("店舗"+state.detail);
   document.getElementById("app").classList.add("detail");
-  const navrow=(FRAN && (window.FR_STORES||[]).length>1)
-    ? `<div style="margin:2px 0 8px">店舗：<select id="fr-store">${window.FR_STORES.map(id=>`<option value="${id}" ${id===state.detail?"selected":""}>${esc((storeMeta(id)||{}).name||id)}</option>`).join("")}</select></div>`
-    : (FRAN ? "" : `<div style="margin:2px 0 8px"><a href="index.html?g=${GROUP}" class="chip" style="text-decoration:none">◀ 一覧に戻る</a></div>`);
+  const navrow=FRAN
+    ? ((window.FR_STORES||[]).length>1 ? `<div style="margin:2px 0 8px"><button class="chip" id="fr-home">◀ 店舗一覧</button></div>` : "")
+    : `<div style="margin:2px 0 8px"><a href="index.html?g=${GROUP}" class="chip" style="text-decoration:none">◀ 一覧に戻る</a></div>`;
   document.getElementById("app").innerHTML=`
     <header>
       <h1>${esc(nm)} <span class="gbadge">店舗別</span></h1>
@@ -837,11 +868,7 @@ function renderDetail(){
     <div id="mdl-root"></div>
     <div class="foot">差分の色＝上位3店平均との差（上:緑／下:赤）。来店客数・購入率はデジテール導入店のみ。${FRAN?'比較は各店の生データではなく集計値のみを表示します。':''}</div>`;
   wireCommon();
-  if(FRAN){const sw=document.getElementById("fr-store"); if(sw)sw.onchange=()=>{
-    const nid=+sw.value; state.detail=nid; state.sel=new Set([nid]);
-    const tm=(window.FR_BENCH[nid]||{}).thismonth; if(tm){state.from=tm.from;state.to=tm.to;state.kind="thismonth";}
-    renderDetail();
-  };}
+  if(FRAN){const hb=document.getElementById("fr-home"); if(hb)hb.onclick=renderFranchiseeHome;}
   draw();
   if(!FRAN)aiWeeklyInsight();   // AIのまとめは本部モードのみ（加盟店は集計値ベースで表示、AIは今後）
 }
