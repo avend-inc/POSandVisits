@@ -731,7 +731,7 @@ function renderDetail(){
     <div class="panel">
       <h2>日別推移 <span class="sub" style="font-weight:500">（下スクロールで過去）</span></h2>
       <div class="tblwrap daywrap"><table class="kmat daykpi" id="daykpi"></table></div>
-      <p class="note" style="margin:7px 0 0">最新日が上。<b>青字＝土日祝</b>。天気＝店舗所在地の実況（気象庁モデル・最高/最低気温）。</p>
+      <p class="note" style="margin:7px 0 0"><b>青字＝土日祝</b>／気温は最高・最低</p>
     </div>
     <div class="panel">
       <h2>売上推移 <span class="sub" id="trend-range" style="font-weight:700;color:var(--accent)"></span></h2>
@@ -751,7 +751,7 @@ function renderDetail(){
       </div>
       <div class="chart" id="trendchart"></div>
       <p class="note" id="trend-note" style="margin:6px 0 0"></p>
-      <p class="note" style="margin:2px 0 0">同時に表示できるのは3つまで。目盛りは左＝1つめ・右＝2つめの項目（3つめはグラフをなぞって確認）。仕入数＝在庫管理アプリの納品点数（納品日ベース）。</p>
+      <p class="note" style="margin:2px 0 0">最大3つまで表示（目盛り＝左:1つめ／右:2つめ）</p>
     </div>
     <div class="panel">
       <h2>KPIまとめ <span class="sub" id="kpi-range" style="font-weight:700;color:var(--accent)"></span></h2>
@@ -769,7 +769,7 @@ function renderDetail(){
         <span class="sub" id="periodlabel"></span>
       </div>
       <div class="tblwrap"><table class="kmat" id="kpi2"></table></div>
-      <p class="note" style="margin:7px 0 0">上位3店平均＝選択期間の同ブランドFC売上トップ3（直営・下北沢除く）。平日・土日祝平均は直近2週間の1日あたり。</p>
+      <p class="note" style="margin:7px 0 0">上位3店＝同ブランドの売上トップ3（下北沢除く）</p>
     </div>
     <div class="panel">
       <h2>販売・売上比率 <span class="sub" style="font-weight:500">（価格帯×カテゴリ）</span> <span class="sub" id="heatX-rng" style="font-weight:700;color:var(--accent)"></span></h2>
@@ -784,19 +784,17 @@ function renderDetail(){
         <button class="chip hchip" data-hpreset="d14">直近14日</button>
         <button class="chip hchip" data-hpreset="d30">直近30日</button>
       </div>
-      <p class="note">縦=ランク帯(S〜D)／横=カテゴリ。緑=上位5。見出し・マスをタップで内訳。期間はこのカード専用です（KPIまとめとは連動しません）。</p>
+      <p class="note">緑＝上位5。マスをタップで内訳</p>
       <div class="tblwrap"><table class="heat" id="heatX"></table></div>
       <h2 style="margin-top:16px">同ブランド全体 <span class="sub" style="font-weight:500">（${esc(rptBrand3(state.detail))}・比率のみ）</span></h2>
-      <p class="note">自店との見比べ用。同じ期間・同じ列の並びで、${esc(rptBrand3(state.detail))}全店舗の構成比を出しています。</p>
-      <div class="tblwrap"><table class="heat" id="heatB"></table></div>
+      <div class="tblwrap" style="margin-top:6px"><table class="heat" id="heatB"></table></div>
     </div>
     <div class="panel">
       <h2>AIのまとめ <span class="sub" style="font-weight:500">（直近2週間・毎週月曜更新）</span></h2>
       <div id="ai-out" style="margin-top:6px;padding:10px 12px;border-left:3px solid var(--accent);background:var(--surface2);border-radius:0 10px 10px 0;font-size:12.5px;line-height:1.9">⏳ 分析を読み込み中…</div>
-      <p class="note" style="margin:7px 0 0">同ブランド比較・販売比率・週次推移から、AIが店舗運営に大事なポイントだけを自動でまとめています（参考情報）。</p>
     </div>
     <div id="mdl-root"></div>
-    <div class="foot">差分は自店と上位3店平均との差で、上＝緑・下＝赤（差が大きいほど濃色）。来店客数・購入率は<b>デジテール（入店計測）導入店のみ</b>の平均です。</div>`;
+    <div class="foot">差分の色＝上位3店平均との差（上:緑／下:赤）。来店客数・購入率はデジテール導入店のみ。</div>`;
   wireCommon();
   draw();
   aiWeeklyInsight();   // AIのまとめは非同期で読み込む（週1回だけAPIを呼び、以降はキャッシュ）
@@ -2128,25 +2126,27 @@ async function aiWeeklyInsight(){
     // AI版ではないことが分かるよう明記し、原因も併記する。
     const why=await askDiagnose((e&&e.message)||String(e));
     const auto=autoInsight();
-    out.innerHTML=(auto?`${esc(auto).replace(/\n+/g,"<br>")}<div class="sub" style="margin-top:8px;font-size:11px">※ 自動集計による要約です（AI接続の復旧後はAIのまとめに切り替わります）。</div>`
-                       :`<span class="sub">まとめを作成できませんでした。</span>`)+
-      `<div class="sub" style="margin-top:6px;font-size:11px">AI接続エラー：${esc(why)} <button class="chip" id="ai-retry" style="margin-left:4px;padding:3px 8px">再試行</button></div>`;
+    out.innerHTML=(auto?esc(auto).replace(/\n+/g,"<br>"):`<span class="sub">まとめを作成できませんでした。</span>`)+
+      `<div class="sub" style="margin-top:8px;font-size:11px">※ 自動集計版（AI未接続：${esc(why)}）`+
+      `<button class="chip" id="ai-retry" style="margin-left:6px;padding:3px 8px">再試行</button></div>`;
     const rb=document.getElementById("ai-retry");
     if(rb)rb.onclick=()=>{ out.textContent="⏳ 分析中…"; try{localStorage.removeItem(key);}catch(_){} aiWeeklyInsight(); };
   }
 }
-// AI接続の失敗原因を切り分ける：同じプロジェクトのREST APIは応答するのに
-// Edge Function だけ応答しない＝関数が未デプロイ（またはCORS設定の問題）と判定できる。
+// AI接続の失敗原因を切り分ける。
+// プリフライト（事前確認）の起きない「単純リクエスト」で関数を叩いてみる：
+//   ・応答が読める → 関数は設置済み。通常の呼び出しが弾かれるのは CORS/JWT 設定側の問題
+//   ・応答が読めない → 関数がこのプロジェクトに無い（または入口で遮断されている）
 async function askDiagnose(baseMsg){
   if(!SUPA.url)return baseMsg;
-  const probe=async u=>{ try{ await fetch(u,{method:"POST",mode:"no-cors",body:"{}"}); return true; }catch(_){ return false; } };
   try{
-    const restOk=await probe(SUPA.url+"/rest/v1/");
-    const fnOk=await probe(SUPA.url+"/functions/v1/ask");
-    if(restOk&&!fnOk)return "Edge Function『ask』に接続できません（サーバ側の設置が必要です）";
-    if(restOk&&fnOk)return baseMsg+"（関数は応答していますがブラウザから読めません＝CORS設定の可能性）";
-    return baseMsg+"（ネットワークに接続できません）";
-  }catch(_){ return baseMsg; }
+    const r=await fetch(SUPA.url+"/functions/v1/ask",{method:"POST",headers:{"content-type":"text/plain"},body:"{}"});
+    const txt=(await r.text()).slice(0,120);
+    if(r.status===401||/ログイン|認証/.test(txt))return "関数は動いていますが、ブラウザの事前確認(CORS)で弾かれています（サーバ側の設定変更が必要）";
+    return baseMsg+`（関数の応答 HTTP ${r.status}）`;
+  }catch(_){
+    return "Edge Function『ask』に接続できません（このSupabaseプロジェクトへの設置が必要です）";
+  }
 }
 // AIが使えないときの自動まとめ（同じデータをルールで要約する。数字は実データから計算）
 function autoInsight(){
