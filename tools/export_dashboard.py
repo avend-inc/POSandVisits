@@ -523,6 +523,20 @@ def main() -> int:
             _ensure_bucket(sb, BUCKET_PRIVATE, public=False)
             _upload(sb, BUCKET_PRIVATE, "data.json", data_bytes,
                     "application/json; charset=utf-8", public=False)
+            # 加盟店(FC)向け：店舗ごとのバンドル store-<id>.json を書き出す。
+            #   中身＝自店の明細＋事前計算した比較集計（他店の生データは含めない）。
+            #   RLS（sql/019）で「その店の割当者＋本部」だけが読める。
+            try:
+                from tools.store_bundles import build_store_bundles
+                from datetime import datetime as _dt
+                bundles = build_store_bundles(data, _dt.now(JST).date().isoformat())
+                for _sid, _b in bundles.items():
+                    _body = json.dumps(_b, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+                    _upload(sb, BUCKET_PRIVATE, f"store-{_sid}.json", _body,
+                            "application/json; charset=utf-8", public=False)
+                print(f"  店舗バンドル: {len(bundles)}件（store-<id>.json）")
+            except Exception as _e:
+                print(f"  ⚠️ 店舗バンドル生成をスキップ: {_e}")
             html = _inject_config(html_text, sb.url, anon, "")
             _upload(sb, BUCKET_PUBLIC, "index.html", html,
                     "text/html; charset=utf-8", public=True)

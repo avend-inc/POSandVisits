@@ -312,11 +312,44 @@ async function authBoot(url,anon){
   try{const {data:u}=await SB.from("app_users").select("role").eq("email",ME.email).maybeSingle();role=u&&u.role||null;}catch(e){}
   ME.role=role;
   if(!ME.role){showDenied(ME.email);return;}
+  // 加盟店（FC）判定：app_user_stores に割り当てがあれば「加盟店モード」＝自店バンドルだけ読む。
+  // 割り当てが無い＝本部（従来どおり全店 data.json）。RLSで data.json は本部しか読めない。
+  let frStores=[];
+  try{ const {data:us}=await SB.from("app_user_stores").select("store_id");
+       frStores=[...new Set((us||[]).map(r=>+r.store_id))]; }catch(e){}
+  if(frStores.length){ await franchiseeBoot(frStores); return; }
   screen('<div class="sub" style="padding:40px 0">データを読み込み中…</div>');
   const {data,error}=await SB.storage.from("dashboard-data").download("data.json");
   if(error)throw new Error("データを取得できませんでした（"+error.message+"）");
   DATA=JSON.parse(await data.text());
   prep();render();
+}
+// 加盟店モード：割り当て店舗の store-<id>.json（自店の明細＋事前計算した比較値）だけを読み込む。
+async function franchiseeBoot(ids){
+  screen('<div class="sub" style="padding:40px 0">データを読み込み中…</div>');
+  const bench={}, stores=[], daily=[], cat=[], catp=[], bundles=[]; let bundleNames={},catSeason={},gradeBands=[],gen="";
+  for(const sid of ids){
+    try{
+      const {data,error}=await SB.storage.from("dashboard-data").download("store-"+sid+".json");
+      if(error) continue;
+      const b=JSON.parse(await data.text());
+      bench[sid]=b.bench||{};
+      (b.stores||[]).forEach(s=>stores.push(s));
+      daily.push(...(b.daily||[])); cat.push(...(b.cat||[])); catp.push(...(b.catp||[]));
+      bundles.push(...(b.bundles||[])); Object.assign(bundleNames,b.bundleNames||{});
+      if(b.catSeason)catSeason=b.catSeason; if(b.gradeBands)gradeBands=b.gradeBands; if(b.generated_at)gen=b.generated_at;
+    }catch(e){}
+  }
+  if(!stores.length){ showError(new Error("割り当てられた店舗のデータが見つかりませんでした。管理者にお問い合わせください。")); return; }
+  window.FRANCHISEE=true; window.FR_STORES=stores.map(s=>s.id); window.FR_BENCH=bench;
+  DATA={generated_at:gen,stores,daily,cat,catp,bundles,bundleNames,catSeason,gradeBands};
+  prep();
+  // 自店ページ固定。URLの?storeが自分の店なら優先、無ければ先頭。
+  state.detail=(DETAIL_ID&&window.FR_STORES.includes(DETAIL_ID))?DETAIL_ID:window.FR_STORES[0];
+  state.sel=new Set([state.detail]);
+  const tm=(bench[state.detail]||{}).thismonth;                 // 初期表示は今月（焼込みレンジ）
+  if(tm){state.from=tm.from;state.to=tm.to;state.kind="thismonth";}
+  render();
 }
 function showLogin(){
   screen(`<div class="gate">
@@ -553,7 +586,11 @@ function wireCommon(){
   const on=(id,ev,fn)=>{const el=document.getElementById(id);if(el)el[ev]=fn;};
   on("from","onchange",e=>{state.from=clampLo(e.target.value||DATA._min);if(state.from>state.to)state.to=state.from;state.kind="custom";syncDateInputs();savePeriod();draw();});
   on("to","onchange",e=>{state.to=clampHi(e.target.value||DATA._max);if(state.to<state.from)state.from=state.to;state.kind="custom";syncDateInputs();savePeriod();draw();});
-  document.querySelectorAll(".pchip").forEach(b=>b.onclick=()=>{const[f,t]=presetRange(b.dataset.preset);state.from=f;state.to=t;state.kind=b.dataset.preset;syncDateInputs();savePeriod();draw();});
+  document.querySelectorAll(".pchip").forEach(b=>b.onclick=()=>{
+    const pk=b.dataset.preset; let f,t;
+    const fb=window.FRANCHISEE&&window.FR_BENCH&&(window.FR_BENCH[state.detail]||{})[pk];   // 加盟店は焼込みレンジを使う
+    if(fb){f=fb.from;t=fb.to;}else{[f,t]=presetRange(pk);}
+    state.from=f;state.to=t;state.kind=pk;syncDateInputs();savePeriod();draw();});
   document.querySelectorAll(".gchip").forEach(b=>b.onclick=()=>{state.grain=b.dataset.grain;state.trendEnd=trendLatestAnchor(state.grain);drawTrend2();});
   on("tr-prev","onclick",()=>{trendShift(-1);drawTrend2();});
   on("tr-next","onclick",()=>{trendShift(1);drawTrend2();});
@@ -655,18 +692,23 @@ function renderMain(){
 // 店舗専用ページ（一覧の店名タップで ?store=<id> に遷移して表示。①店舗選択は出さない）
 function renderDetail(){
   syncAdminTab(); syncGroupTab();
+  const FRAN=!!window.FRANCHISEE;
+  if(FRAN){const tb=document.querySelector(".tabbar"); if(tb)tb.style.display="none";}   // 加盟店は他タブに行けない
   const s=storeMeta(state.detail); const nm=(s&&s.name)||("店舗"+state.detail);
+  const switcher=(FRAN && (window.FR_STORES||[]).length>1)
+    ? `<div style="margin:2px 0 8px">店舗：<select id="fr-store">${window.FR_STORES.map(id=>`<option value="${id}" ${id===state.detail?"selected":""}>${esc((storeMeta(id)||{}).name||id)}</option>`).join("")}</select></div>`
+    : (FRAN ? "" : `<div style="margin:2px 0 8px"><a href="index.html?g=${GROUP}" class="chip" style="text-decoration:none">◀ 一覧に戻る</a></div>`);
   document.getElementById("app").innerHTML=`
     <header>
       <h1>${esc(nm)} <span class="gbadge">店舗別</span></h1>
-      <button class="themebtn" id="storereportbtn" style="margin-left:auto;width:auto;padding:0 12px;gap:5px">📊 レポート</button>
-      <button class="themebtn" id="themebtn" style="margin-left:6px">◐</button>
+      ${FRAN?'':'<button class="themebtn" id="storereportbtn" style="margin-left:auto;width:auto;padding:0 12px;gap:5px">📊 レポート</button>'}
+      <button class="themebtn" id="themebtn" style="margin-left:${FRAN?'auto':'6px'}">◐</button>
       ${SB?'<button class="themebtn" id="logoutbtn" style="margin-left:6px">ログアウト</button>':''}
     </header>
     <div class="sub" style="margin:2px 0 6px">
       最新データ 売上:<b style="color:var(--ink)">${DATA._salesMax}</b>／来店:<b style="color:var(--ink)">${DATA._visitMax}</b>　更新:${(DATA.generated_at||"").replace("T"," ").slice(5,16)}
     </div>
-    <div style="margin:2px 0 8px"><a href="index.html?g=${GROUP}" class="chip" style="text-decoration:none">◀ 一覧に戻る</a></div>
+    ${switcher}
     <div class="grid" style="grid-template-columns:repeat(3,minmax(0,1fr))">
       <div class="card"><div class="k">今月の売上 <span class="sub" id="dtop-cur-note" style="font-weight:500"></span></div><div class="val" id="dtop-cur">—</div><div class="knote">税抜（月初〜最新日）</div></div>
       <div class="card"><div class="k">着地見込み <span class="sub" style="font-weight:500">当月</span></div><div class="val" id="dtop-land">—</div><div class="knote">当月実績÷経過日数×暦日数</div></div>
@@ -691,9 +733,9 @@ function renderDetail(){
         <button class="chip pchip" data-preset="prevday">前日</button>
       </div>
       <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:8px">
-        <input type="date" id="from" min="${DATA._min}" max="${DATA._max}" value="${state.from}">
+        ${FRAN?'':`<input type="date" id="from" min="${DATA._min}" max="${DATA._max}" value="${state.from}">
         <span class="sub">〜</span>
-        <input type="date" id="to" min="${DATA._min}" max="${DATA._max}" value="${state.to}">
+        <input type="date" id="to" min="${DATA._min}" max="${DATA._max}" value="${state.to}">`}
         <span class="sub" id="periodlabel"></span>
       </div>
       <p class="note" id="storekpi-note" style="display:none"></p>
@@ -721,9 +763,14 @@ function renderDetail(){
       <div class="tblwrap"><table class="heat" id="heatA"></table></div>
     </div>
     <div id="mdl-root"></div>
-    <div class="foot">この店舗（<b>${esc(nm)}</b>）だけの数字です。◀一覧に戻るで全店ビューへ。<br>
-      KPI比較は選択期間で、<b>同ブランド上位5平均</b>（${ownOf(state.detail)==="直営"?"直営店":brandOf(state.detail)}の税抜売上トップ5）／<b>全店平均</b>（ブランド不問）／<b>FC上位3平均</b>（直営除く税抜売上トップ3）と並べています。差分は<b>同ブランド上位5平均</b>との差で、上＝緑・下＝赤（差が大きいほど濃色）。<b>いずれも下北沢を除外</b>し、来店客数・購入率は<b>デジテール（入店計測）導入店のみ</b>の平均です。</div>`;
+    <div class="foot">${FRAN?`この画面は<b>${esc(nm)}</b>の数字だけを表示しています。`:`この店舗（<b>${esc(nm)}</b>）だけの数字です。◀一覧に戻るで全店ビューへ。`}<br>
+      KPI比較は選択期間で、<b>同ブランド上位5平均</b>（${ownOf(state.detail)==="直営"?"直営店":brandOf(state.detail)}の税抜売上トップ5）／<b>全店平均</b>（ブランド不問）／<b>FC上位3平均</b>（直営除く税抜売上トップ3）と並べています。差分は<b>同ブランド上位5平均</b>との差で、上＝緑・下＝赤（差が大きいほど濃色）。<b>いずれも下北沢を除外</b>し、来店客数・購入率は<b>デジテール（入店計測）導入店のみ</b>の平均です。${FRAN?'比較は各店の生データではなく集計値のみを表示します。':''}</div>`;
   wireCommon();
+  if(FRAN){const sw=document.getElementById("fr-store"); if(sw)sw.onchange=()=>{
+    const nid=+sw.value; state.detail=nid; state.sel=new Set([nid]);
+    const tm=(window.FR_BENCH[nid]||{}).thismonth; if(tm){state.from=tm.from;state.to=tm.to;state.kind="thismonth";}
+    renderDetail();
+  };}
   draw();
 }
 
@@ -2012,23 +2059,35 @@ function topStoresBy(ids,from,to,n){
   return ids.map(id=>({id,ex:M("ex").calc(sumRows(rowsIn(from,to,id)))||0}))
     .filter(x=>x.ex>0).sort((a,b)=>b.ex-a.ex).slice(0,n).map(x=>x.id);
 }
-// 店舗詳細のKPI（対象期間）：自店実績と、同ブランド上位5平均／全店平均／FC上位3平均を並べて比較
+// 店舗詳細のKPI（対象期間）：自店実績と、同ブランド上位5平均／全店平均／FC上位3平均を並べて比較。
+//  本部モード＝全店データからライブ計算（peerAvg）。加盟店モード＝store-<id>.jsonに焼込んだ
+//  比較値（他店の生データは持たない）を使う。どちらも数式が同じなので数字は一致する。
 function drawStoreKpiDetail(el){
   const id=state.detail, s=storeMeta(id), p=sumRows(rowsIn(state.from,state.to,id));
   const own=ownOf(id), br=brandOf(id), from=state.from, to=state.to;
-  const notShimo=x=>((x.name||"").indexOf("下北沢")<0);
-  // 同ブランド（直営店→直営／FC店→同ブランド）・全店・FC のベンチマーク集合（いずれも下北沢除外）
-  const brandMembers=usableStores().filter(x=>notShimo(x)&&(own==="直営"?ownOf(x.id)==="直営":brandOf(x.id)===br)).map(x=>x.id);
-  const allIds=usableStores().filter(x=>notShimo(x)).map(x=>x.id);
-  const fcIds=usableStores().filter(x=>notShimo(x)&&ownOf(x.id)!=="直営").map(x=>x.id);
-  const brTop5=topStoresBy(brandMembers,from,to,5);
-  const fcTop3=topStoresBy(fcIds,from,to,3);
   const brandLabel=(own==="直営"?"直営":br);
-  const benches=[
-    {label:brandLabel+" 上位5平均※", ids:brTop5},
-    {label:"全店 平均",             ids:allIds},
-    {label:"FC上位3平均（直営除く）",  ids:fcTop3},
-  ];
+  const baked=window.FRANCHISEE&&window.FR_BENCH&&(window.FR_BENCH[id]||{})[state.kind];
+  let benches, diffAvg;
+  if(baked){
+    benches=[
+      {label:brandLabel+" 上位5平均※", get:k=>baked.brandTop5[k]},
+      {label:"全店 平均",             get:k=>baked.all[k]},
+      {label:"FC上位3平均（直営除く）",  get:k=>baked.fcTop3[k]},
+    ];
+    diffAvg=k=>baked.brandTop5[k];
+  }else{
+    const notShimo=x=>((x.name||"").indexOf("下北沢")<0);
+    const brandMembers=usableStores().filter(x=>notShimo(x)&&(own==="直営"?ownOf(x.id)==="直営":brandOf(x.id)===br)).map(x=>x.id);
+    const allIds=usableStores().filter(x=>notShimo(x)).map(x=>x.id);
+    const fcIds=usableStores().filter(x=>notShimo(x)&&ownOf(x.id)!=="直営").map(x=>x.id);
+    const brTop5=topStoresBy(brandMembers,from,to,5), fcTop3=topStoresBy(fcIds,from,to,3);
+    benches=[
+      {label:brandLabel+" 上位5平均※", get:k=>peerAvg(k,from,to,brTop5)},
+      {label:"全店 平均",             get:k=>peerAvg(k,from,to,allIds)},
+      {label:"FC上位3平均（直営除く）",  get:k=>peerAvg(k,from,to,fcTop3)},
+    ];
+    diffAvg=k=>peerAvg(k,from,to,brTop5);
+  }
   const rl=document.getElementById("kpi-range"); if(rl)rl.textContent=mdLabel(from,to);   // タイトル「KPI（m/d〜m/d）」
   let h=`<thead><tr><th></th>${KPI2_COLS.map(k=>`<th>${kpiLabel(k)}</th>`).join("")}</tr></thead><tbody>`;
   // 自店（実績）
@@ -2037,11 +2096,11 @@ function drawStoreKpiDetail(el){
   // ベンチマーク各行
   for(const b of benches){
     h+=`<tr><td class="peer">${esc(b.label)}</td>`+
-       KPI2_COLS.map(k=>{const av=peerAvg(k,from,to,b.ids);return `<td class="peer">${M(k).fmt(av==null?0:av)}</td>`;}).join("")+`</tr>`;
+       KPI2_COLS.map(k=>{const av=b.get(k);return `<td class="peer">${M(k).fmt(av==null?0:av)}</td>`;}).join("")+`</tr>`;
   }
   // 差分（自店 − 同ブランド上位5平均）：上回り緑・下回り赤、差が大きいほど濃色
   h+=`<tr><td>差分（対 ${esc(brandLabel)}上位5）</td>`+KPI2_COLS.map(k=>{
-      const cur=M(k).calc(p), av=peerAvg(k,from,to,brTop5);
+      const cur=M(k).calc(p), av=diffAvg(k);
       const diff=(cur!=null&&av!=null)?cur-av:null;
       const dt=diff==null?M(k).fmt(0):(diff>=0?"+":"−")+M(k).fmt(Math.abs(diff));
       return `<td style="${diffColor(cur,av)}">${dt}</td>`;}).join("")+`</tr>`;
