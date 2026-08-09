@@ -577,6 +577,7 @@ function wireCommon(){
   document.querySelectorAll(".gchip[data-grain]").forEach(b=>b.onclick=()=>{state.grain=b.dataset.grain;state.trendEnd=trendLatestAnchor(state.grain);drawTrend2();});
   on("tr-prev","onclick",()=>{trendShift(-1);drawTrend2();});
   on("tr-next","onclick",()=>{trendShift(1);drawTrend2();});
+  on("ai-btn","onclick",askInsight);
   // 店舗ページ：比率表の切替（販売数／税抜売上）と推移グラフの系列トグル（最大3・最後の1つは消せない）
   document.querySelectorAll(".hmet").forEach(b=>b.onclick=()=>{state.heatMetric=b.dataset.hmet;drawHeatX();});
   document.querySelectorAll(".tmet").forEach(b=>b.onclick=()=>{
@@ -723,7 +724,11 @@ function renderDetail(){
         <span class="sub" id="periodlabel"></span>
       </div>
       <div class="tblwrap"><table class="kmat" id="kpi2"></table></div>
-      <p class="note" style="margin:7px 0 0">上位3店平均＝選択期間の同ブランド売上トップ3（下北沢除く）。平日・土日祝平均は直近2週間の1日あたり。選択期間は下の比率表にも使われます。</p>
+      <p class="note" style="margin:7px 0 0">上位3店平均＝選択期間の同ブランドFC売上トップ3（直営・下北沢除く）。平日・土日祝平均は直近2週間の1日あたり。選択期間は下の比率表にも使われます。</p>
+      <div style="margin-top:10px">
+        <button class="chip" id="ai-btn">✨ AIの示唆を見る</button>
+        <div id="ai-out" style="display:none;margin-top:8px;padding:10px 12px;border-left:3px solid var(--accent);background:var(--surface2);border-radius:0 10px 10px 0;font-size:12.5px;line-height:1.8"></div>
+      </div>
     </div>
     <div class="panel">
       <h2>売上推移</h2>
@@ -744,7 +749,7 @@ function renderDetail(){
       </div>
       <div class="chart" id="trendchart"></div>
       <p class="note" id="trend-note" style="margin:6px 0 0"></p>
-      <p class="note" style="margin:2px 0 0">同時に表示できるのは3つまで（左端の目盛りは1つめの項目）。仕入数＝在庫管理アプリの納品点数（納品日ベース）。</p>
+      <p class="note" style="margin:2px 0 0">同時に表示できるのは3つまで。目盛りは左＝1つめ・右＝2つめの項目（3つめはグラフをなぞって確認）。仕入数＝在庫管理アプリの納品点数（納品日ベース）。</p>
     </div>
     <div class="panel">
       <h2>販売・売上比率 <span class="sub" style="font-weight:500">（価格帯×カテゴリ）</span> <span class="sub" id="heatX-rng" style="font-weight:700;color:var(--accent)"></span></h2>
@@ -759,8 +764,7 @@ function renderDetail(){
       <div class="tblwrap"><table class="heat" id="heatB"></table></div>
     </div>
     <div id="mdl-root"></div>
-    <div class="foot">この店舗（<b>${esc(nm)}</b>）だけの数字です。◀一覧に戻るで全店ビューへ。<br>
-      KPIまとめの<b>上位3店平均</b>は、選択期間の同ブランド税抜売上トップ3（<b>下北沢除く</b>）の平均。差分は自店との差で、上＝緑・下＝赤（差が大きいほど濃色）。来店客数・購入率は<b>デジテール（入店計測）導入店のみ</b>の平均です。日別推移の天気・気温は店舗所在地の実績（Open-Meteo）で、直近約3ヶ月ぶんを表示します。仕入数は在庫管理アプリの納品データです。</div>`;
+    <div class="foot">差分は自店と上位3店平均との差で、上＝緑・下＝赤（差が大きいほど濃色）。来店客数・購入率は<b>デジテール（入店計測）導入店のみ</b>の平均です。</div>`;
   wireCommon();
   draw();
 }
@@ -2012,7 +2016,8 @@ function drawKpi2Detail(el,ctx){
   const wdCol={from:w2,to:sd,day:"wd"}, weCol={from:w2,to:sd,day:"we"};
   const own=ownOf(id), b3=rptBrand3(id), short=brandShort(id);
   const notShimo=x=>((x.name||"").indexOf("下北沢")<0);
-  const members=usableStores().filter(x=>notShimo(x)&&(own==="直営"?ownOf(x.id)==="直営":rptBrand3(x.id)===b3)).map(x=>x.id);
+  // 比較対象：FC店→同ブランドのFC店のみ（直営店は除く）／直営店→直営店どうし。いずれも下北沢除外
+  const members=usableStores().filter(x=>notShimo(x)&&(own==="直営"?ownOf(x.id)==="直営":(rptBrand3(x.id)===b3&&ownOf(x.id)!=="直営"))).map(x=>x.id);
   const top3=topStoresBy(members,state.from,state.to,3);
   const rl=document.getElementById("kpi-range"); if(rl)rl.textContent="期間 "+mdLabel(state.from,state.to);
   let h=`<thead><tr><th></th>
@@ -2036,6 +2041,38 @@ function drawKpi2Detail(el,ctx){
       <td>${m.fmt(wd==null?0:wd)}</td>
       <td>${m.fmt(we==null?0:we)}</td></tr>`;}
   el.innerHTML=h+`</tbody>`;
+}
+// ---- AIの示唆（KPIまとめの下）：分析AIと同じ Edge Function "ask" に比較データを渡して3〜4行で要約 ----
+const AIIN={};   // キャッシュ：店id|期間 → HTML（同じ期間で押し直してもAPIを呼ばない）
+async function askInsight(){
+  const btn=document.getElementById("ai-btn"), out=document.getElementById("ai-out");
+  if(!btn||!out)return;
+  if(!SB){ out.style.display=""; out.textContent="AIの示唆はログイン版でのみ使えます。"; return; }
+  const id=state.detail, key=id+"|"+state.from+"|"+state.to;
+  if(AIIN[key]){ out.style.display=""; out.innerHTML=AIIN[key]; return; }
+  const old=btn.textContent; btn.disabled=true; btn.textContent="⏳ 分析中…";
+  try{
+    const s=storeMeta(id), nm=(s&&s.name)||("店舗"+id);
+    const own=ownOf(id), b3=rptBrand3(id);
+    const notShimo=x=>((x.name||"").indexOf("下北沢")<0);
+    const members=usableStores().filter(x=>notShimo(x)&&(own==="直営"?ownOf(x.id)==="直営":(rptBrand3(x.id)===b3&&ownOf(x.id)!=="直営"))).map(x=>x.id);
+    const top3=topStoresBy(members,state.from,state.to,3);
+    const p=sumRows(rowsIn(state.from,state.to,id));
+    const cmp=KPI2_COLS.map(k=>({kpi:kpiLabel(k),self:M(k).calc(p),top3avg:peerAvg(k,state.from,state.to,top3)}));
+    const digest={
+      today:todayStr(), closing:DATA._salesMax||DATA._max,
+      stores:top3.map(t=>(storeMeta(t)||{}).name||t),
+      note:`店舗「${nm}」の期間 ${state.from}〜${state.to} のKPI実績と、同ブランド上位3店（${own==="直営"?"直営":b3}・下北沢除く${own==="直営"?"":"・直営除く"}）の平均との比較。`,
+      legend:"series.cmp = [{kpi:指標名, self:自店の値, top3avg:上位3店平均}]（金額は税抜円）",
+      series:{cmp},
+    };
+    const q="この比較データから、この店舗にとって本当に重要な示唆だけを日本語で3〜4行にまとめてください。今回は【結論】などの見出し・箇条書き・Markdown記法は使わず、プレーンな文章のみで。数字は重要なものだけ添えてください。";
+    const {data,error}=await SB.functions.invoke("ask",{body:{question:q,digest,history:[]}});
+    if(error||!data||data.error||!data.answer)throw new Error((data&&data.error)||(error&&error.message)||"取得に失敗しました");
+    const html=esc(data.answer).replace(/\n+/g,"<br>");
+    AIIN[key]=html; out.style.display=""; out.innerHTML=html;
+  }catch(e){ out.style.display=""; out.textContent="AIの示唆を取得できませんでした："+((e&&e.message)||e); }
+  finally{ btn.disabled=false; btn.textContent=old; }
 }
 
 // 比較対象（同ブランド平均）の店舗ID：直営店→直営全店 / FC店→同ブランド（直営含む）。いずれも来店計測(デジテール)導入店のみ。
@@ -2273,13 +2310,22 @@ async function loadPurchases(id){
   if(SHIP[id]!==undefined)return SHIP[id];
   if(!SB){SHIP[id]="none";return "none";}
   try{
-    const {data:l}=await SB.from("pos_store_links").select("destination_id").eq("pos_store_id",id).maybeSingle();
-    const dest=l&&l.destination_id;
+    // ① 対応表（設定ページのPOS連携）で請求先を引く。kind=none/closed は連携しない指定
+    let dest=null;
+    const {data:l}=await SB.from("pos_store_links").select("destination_id,kind").eq("pos_store_id",id).maybeSingle();
+    if(l&&l.destination_id&&l.kind!=="none"&&l.kind!=="closed")dest=l.destination_id;
+    // ② 対応表に無い店は、店名の地名で在庫アプリの請求先を検索（1件に絞れたときだけ採用）
+    if(!dest&&!(l&&(l.kind==="none"||l.kind==="closed"))){
+      const s=storeMeta(id), q=((s&&s.name)||"").replace(/SELFURUGI|NOTIME|GARAGE/gi,"").replace(/店$/,"").trim();
+      if(q){const {data:ds}=await SB.from("destinations").select("id,name").ilike("name","%"+q+"%").limit(5);
+        if(ds&&ds.length===1)dest=ds[0].id;}
+    }
     if(!dest){SHIP[id]="none";return "none";}
     const m={}; let from=0;
     for(;;){
       const {data:rows,error}=await SB.from("shipments")
-        .select("shipment_date,delivery_date,total_quantity").eq("destination_id",dest).range(from,from+999);
+        .select("shipment_date,delivery_date,total_quantity").eq("destination_id",dest)
+        .order("id").range(from,from+999);
       if(error||!rows){ if(from===0){SHIP[id]="none";return "none";} break; }
       for(const r of rows){const d=r.delivery_date||r.shipment_date; if(!d)continue; m[d]=(m[d]||0)+(r.total_quantity||0);}
       if(rows.length<1000)break; from+=1000;
@@ -2338,7 +2384,8 @@ function drawMultiChart(box,labels,series,isFc){
   const n=labels.length;
   const act=series.filter(s=>s.vals.some(v=>v!=null));
   if(!n||!act.length){box.innerHTML='<div class="sub" style="padding:8px 0">データなし</div>';return;}
-  const W=Math.max(box.clientWidth||680,320),H=200,PADL=48,PADR=14,PADT=14,PADB=26;
+  const single=act.length===1;
+  const W=Math.max(box.clientWidth||680,320),H=200,PADL=48,PADR=single?14:48,PADT=14,PADB=26;
   const xs=i=>PADL+(W-PADL-PADR)*(n<=1?0.5:i/(n-1));
   const sc=series.map(s=>{
     const nums=s.vals.filter(v=>v!=null);
@@ -2349,7 +2396,9 @@ function drawMultiChart(box,labels,series,isFc){
   });
   const a0=sc.findIndex(x=>x), ax=sc[a0], axm=series[a0];
   const gy=[];for(let i=0;i<=3;i++){const val=ax.lo+(ax.hi-ax.lo)*i/3;gy.push({y:ax.ys(val),val});}
-  const single=act.length===1;
+  // 右の縦軸＝2つめに選んだ系列の目盛り（3系列めはツールチップで確認）
+  let a1=-1; for(let i=0;i<sc.length;i++){ if(i!==a0&&sc[i]){a1=i;break;} }
+  const gy2=(a1>=0)?[0,1,2,3].map(i=>{const val=sc[a1].lo+(sc[a1].hi-sc[a1].lo)*i/3;return {y:sc[a1].ys(val),val};}):[];
   const lines=series.map((s,si)=>{
     const S=sc[si]; if(!S)return"";
     const pts=s.vals.map((v,i)=>v==null?null:[xs(i),S.ys(v)]);
@@ -2364,6 +2413,7 @@ function drawMultiChart(box,labels,series,isFc){
   const step=Math.max(1,Math.ceil(n/6));
   box.innerHTML=`<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="推移グラフ">
     ${gy.map(gg=>`<line x1="${PADL}" y1="${gg.y.toFixed(1)}" x2="${W-PADR}" y2="${gg.y.toFixed(1)}" stroke="var(--border)" stroke-width="1"/><text x="${PADL-7}" y="${(gg.y+3).toFixed(1)}" text-anchor="end" font-size="9.5" fill="${single?"var(--muted)":axm.color}">${shortNum(gg.val)}</text>`).join("")}
+    ${gy2.map(gg=>`<text x="${(W-PADR+7).toFixed(1)}" y="${(gg.y+3).toFixed(1)}" text-anchor="start" font-size="9.5" fill="${series[a1].color}">${shortNum(gg.val)}</text>`).join("")}
     ${lines.join("")}
     ${labels.map((lb,i)=>(i===n-1||(i%step===0&&n-1-i>=step))?`<text x="${xs(i).toFixed(1)}" y="${H-PADB+16}" text-anchor="middle" font-size="9" fill="var(--muted)">${lb}</text>`:"").join("")}
     <rect id="tc-hit" x="${PADL}" y="${PADT}" width="${(W-PADL-PADR).toFixed(1)}" height="${(H-PADT-PADB).toFixed(1)}" fill="transparent"/>
