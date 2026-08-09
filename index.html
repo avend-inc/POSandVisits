@@ -251,6 +251,7 @@ function navIsReload(){
 //  ・認証モード : Googleログイン → 許可リスト(app_users)に居れば非公開data.jsonを読む
 const CONFIG_URL="https://qcdxhsrnlsgpntbiellh.supabase.co/storage/v1/object/public/dashboard/config.json";
 let SB=null, ME={email:"",role:null};   // Supabase クライアント／ログイン中ユーザー
+const SUPA={url:"",anon:""};            // Supabase の接続情報（Edge Function を直接叩くときに使う）
 
 // 「プリントTシャツ」「バンド/ミュージックTシャツ」「アニメ/ムービーTシャツ」は直営店だけの細分。
 // ★これらを「Tシャツ」に統合するのは “レポートの中だけ”。ダッシュボード画面は原本のまま。
@@ -327,6 +328,7 @@ async function ensureSupabase(){
 async function authBoot(url,anon){
   screen('<div class="sub" style="padding:40px 0">読み込み中…</div>');
   await ensureSupabase();
+  SUPA.url=String(url||"").replace(/\/+$/,""); SUPA.anon=anon;   // AI呼び出しの直接fetch用に控える
   SB=window.supabase.createClient(url,anon,{
     auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,
       flowType:"pkce",storageKey:"notime-auth"},
@@ -380,8 +382,18 @@ function pKey(d,g){return g==="day"?d:g==="month"?d.slice(0,7):mondayOf(d);}
 function pLabel(k,g){
   if(g==="month"){const[y,m]=k.split("-");return `${y}年${+m}月`;}
   if(g==="day"){const[,m,dd]=k.split("-");return `${+m}/${+dd}`;}
-  const mon=new Date(k+"T00:00:00Z"),sun=new Date(mon);sun.setUTCDate(sun.getUTCDate()+6);
-  const f=x=>`${x.getUTCMonth()+1}/${x.getUTCDate()}`;return `${f(mon)}〜${f(sun)}`;
+  return `${+k.slice(5,7)}/${+k.slice(8,10)}週`;   // 週は「6/29週」（月曜始まり）
+}
+// グラフの横軸など、幅が限られる場所で使う短いラベル（月=「8月」／週=「6/29週」／日=「8/8」）
+function pShort(k,g){
+  if(g==="month")return `${+k.slice(5,7)}月`;
+  if(g==="day")return `${+k.slice(5,7)}/${+k.slice(8,10)}`;
+  return `${+k.slice(5,7)}/${+k.slice(8,10)}週`;
+}
+// 見出しに出す期間の範囲ラベル（月だけ年を2桁で添える）
+function pRange(k,g){
+  if(g==="month")return `${k.slice(2,4)}年${+k.slice(5,7)}月`;
+  return pShort(k,g);
 }
 function addDays(d,n){const t=new Date(d+"T00:00:00Z");t.setUTCDate(t.getUTCDate()+n);return t.toISOString().slice(0,10);}
 function daysBetween(a,b){return Math.round((Date.parse(b)-Date.parse(a))/86400000)+1;}
@@ -722,14 +734,13 @@ function renderDetail(){
       <p class="note" style="margin:7px 0 0">最新日が上。<b>青字＝土日祝</b>。天気＝店舗所在地の実況（気象庁モデル・最高/最低気温）。</p>
     </div>
     <div class="panel">
-      <h2>売上推移</h2>
-      <div style="display:flex;align-items:center;gap:8px;margin:4px 0 8px;flex-wrap:wrap">
+      <h2>売上推移 <span class="sub" id="trend-range" style="font-weight:700;color:var(--accent)"></span></h2>
+      <div style="display:flex;align-items:center;gap:6px;margin:6px 0 8px">
         <button class="gchip" data-grain="month">月</button>
         <button class="gchip" data-grain="week">週</button>
         <button class="gchip" data-grain="day">日</button>
-        <span style="margin-left:auto;display:flex;align-items:center;gap:8px">
-          <button class="chip" id="tr-prev">◀</button><span class="sub" id="trend-range"></span><button class="chip" id="tr-next">▶</button>
-        </span>
+        <button class="chip" id="tr-prev" style="margin-left:auto">◀</button>
+        <button class="chip" id="tr-next">▶</button>
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px">
         <button class="gchip tmet" data-tmet="ex">売上</button>
@@ -775,8 +786,8 @@ function renderDetail(){
       </div>
       <p class="note">縦=ランク帯(S〜D)／横=カテゴリ。緑=上位5。見出し・マスをタップで内訳。期間はこのカード専用です（KPIまとめとは連動しません）。</p>
       <div class="tblwrap"><table class="heat" id="heatX"></table></div>
-      <h2 style="margin-top:16px">同ブランド全体 <span class="sub" style="font-weight:500">（${esc(brandOf(state.detail))}・比率のみ）</span></h2>
-      <p class="note">自店との見比べ用。同じ期間・同じ列の並びで、${esc(brandOf(state.detail))}全店舗の構成比を出しています。</p>
+      <h2 style="margin-top:16px">同ブランド全体 <span class="sub" style="font-weight:500">（${esc(rptBrand3(state.detail))}・比率のみ）</span></h2>
+      <p class="note">自店との見比べ用。同じ期間・同じ列の並びで、${esc(rptBrand3(state.detail))}全店舗の構成比を出しています。</p>
       <div class="tblwrap"><table class="heat" id="heatB"></table></div>
     </div>
     <div class="panel">
@@ -1949,8 +1960,9 @@ function drawHeatX(){
   if(!document.getElementById("heatX"))return;
   const D=heatData(), cats=heatCatsOf(D);
   drawHeat("heatX",state.heatMetric,D,cats);
-  const br=brandOf(state.detail);
-  const ids=new Set(usableStores().filter(s=>brandOf(s.id)===br).map(s=>s.id));
+  // 比較対象のブランドはKPIまとめの「上位3店」と同じ判定（GARAGEは別ブランド扱い）にそろえる
+  const br=rptBrand3(state.detail);
+  const ids=new Set(usableStores().filter(s=>rptBrand3(s.id)===br).map(s=>s.id));
   drawHeat("heatB",state.heatMetric,heatData(ids),cats,{pctOnly:true,noDrill:true});
   document.querySelectorAll(".hmet").forEach(b=>b.classList.toggle("on",b.dataset.hmet===state.heatMetric));
   document.querySelectorAll(".hchip").forEach(b=>b.classList.toggle("on",b.dataset.hpreset===state.hKind));
@@ -2087,7 +2099,10 @@ async function aiWeeklyInsight(){
     const p=sumRows(rowsIn(f,t,id));
     const cmp=KPI2_COLS.map(k=>({kpi:kpiLabel(k),self:M(k).calc(p),top3avg:peerAvg(k,f,t,top3)}));
     // 販売比率（ランク×カテゴリ・販売数シェア%）：自店とブランド全体
-    const shareOf=D=>{const o={}; for(const g in D.cells)for(const c in D.cells[g]){const q=D.cells[g][c].q||0; if(q>0&&D.gQ)o[`ランク${g}×${c}`]=Math.round(q/D.gQ*1000)/10;} return o;};
+    // 構成比は上位12マスだけ渡す（送信量を抑えて応答を速くするため）
+    const shareOf=D=>{const a=[];
+      for(const g in D.cells)for(const c in D.cells[g]){const q=D.cells[g][c].q||0; if(q>0&&D.gQ)a.push([`ランク${g}×${c}`,Math.round(q/D.gQ*1000)/10]);}
+      const o={}; a.sort((x,y)=>y[1]-x[1]).slice(0,12).forEach(([k,v])=>o[k]=v); return o;};
     const selfD=heatData(undefined,f,t);
     const brandIds=new Set(usableStores().filter(x=>brandOf(x.id)===brandOf(id)).map(x=>x.id));
     const brandD=heatData(brandIds,f,t);
@@ -2104,12 +2119,50 @@ async function aiWeeklyInsight(){
       series:{cmp,selfShare:shareOf(selfD),brandShare:shareOf(brandD),weekly},
     };
     const q="このデータから、この店舗の運営にとって特に大事なポイントだけを日本語で3〜4行にまとめてください。同ブランド上位店との差・売れ筋構成の違い・直近の週次トレンドのうち、行動につながる重要なものだけ。見出し・箇条書き・Markdown記法は使わず、プレーンな文章のみ。数字は重要なものだけ添えてください。";
-    const {data,error}=await SB.functions.invoke("ask",{body:{question:q,digest,history:[]}});
-    if(error||!data||data.error||!data.answer)throw new Error((data&&data.error)||(error&&error.message)||"取得に失敗しました");
-    const html=esc(data.answer).replace(/\n+/g,"<br>");
+    const answer=await callAsk(q,digest);
+    const html=esc(answer).replace(/\n+/g,"<br>");
     try{ localStorage.setItem(key,html); }catch(_){}
     out.innerHTML=html;
-  }catch(e){ out.textContent="AIのまとめを取得できませんでした："+((e&&e.message)||e); }
+  }catch(e){
+    out.innerHTML=`<span class="sub">AIのまとめを取得できませんでした（${esc((e&&e.message)||String(e))}）</span> `+
+      `<button class="chip" id="ai-retry" style="margin-left:6px">再試行</button>`;
+    const rb=document.getElementById("ai-retry");
+    if(rb)rb.onclick=()=>{ out.textContent="⏳ 分析中…"; aiWeeklyInsight(); };
+  }
+}
+// Edge Function "ask"（分析AI）を呼ぶ。まず直接 fetch し、だめなら supabase-js 経由で再試行する。
+// 直接 fetch にすることで、失敗時に HTTP ステータスと本文が読めて原因が分かる。
+async function callAsk(question,digest){
+  const body=JSON.stringify({question,digest,history:[]});
+  let firstErr=null;
+  if(SUPA.url){
+    try{
+      const {data:{session}}=await SB.auth.getSession();
+      const tok=(session&&session.access_token)||SUPA.anon;
+      const ac=new AbortController(); const timer=setTimeout(()=>ac.abort(),120000);
+      let r;
+      try{
+        r=await fetch(SUPA.url+"/functions/v1/ask",{method:"POST",signal:ac.signal,
+          headers:{"content-type":"application/json","authorization":"Bearer "+tok,"apikey":SUPA.anon},body});
+      } finally { clearTimeout(timer); }
+      const txt=await r.text();
+      let j=null; try{ j=JSON.parse(txt); }catch(_){}
+      if(!r.ok)throw new Error(`HTTP ${r.status}${(j&&j.error)?"："+j.error:(txt?"："+txt.slice(0,120):"")}`);
+      if(j&&j.error)throw new Error(j.error);
+      if(j&&j.answer)return j.answer;
+      throw new Error("AIから空の応答");
+    }catch(e){ firstErr=e; }
+  }
+  // 予備：supabase-js の invoke（直接fetchが通らない環境向け）
+  try{
+    const {data,error}=await SB.functions.invoke("ask",{body:{question,digest,history:[]}});
+    if(error)throw error;
+    if(data&&data.error)throw new Error(data.error);
+    if(data&&data.answer)return data.answer;
+    throw new Error("AIから空の応答");
+  }catch(e2){
+    throw new Error(((firstErr&&firstErr.message)||"")||((e2&&e2.message)||String(e2)));
+  }
 }
 
 // 比較対象（同ブランド平均）の店舗ID：直営店→直営全店 / FC店→同ブランド（直営含む）。いずれも来店計測(デジテール)導入店のみ。
@@ -2451,10 +2504,9 @@ function drawTrendDetail(){
     });
     return {key:m.key,label:m.label,color:m.color,fmt:m.fmt,axf:m.axf,vals};
   });
-  const lab=k=>pLabel(k,g)+(k===fkey?"(見込)":"");
-  drawMultiChart(box,keys.map(lab),series,keys.map(k=>k===fkey));
-  const rl=document.getElementById("trend-range");
-  if(rl)rl.textContent=`${pLabel(keys[0],g)} 〜 ${lab(keys[keys.length-1])}`;
+  drawMultiChart(box,keys.map(k=>pShort(k,g)),series,keys.map(k=>k===fkey));
+  const rl=document.getElementById("trend-range"), lastKey=keys[keys.length-1];
+  if(rl)rl.textContent=`${pRange(keys[0],g)}〜${pRange(lastKey,g)}${lastKey===fkey?"(見込)":""}`;
   document.querySelectorAll(".gchip[data-grain]").forEach(b=>b.classList.toggle("on",b.dataset.grain===g));
   syncTmetChips();
   const note=document.getElementById("trend-note");
@@ -2467,7 +2519,13 @@ function drawMultiChart(box,labels,series,isFc){
   const act=series.filter(s=>s.vals.some(v=>v!=null));
   if(!n||!act.length){box.innerHTML='<div class="sub" style="padding:8px 0">データなし</div>';return;}
   const single=act.length===1;
-  const W=Math.max(box.clientWidth||680,320),H=200,PADL=48,PADR=single?14:48,PADT=14,PADB=26;
+  const FS=9;   // 横軸ラベルの文字サイズ
+  // 全ラベルを1行に並べて入るか判定。入らないときは上下2段の互い違いにして「全部表示」する。
+  const estW=s=>[...String(s)].reduce((w,ch)=>w+(/[0-9/.]/.test(ch)?FS*0.55:FS*1.02),0);
+  const labW=Math.max(...labels.map(estW));
+  const W=Math.max(box.clientWidth||680,320),PADL=48,PADR=single?14:48;
+  const stagger=n>1 && (labW+5)*n > (W-PADL-PADR);
+  const PADB=stagger?36:26, H=stagger?210:200, PADT=14;
   const xs=i=>PADL+(W-PADL-PADR)*(n<=1?0.5:i/(n-1));
   const sc=series.map(s=>{
     const nums=s.vals.filter(v=>v!=null);
@@ -2492,12 +2550,14 @@ function drawMultiChart(box,labels,series,isFc){
     const dots=pts.map((p,i)=>p?`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3" fill="${(isFc[i]&&s.key==="ex")?"var(--surface)":s.color}" stroke="${s.color}" stroke-width="2"${(isFc[i]&&s.key==="ex")?' stroke-dasharray="2 1.6"':""}/>`:"").join("");
     return area+`<path d="${path}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`+dots;
   });
-  const step=Math.max(1,Math.ceil(n/6));
+  // 端のラベルがSVGからはみ出さないよう、中央寄せの基準位置を内側に寄せる
+  const lx=i=>Math.min(Math.max(xs(i),estW(labels[i])/2+1),W-estW(labels[i])/2-1);
+  const lyOf=i=>H-PADB+(stagger?(i%2?26:13):16);
   box.innerHTML=`<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="推移グラフ">
     ${gy.map(gg=>`<line x1="${PADL}" y1="${gg.y.toFixed(1)}" x2="${W-PADR}" y2="${gg.y.toFixed(1)}" stroke="var(--border)" stroke-width="1"/><text x="${PADL-7}" y="${(gg.y+3).toFixed(1)}" text-anchor="end" font-size="9.5" fill="${single?"var(--muted)":axm.color}">${(axm.axf||shortNum)(gg.val)}</text>`).join("")}
     ${gy2.map(gg=>`<text x="${(W-PADR+7).toFixed(1)}" y="${(gg.y+3).toFixed(1)}" text-anchor="start" font-size="9.5" fill="${series[a1].color}">${(series[a1].axf||shortNum)(gg.val)}</text>`).join("")}
     ${lines.join("")}
-    ${labels.map((lb,i)=>(i===n-1||(i%step===0&&n-1-i>=step))?`<text x="${xs(i).toFixed(1)}" y="${H-PADB+16}" text-anchor="middle" font-size="9" fill="var(--muted)">${lb}</text>`:"").join("")}
+    ${labels.map((lb,i)=>`<text x="${lx(i).toFixed(1)}" y="${lyOf(i)}" text-anchor="middle" font-size="${FS}" fill="var(--muted)">${lb}</text>`).join("")}
     <rect id="tc-hit" x="${PADL}" y="${PADT}" width="${(W-PADL-PADR).toFixed(1)}" height="${(H-PADT-PADB).toFixed(1)}" fill="transparent"/>
     <line id="tc-cross" x1="0" y1="${PADT}" x2="0" y2="${H-PADB}" stroke="var(--muted)" stroke-width="1" opacity="0"/>
   </svg><div class="tip"></div>`;
