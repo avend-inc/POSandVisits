@@ -154,11 +154,28 @@
   .mdl{background:var(--surface);width:100%;max-width:520px;max-height:82vh;overflow:auto;border-radius:16px;padding:16px}
   .mdl h3{margin:0 0 8px;font-size:15px}
   .mdl .x{position:absolute;top:10px;right:14px;font-size:22px;color:var(--ink2);cursor:pointer;background:none;border:none}
-  /* 日別KPI推移：直近2週ぶんの高さに収め、下スクロールで過去。見出しは上に固定 */
-  .daywrap{max-height:430px;overflow:auto}
+  /* 日別推移：直近10日ぶんの高さに収め、下スクロールで過去。見出しは上に固定 */
+  .daywrap{max-height:320px;overflow:auto}
   .daywrap thead th{position:sticky;top:0;background:var(--surface);z-index:2}
   .daywrap thead th:first-child{z-index:3}
   .kmat tr.we td{color:var(--accent)}
+  /* 店舗詳細ページ：上部サマリーカード（横幅で数字を縮めてはみ出さない）・見出しアクセント */
+  .dtop{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:10px 0 4px}
+  .dtop .card{padding:11px 12px;border-radius:12px;border-top:3px solid var(--accent)}
+  .dtop .card .k{font-size:11px;margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dtop .card .val{font-size:clamp(14px,4.4vw,22px);white-space:nowrap;letter-spacing:-.02em}
+  .dtop .card .val small{font-size:11px;font-weight:700;color:var(--ink2);margin-left:1px}
+  .dtop .card .knote{font-size:9.5px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dtop .card.land{background:linear-gradient(135deg,#1f2a44,#2b3c60);border-top-color:#b8860b;border-color:#2b3c60}
+  .dtop .card.land .k{color:#cadcfc}
+  .dtop .card.land .val{color:#fff}
+  .dtop .card.land .val small{color:#cadcfc}
+  .dtop .card.land .knote{color:#8fa3c8}
+  .detail .panel h2{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  .detail .panel h2::before{content:"";width:4px;height:14px;border-radius:2px;background:linear-gradient(180deg,var(--accent),#b8860b);flex:none}
+  /* 日別推移の表はスマホ幅でも横スクロールなしで収まるよう圧縮 */
+  .daykpi{font-size:11.5px}
+  .daykpi th,.daykpi td{padding:5px 4px}
 </style>
 </head>
 <body>
@@ -208,7 +225,8 @@ const GROUP_LABEL=(GROUP==="fc")?"FC店":"直営店";
 const DETAIL_ID=(function(){const v=new URLSearchParams(location.search).get("store");return v&&/^\d+$/.test(v)?+v:null;})();
 
 // sel=選択店舗ID(Set)。kind=③期間プリセット。grain=⑤推移の粒度。trendAnchor=⑤の＜＞位置。
-const state={store:"__sel__",sel:null,grain:"month",metric:"ex",from:null,to:null,kind:"thismonth",trendEnd:null,detail:DETAIL_ID};
+const state={store:"__sel__",sel:null,grain:"month",metric:"ex",from:null,to:null,kind:"thismonth",trendEnd:null,detail:DETAIL_ID,
+  kview:"sum",heatMetric:"q"};   // kview=店舗ページKPIまとめの表示（sum=期間まとめ/cmp=他店比較）。heatMetric=比率表の切替（q=販売数/a=税抜売上）
 let DATA=null;
 // リロード／直アクセスか？（＝タブ移動でないか）。リロード時は選択・期間をデフォルトへ戻す。
 function navIsReload(){
@@ -554,9 +572,12 @@ function wireCommon(){
   on("from","onchange",e=>{state.from=clampLo(e.target.value||DATA._min);if(state.from>state.to)state.to=state.from;state.kind="custom";syncDateInputs();savePeriod();draw();});
   on("to","onchange",e=>{state.to=clampHi(e.target.value||DATA._max);if(state.to<state.from)state.from=state.to;state.kind="custom";syncDateInputs();savePeriod();draw();});
   document.querySelectorAll(".pchip").forEach(b=>b.onclick=()=>{const[f,t]=presetRange(b.dataset.preset);state.from=f;state.to=t;state.kind=b.dataset.preset;syncDateInputs();savePeriod();draw();});
-  document.querySelectorAll(".gchip").forEach(b=>b.onclick=()=>{state.grain=b.dataset.grain;state.trendEnd=trendLatestAnchor(state.grain);drawTrend2();});
+  document.querySelectorAll(".gchip[data-grain]").forEach(b=>b.onclick=()=>{state.grain=b.dataset.grain;state.trendEnd=trendLatestAnchor(state.grain);drawTrend2();});
   on("tr-prev","onclick",()=>{trendShift(-1);drawTrend2();});
   on("tr-next","onclick",()=>{trendShift(1);drawTrend2();});
+  // 店舗ページ：KPIまとめの表示切替（期間まとめ／他店比較）と比率表の切替（販売数／税抜売上）
+  document.querySelectorAll(".kview").forEach(b=>b.onclick=()=>{state.kview=b.dataset.kview;syncKview();});
+  document.querySelectorAll(".hmet").forEach(b=>b.onclick=()=>{state.heatMetric=b.dataset.hmet;drawHeatX();});
   on("themebtn","onclick",toggleTheme);
   on("reportbtn","onclick",openReportDialog);
   on("storereportbtn","onclick",openStoreReportDialog);
@@ -565,6 +586,7 @@ function wireCommon(){
 function renderMain(){
   syncAdminTab();
   syncGroupTab();
+  document.getElementById("app").classList.remove("detail");
   document.getElementById("app").innerHTML=`
     <header>
       <h1>売上KPI管理 <span class="gbadge">${GROUP_LABEL}</span></h1>
@@ -656,6 +678,7 @@ function renderMain(){
 function renderDetail(){
   syncAdminTab(); syncGroupTab();
   const s=storeMeta(state.detail); const nm=(s&&s.name)||("店舗"+state.detail);
+  document.getElementById("app").classList.add("detail");
   document.getElementById("app").innerHTML=`
     <header>
       <h1>${esc(nm)} <span class="gbadge">店舗別</span></h1>
@@ -667,37 +690,44 @@ function renderDetail(){
       最新データ 売上:<b style="color:var(--ink)">${DATA._salesMax}</b>／来店:<b style="color:var(--ink)">${DATA._visitMax}</b>　更新:${(DATA.generated_at||"").replace("T"," ").slice(5,16)}
     </div>
     <div style="margin:2px 0 8px"><a href="index.html?g=${GROUP}" class="chip" style="text-decoration:none">◀ 一覧に戻る</a></div>
-    <div class="grid" style="grid-template-columns:repeat(3,minmax(0,1fr))">
-      <div class="card"><div class="k">今月の売上 <span class="sub" id="dtop-cur-note" style="font-weight:500"></span></div><div class="val" id="dtop-cur">—</div><div class="knote">税抜（月初〜最新日）</div></div>
-      <div class="card"><div class="k">着地見込み <span class="sub" style="font-weight:500">当月</span></div><div class="val" id="dtop-land">—</div><div class="knote">当月実績÷経過日数×暦日数</div></div>
-      <div class="card"><div class="k">前日の売上 <span class="sub" id="dtop-prev-note" style="font-weight:500"></span></div><div class="val" id="dtop-prev">—</div><div class="knote">税抜（最新データ日）</div></div>
+    <div class="dtop">
+      <div class="card"><div class="k">今月の売上</div><div class="val" id="dtop-cur">—</div><div class="knote">税抜 <span id="dtop-cur-note"></span></div></div>
+      <div class="card land"><div class="k">着地見込み</div><div class="val" id="dtop-land">—</div><div class="knote">当月の月末予測</div></div>
+      <div class="card"><div class="k">前日の売上</div><div class="val" id="dtop-prev">—</div><div class="knote">税抜 <span id="dtop-prev-note"></span></div></div>
     </div>
     <div class="panel">
-      <h2>KPIまとめ <span class="sub" style="font-weight:500">（前日／今週／今月）</span></h2>
-      <div class="tblwrap"><table class="kmat" id="kpi2"></table></div>
+      <h2>日別推移 <span class="sub" style="font-weight:500">（下スクロールで過去）</span></h2>
+      <div class="tblwrap daywrap"><table class="kmat daykpi" id="daykpi"></table></div>
+      <p class="note" style="margin:7px 0 0">最新日が上。<b>青字＝土日祝</b>。</p>
     </div>
     <div class="panel">
-      <h2>日別KPI推移 <span class="sub" style="font-weight:500">（直近2週間／下スクロールで過去）</span></h2>
-      <p class="note">縦＝日付（<b>青字＝土日祝</b>）、横＝KPI。集計期間の設定に関わらず日次の実績を表示します。</p>
-      <div class="tblwrap daywrap"><table class="kmat" id="daykpi"></table></div>
-    </div>
-    <div class="panel">
-      <h2>KPI（<span id="kpi-range"></span>）</h2>
-      <div style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 8px">
-        <button class="chip pchip" data-preset="thismonth">今月</button>
-        <button class="chip pchip" data-preset="lastmonth">前月</button>
-        <button class="chip pchip" data-preset="thisweek">今週</button>
-        <button class="chip pchip" data-preset="lastweek">前週</button>
-        <button class="chip pchip" data-preset="prevday">前日</button>
+      <h2>KPIまとめ</h2>
+      <div style="display:flex;gap:6px;margin:7px 0 10px">
+        <button class="gchip kview" data-kview="sum">期間まとめ</button>
+        <button class="gchip kview" data-kview="cmp">他店比較</button>
       </div>
-      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:8px">
-        <input type="date" id="from" min="${DATA._min}" max="${DATA._max}" value="${state.from}">
-        <span class="sub">〜</span>
-        <input type="date" id="to" min="${DATA._min}" max="${DATA._max}" value="${state.to}">
-        <span class="sub" id="periodlabel"></span>
+      <div id="kview-sum">
+        <div class="tblwrap"><table class="kmat" id="kpi2"></table></div>
+        <p class="note" style="margin:7px 0 0">平日平均・土日祝平均は直近2週間の1日あたり。</p>
       </div>
-      <p class="note" id="storekpi-note" style="display:none"></p>
-      <div class="tblwrap"><table class="kmat" id="storekpi"></table></div>
+      <div id="kview-cmp" style="display:none">
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px">
+          <button class="chip pchip" data-preset="thismonth">今月</button>
+          <button class="chip pchip" data-preset="lastmonth">前月</button>
+          <button class="chip pchip" data-preset="thisweek">今週</button>
+          <button class="chip pchip" data-preset="lastweek">前週</button>
+          <button class="chip pchip" data-preset="prevday">前日</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+          <input type="date" id="from" min="${DATA._min}" max="${DATA._max}" value="${state.from}">
+          <span class="sub">〜</span>
+          <input type="date" id="to" min="${DATA._min}" max="${DATA._max}" value="${state.to}">
+          <span class="sub" id="periodlabel"></span>
+        </div>
+        <p class="note" style="margin:0 0 6px">期間 <b id="kpi-range" style="color:var(--accent)"></b> の自店実績と他店平均の比較（この期間は下の比率表にも使われます）</p>
+        <p class="note" id="storekpi-note" style="display:none"></p>
+        <div class="tblwrap"><table class="kmat" id="storekpi"></table></div>
+      </div>
     </div>
     <div class="panel">
       <h2>売上推移 <span class="sub" style="font-weight:500">税抜</span></h2>
@@ -709,21 +739,23 @@ function renderDetail(){
           <button class="chip" id="tr-prev">◀</button><span class="sub" id="trend-range"></span><button class="chip" id="tr-next">▶</button>
         </span>
       </div>
-      <div class="tblwrap"><table class="kmat" id="trend"></table></div>
+      <div class="chart" id="trendchart"></div>
+      <div class="tblwrap" style="margin-top:8px"><table class="kmat" id="trend"></table></div>
     </div>
     <div class="panel">
-      <h2>販売数比率 <span class="sub" style="font-weight:500">（価格帯×カテゴリ）</span> <span class="sub" id="heatQ-rng" style="font-weight:700;color:var(--accent)"></span></h2>
-      <p class="note">縦=ランク帯(S〜D)／横=カテゴリ。緑=上位5。見出し・マスをタップで内訳。集計期間は上のKPIで選んだ期間です。</p>
-      <div class="tblwrap"><table class="heat" id="heatQ"></table></div>
-    </div>
-    <div class="panel">
-      <h2>税抜売上比率 <span class="sub" style="font-weight:500">（価格帯×カテゴリ）</span> <span class="sub" id="heatA-rng" style="font-weight:700;color:var(--accent)"></span></h2>
-      <div class="tblwrap"><table class="heat" id="heatA"></table></div>
+      <h2>販売・売上比率 <span class="sub" style="font-weight:500">（価格帯×カテゴリ）</span> <span class="sub" id="heatX-rng" style="font-weight:700;color:var(--accent)"></span></h2>
+      <div style="display:flex;gap:6px;margin:7px 0 8px">
+        <button class="gchip hmet" data-hmet="q">販売数</button>
+        <button class="gchip hmet" data-hmet="a">税抜売上</button>
+      </div>
+      <p class="note">縦=ランク帯(S〜D)／横=カテゴリ。緑=上位5。見出し・マスをタップで内訳。集計期間はKPIまとめ「他店比較」で選んだ期間です。</p>
+      <div class="tblwrap"><table class="heat" id="heatX"></table></div>
     </div>
     <div id="mdl-root"></div>
     <div class="foot">この店舗（<b>${esc(nm)}</b>）だけの数字です。◀一覧に戻るで全店ビューへ。<br>
-      KPI比較は選択期間で、<b>同ブランド上位5平均</b>（${ownOf(state.detail)==="直営"?"直営店":brandOf(state.detail)}の税抜売上トップ5）／<b>全店平均</b>（ブランド不問）／<b>FC上位3平均</b>（直営除く税抜売上トップ3）と並べています。差分は<b>同ブランド上位5平均</b>との差で、上＝緑・下＝赤（差が大きいほど濃色）。<b>いずれも下北沢を除外</b>し、来店客数・購入率は<b>デジテール（入店計測）導入店のみ</b>の平均です。</div>`;
+      KPIまとめ「他店比較」は選択期間で、<b>同ブランド上位5平均</b>（${ownOf(state.detail)==="直営"?"直営店":brandOf(state.detail)}の税抜売上トップ5）／<b>全店平均</b>（ブランド不問）／<b>FC上位3平均</b>（直営除く税抜売上トップ3）と並べています。差分は<b>同ブランド上位5平均</b>との差で、上＝緑・下＝赤（差が大きいほど濃色）。<b>いずれも下北沢を除外</b>し、来店客数・購入率は<b>デジテール（入店計測）導入店のみ</b>の平均です。</div>`;
   wireCommon();
+  syncKview();
   draw();
 }
 
@@ -1870,10 +1902,28 @@ function mdLabel(f,t){ const g=s=>`${+s.slice(5,7)}/${+s.slice(8,10)}`; return f
 function draw(){ drawSlicer(); drawPeriod(); refresh(); }
 // 選択・期間の変更でスライサー本体以外を描き直す（チェックのたびにリストを作り直さない）
 function refresh(){ if(state.detail){drawDetailExtras(); drawDayKpi();} drawKpi2(); drawStoreKpi(); drawTrend2();
-  const D=heatData();                                    // ⑥⑦で同じ集計・同じ列順を使う
-  const cats=Object.keys(D.catTot).sort((a,b)=>D.catTot[b].a-D.catTot[a].a).slice(0,10);  // 売上降順・共通
-  drawHeat("heatQ","q",D,cats); drawHeat("heatA","a",D,cats);
+  if(state.detail){ drawHeatX(); }                       // 店舗ページ＝1表（販売数/税抜売上を切替）
+  else{ const D=heatData();                              // ⑥⑦で同じ集計・同じ列順を使う
+    const cats=heatCatsOf(D);                            // 売上降順・共通
+    drawHeat("heatQ","q",D,cats); drawHeat("heatA","a",D,cats); }
   updateSelCount(); }
+// 比率表の列（カテゴリ）：税抜売上の降順・上位10（販売数表示でも列順は共通）
+function heatCatsOf(D){ return Object.keys(D.catTot).sort((a,b)=>D.catTot[b].a-D.catTot[a].a).slice(0,10); }
+// 店舗ページの比率表：選択中の指標（販売数/税抜売上）で1表を描き、切替チップを点灯
+function drawHeatX(){
+  if(!document.getElementById("heatX"))return;
+  const D=heatData();
+  drawHeat("heatX",state.heatMetric,D,heatCatsOf(D));
+  document.querySelectorAll(".hmet").forEach(b=>b.classList.toggle("on",b.dataset.hmet===state.heatMetric));
+}
+// 店舗ページのKPIまとめ：期間まとめ／他店比較の表示切替
+function syncKview(){
+  const sum=document.getElementById("kview-sum"), cmp=document.getElementById("kview-cmp");
+  if(!sum||!cmp)return;
+  sum.style.display=(state.kview==="cmp")?"none":"";
+  cmp.style.display=(state.kview==="cmp")?"":"none";
+  document.querySelectorAll(".kview").forEach(b=>b.classList.toggle("on",b.dataset.kview===state.kview));
+}
 
 // ① 店舗選択（ドロップダウン内のチェックボックス）
 function drawSlicer(){
@@ -1985,26 +2035,28 @@ function drawDetailExtras(){
   const cur=M("ex").calc(sumRows(rowsIn(ym+"-01",sd,id)));
   const lv=landingMonth();                                  // 詳細ページは state.sel=当該店のみ＝この店の着地
   const prev=M("ex").calc(sumRows(rowsIn(sd,sd,id)));
-  el.textContent=YEN(cur||0)+"円";
-  const l=document.getElementById("dtop-land"); if(l)l.textContent=YEN(lv||0)+"円";
-  const pv=document.getElementById("dtop-prev"); if(pv)pv.textContent=YEN(prev||0)+"円";
+  el.innerHTML=YEN(cur||0)+"<small>円</small>";
+  const l=document.getElementById("dtop-land"); if(l)l.innerHTML=YEN(lv||0)+"<small>円</small>";
+  const pv=document.getElementById("dtop-prev"); if(pv)pv.innerHTML=YEN(prev||0)+"<small>円</small>";
   const cn=document.getElementById("dtop-cur-note"); if(cn)cn.textContent=`${+ym.slice(5,7)}/1〜${+sd.slice(5,7)}/${+sd.slice(8,10)}`;
   const pn=document.getElementById("dtop-prev-note"); if(pn)pn.textContent=`${+sd.slice(5,7)}/${+sd.slice(8,10)}`;
 }
-// 日別KPI推移（縦=日付・最新が上／横=KPI）。直近2週ぶんの高さに収め、下スクロールで過去を表示。
+// 日別推移（縦=日付・最新が上／横=KPI）。直近10日ぶんの高さに収め、下スクロールで過去を表示。
+// 列は商品販売数まで（平均購入数・商品単価は出さない）＝スマホ幅で横スクロールなしで収める。
 const WK=["日","月","火","水","木","金","土"];
+const DAY_COLS=["ex","v","pr","aov","qty"];
 function drawDayKpi(){
   const el=document.getElementById("daykpi"); if(!el)return;
   const id=state.detail; if(id==null)return;
   const sd=DATA._salesMax||DATA._max, byDate=new Map();
   for(const r of DATA.daily){ if(r.s!==id)continue; if(r.d>sd)continue; let a=byDate.get(r.d); if(!a){a=[];byDate.set(r.d,a);} a.push(r); }
   const dates=[...byDate.keys()].sort().reverse();
-  let h=`<thead><tr><th>日付</th>${KPI2_COLS.map(k=>`<th>${kpiLabel(k)}</th>`).join("")}</tr></thead><tbody>`;
-  if(!dates.length){ el.innerHTML=h+`<tr><td colspan="${KPI2_COLS.length+1}" class="sub">データがありません</td></tr></tbody>`; return; }
+  let h=`<thead><tr><th>日付</th>${DAY_COLS.map(k=>`<th>${M(k).name}</th>`).join("")}</tr></thead><tbody>`;
+  if(!dates.length){ el.innerHTML=h+`<tr><td colspan="${DAY_COLS.length+1}" class="sub">データがありません</td></tr></tbody>`; return; }
   for(const d of dates){ const p=sumRows(byDate.get(d)); const we=isWeekendOrHoliday(d);
     const wk=WK[new Date(d+"T00:00:00Z").getUTCDay()];
     h+=`<tr${we?' class="we"':''}><td>${+d.slice(5,7)}/${+d.slice(8,10)}（${wk}）</td>`+
-       KPI2_COLS.map(k=>{const v=M(k).calc(p);return `<td>${M(k).fmt(v==null?0:v)}</td>`;}).join("")+`</tr>`; }
+       DAY_COLS.map(k=>{const v=M(k).calc(p);return `<td>${M(k).fmt(v==null?0:v)}</td>`;}).join("")+`</tr>`; }
   el.innerHTML=h+`</tbody>`;
 }
 // 選択期間・下北沢除外での税抜売上トップN店（比較ベンチマーク用）
@@ -2116,7 +2168,55 @@ function drawTrend2(){
   else h+=`<tr><td colspan="${keys.length+1}" class="sub">店舗が選択されていません</td></tr>`;
   el.innerHTML=h+`</tbody>`;
   const rl=document.getElementById("trend-range"); if(rl)rl.textContent=`${lab(dk[0])} 〜 ${pLabel(dk[dk.length-1],g)}`;
-  document.querySelectorAll(".gchip").forEach(b=>b.classList.toggle("on",b.dataset.grain===g));
+  document.querySelectorAll(".gchip[data-grain]").forEach(b=>b.classList.toggle("on",b.dataset.grain===g));
+  // 店舗ページはグラフ（推移タブと同じ折れ線）も描く。左＝過去→右＝最新。
+  if(rows.length){ const tot=keys.map((_,i)=>rows.reduce((s,r)=>s+r.vals[i],0));
+    drawTrendChart(keys.map(k=>lab(k)),tot,keys.map(k=>k===fkey)); }
+  else drawTrendChart([],[],[]);
+}
+// 売上推移グラフ（店舗ページ）：labels/vals は古い→新しい順。isFc=着地見込みの期か
+function drawTrendChart(labels,vals,isFc){
+  const box=document.getElementById("trendchart"); if(!box)return;
+  box.innerHTML="";
+  const nums=vals.filter(v=>v!=null);
+  if(!labels.length||!nums.length){box.innerHTML='<div class="sub" style="padding:8px 0">データなし</div>';return;}
+  const n=labels.length;
+  const W=Math.max(box.clientWidth||680,320),H=190,PADL=48,PADR=14,PADT=12,PADB=26;
+  const xs=i=>PADL+(W-PADL-PADR)*(n<=1?0.5:i/(n-1));
+  const maxV=Math.max(1,...nums),minV=Math.min(0,...nums);
+  const ys=v=>PADT+(H-PADT-PADB)*(1-(v-minV)/((maxV-minV)||1));
+  const gy=[];for(let i=0;i<=3;i++){const val=minV+(maxV-minV)*i/3;gy.push({y:ys(val),val});}
+  const pts=vals.map((v,i)=>v==null?null:[xs(i),ys(v)]);
+  const path=pts.map((p,i)=>p?`${i&&pts[i-1]?"L":"M"}${p[0].toFixed(1)} ${p[1].toFixed(1)}`:"").join(" ");
+  const first=pts.findIndex(p=>p); let last=-1;for(let i=pts.length-1;i>=0;i--)if(pts[i]){last=i;break;}
+  let area=""; if(first>=0){const base=ys(Math.max(0,minV));
+    area=`<path d="M${pts[first][0].toFixed(1)} ${base.toFixed(1)} `+pts.map(p=>p?`L${p[0].toFixed(1)} ${p[1].toFixed(1)}`:"").join(" ")+` L${pts[last][0].toFixed(1)} ${base.toFixed(1)} Z" fill="var(--accent)" opacity="0.09"/>`;}
+  box.innerHTML=`<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="税抜売上の推移">
+    ${gy.map(gg=>`<line x1="${PADL}" y1="${gg.y.toFixed(1)}" x2="${W-PADR}" y2="${gg.y.toFixed(1)}" stroke="var(--border)" stroke-width="1"/><text x="${PADL-7}" y="${(gg.y+3).toFixed(1)}" text-anchor="end" font-size="9.5" fill="var(--muted)">${shortNum(gg.val)}</text>`).join("")}
+    ${area}<path d="${path}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    ${pts.map((p,i)=>p?`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3.2" fill="${isFc[i]?"var(--surface)":"var(--accent)"}" stroke="var(--accent)" stroke-width="2"${isFc[i]?' stroke-dasharray="2 1.6"':""}/>`:"").join("")}
+    ${labels.map((lb,i)=>`<text x="${xs(i).toFixed(1)}" y="${H-PADB+16}" text-anchor="middle" font-size="9" fill="var(--muted)">${lb}</text>`).join("")}
+    <rect id="tc-hit" x="${PADL}" y="${PADT}" width="${(W-PADL-PADR).toFixed(1)}" height="${(H-PADT-PADB).toFixed(1)}" fill="transparent"/>
+    <line id="tc-cross" x1="0" y1="${PADT}" x2="0" y2="${H-PADB}" stroke="var(--muted)" stroke-width="1" opacity="0"/>
+  </svg><div class="tip"></div>`;
+  const tip=box.querySelector(".tip"),cross=box.querySelector("#tc-cross"),hit=box.querySelector("#tc-hit"),svgEl=box.querySelector("svg");
+  const hide=()=>{tip.style.opacity=0;cross.setAttribute("opacity","0");};
+  function move(ev){const r=svgEl.getBoundingClientRect();const px=((ev.touches?ev.touches[0].clientX:ev.clientX)-r.left)/r.width*W;
+    let i=Math.round((px-PADL)/((W-PADL-PADR)/Math.max(1,n-1)));i=Math.max(0,Math.min(n-1,i));
+    const v=vals[i]; if(v==null){hide();return;}
+    const cx=xs(i);cross.setAttribute("x1",cx);cross.setAttribute("x2",cx);cross.setAttribute("opacity",".45");
+    tip.style.opacity=1;tip.style.left=(cx/W*r.width)+"px";tip.style.top=(ys(v)/H*r.height)+"px";
+    tip.innerHTML=`<b>${labels[i]}</b><br>税抜売上: ${YEN(v)}円`;}
+  hit.addEventListener("mousemove",move);
+  hit.addEventListener("mouseleave",hide);
+  // タッチは横方向のなぞりだけ反応。縦スクロールでは何もしない（カクつき防止）。
+  let sx=0,sy=0,lock=null;
+  hit.addEventListener("touchstart",ev=>{sx=ev.touches[0].clientX;sy=ev.touches[0].clientY;lock=null;},{passive:true});
+  hit.addEventListener("touchmove",ev=>{if(lock==="v")return;
+    const dx=ev.touches[0].clientX-sx,dy=ev.touches[0].clientY-sy;
+    if(lock===null&&(Math.abs(dx)>6||Math.abs(dy)>6))lock=Math.abs(dy)>Math.abs(dx)?"v":"h";
+    if(lock==="v"){hide();return;}move(ev);},{passive:true});
+  hit.addEventListener("touchend",hide);
 }
 
 // ⑥⑦ 価格帯(ランク)×カテゴリ ヒートマップ
