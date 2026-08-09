@@ -1642,7 +1642,7 @@ const GRADE_ORDER=["S","A","B","C","D","E","F"];
 function heatData(){
   const cells={},catTot={},gradeTot={}; let gQ=0,gA=0;
   for(const r of (DATA.catp||[])){ if(!storeMatch(r.s,"__sel__"))continue; if(r.d<state.from||r.d>state.to)continue; if(isDropCat(r.c))continue;
-    const gr=gradeOf(r.c,r.p); if(!gr)continue; const cat=normCat(r.c);
+    const gr=gradeOf(r.c,r.p); if(!gr)continue; const cat=r.c;   // ⑤⑥は原本カテゴリで表示（Tシャツ/プリントT/バンドT/アニメTを分ける。統合はレポートのみ）
     (cells[gr]||(cells[gr]={})); (cells[gr][cat]||(cells[gr][cat]={q:0,a:0}));
     cells[gr][cat].q+=r.q||0; cells[gr][cat].a+=r.a||0;
     (catTot[cat]||(catTot[cat]={q:0,a:0})); catTot[cat].q+=r.q||0; catTot[cat].a+=r.a||0;
@@ -1713,7 +1713,7 @@ function drillGrade(g,metric){
 function drillCell(g,cat,metric){
   const m=new Map(); let tq=0,ta=0;
   for(const r of (DATA.catp||[])){ if(!storeMatch(r.s,"__sel__"))continue; if(r.d<state.from||r.d>state.to)continue;
-    if(normCat(r.c)!==cat)continue; if(gradeOf(r.c,r.p)!==g)continue;
+    if(r.c!==cat)continue; if(gradeOf(r.c,r.p)!==g)continue;
     const e=m.get(r.p)||{label:"¥"+NUM(r.p),q:0,a:0}; e.q+=r.q||0; e.a+=r.a||0; m.set(r.p,e); tq+=r.q||0; ta+=r.a||0;}
   showModal(`ランク${g}×${cat}｜売れている価格 トップ5`,rankTable([...m.values()],metric,metric==="q"?tq:ta));
 }
