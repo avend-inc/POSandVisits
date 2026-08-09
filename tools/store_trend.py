@@ -8,7 +8,7 @@ import requests
 URL=(os.environ.get("SUPABASE_URL") or "").strip().rstrip("/")
 TOKEN=(os.environ.get("SUPABASE_ACCESS_TOKEN") or "").strip()
 REF=re.sub(r"^https?://([^.]+)\..*$", r"\1", URL) if URL else ""
-STORES=[s.strip() for s in (os.environ.get("TREND_STORES","NOTIME熊谷店,SELFURUGI熊谷店")).split(",") if s.strip()]
+STORES=[s.strip() for s in ((os.environ.get("TREND_STORES") or "").strip() or "NOTIME熊谷店,SELFURUGI熊谷店").split(",") if s.strip()]
 CUR="2026-08"  # 進行中(暫定)の月
 def run(sql):
     r=requests.post(f"https://api.supabase.com/v1/projects/{REF}/database/query",

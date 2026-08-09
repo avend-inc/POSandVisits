@@ -31,6 +31,10 @@ on:
         description: "会計明細画面のURL（分かっていれば。空なら既定を試す）"
         required: false
         default: ""
+      trend_stores:
+        description: "store-trendモードの対象店（カンマ区切り。空=既定）"
+        required: false
+        default: ""
 
 concurrency:
   group: notime-airregi-probe
@@ -49,6 +53,7 @@ jobs:
       SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
       SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      TREND_STORES: ${{ inputs.trend_stores }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
