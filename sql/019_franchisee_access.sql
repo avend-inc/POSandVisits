@@ -27,9 +27,11 @@
 -- =====================================================================
 
 -- --- 割り当てテーブル：email → 見られる店舗id ------------------------------
+--   ※ public.stores の主キーは name（id にユニーク制約が無い）ため、id への外部キーは張らない。
+--     store_id は stores.id を論理的に参照する（存在しない店idは画面/RPC側で扱わない）。
 create table if not exists public.app_user_stores (
   email      text   not null,
-  store_id   bigint not null references public.stores(id) on delete cascade,
+  store_id   bigint not null,
   created_at timestamptz not null default now(),
   primary key (email, store_id)
 );
