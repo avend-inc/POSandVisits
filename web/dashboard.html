@@ -615,12 +615,12 @@ function renderMain(){
     </div>
 
     <div class="panel">
-      <h2>⑤ 販売数比率 <span class="sub" style="font-weight:500">（価格帯×カテゴリ）</span></h2>
-      <p class="note">縦=ランク帯(S〜D)／横=カテゴリ。緑=上位5。<b>青字の見出し・数字のマスをタップ</b>で内訳。</p>
+      <h2>⑤ 販売数比率 <span class="sub" style="font-weight:500">（価格帯×カテゴリ）</span> <span class="sub" id="heatQ-rng" style="font-weight:700;color:var(--accent)"></span></h2>
+      <p class="note">縦=ランク帯(S〜D)／横=カテゴリ。緑=上位5。<b>青字の見出し・数字のマスをタップ</b>で内訳。集計期間は③で選んだ期間です。</p>
       <div class="tblwrap"><table class="heat" id="heatQ"></table></div>
     </div>
     <div class="panel">
-      <h2>⑥ 税抜売上比率 <span class="sub" style="font-weight:500">（価格帯×カテゴリ）</span></h2>
+      <h2>⑥ 税抜売上比率 <span class="sub" style="font-weight:500">（価格帯×カテゴリ）</span> <span class="sub" id="heatA-rng" style="font-weight:700;color:var(--accent)"></span></h2>
       <p class="note">⑤と同じ並びで、税抜売上ベース。</p>
       <div class="tblwrap"><table class="heat" id="heatA"></table></div>
     </div>
@@ -686,12 +686,12 @@ function renderDetail(){
       <div class="tblwrap"><table class="kmat" id="trend"></table></div>
     </div>
     <div class="panel">
-      <h2>販売数比率 <span class="sub" style="font-weight:500">（価格帯×カテゴリ）</span></h2>
-      <p class="note">縦=ランク帯(S〜D)／横=カテゴリ。緑=上位5。見出し・マスをタップで内訳。</p>
+      <h2>販売数比率 <span class="sub" style="font-weight:500">（価格帯×カテゴリ）</span> <span class="sub" id="heatQ-rng" style="font-weight:700;color:var(--accent)"></span></h2>
+      <p class="note">縦=ランク帯(S〜D)／横=カテゴリ。緑=上位5。見出し・マスをタップで内訳。集計期間は上のKPIで選んだ期間です。</p>
       <div class="tblwrap"><table class="heat" id="heatQ"></table></div>
     </div>
     <div class="panel">
-      <h2>税抜売上比率 <span class="sub" style="font-weight:500">（価格帯×カテゴリ）</span></h2>
+      <h2>税抜売上比率 <span class="sub" style="font-weight:500">（価格帯×カテゴリ）</span> <span class="sub" id="heatA-rng" style="font-weight:700;color:var(--accent)"></span></h2>
       <div class="tblwrap"><table class="heat" id="heatA"></table></div>
     </div>
     <div id="mdl-root"></div>
@@ -1651,8 +1651,9 @@ function heatData(){
   }
   return {cells,catTot,gradeTot,gQ,gA};
 }
-function drawHeat(elId,metric,D,cats){   // metric: 'q'=販売数 / 'a'=税抜売上。D/catsは⑥⑦共通
+function drawHeat(elId,metric,D,cats){   // metric: 'q'=販売数 / 'a'=税抜売上。D/catsは⑤⑥共通
   const el=document.getElementById(elId); if(!el)return;
+  const rng=document.getElementById(elId+"-rng"); if(rng)rng.textContent="期間 "+mdLabel(state.from,state.to);
   if(!hasGrades()){ el.innerHTML='<tbody><tr><td class="sub" style="padding:8px">ランク帯データがありません。</td></tr></tbody>'; return; }
   const grand=metric==="q"?D.gQ:D.gA;
   if(!grand){ el.innerHTML='<tbody><tr><td class="sub" style="padding:8px">対象期間・店舗に、ランク対象（SS/AW）の販売がありません。</td></tr></tbody>'; return; }
