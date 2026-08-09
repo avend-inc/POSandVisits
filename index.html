@@ -154,6 +154,11 @@
   .mdl{background:var(--surface);width:100%;max-width:520px;max-height:82vh;overflow:auto;border-radius:16px;padding:16px}
   .mdl h3{margin:0 0 8px;font-size:15px}
   .mdl .x{position:absolute;top:10px;right:14px;font-size:22px;color:var(--ink2);cursor:pointer;background:none;border:none}
+  /* 日別KPI推移：直近2週ぶんの高さに収め、下スクロールで過去。見出しは上に固定 */
+  .daywrap{max-height:430px;overflow:auto}
+  .daywrap thead th{position:sticky;top:0;background:var(--surface);z-index:2}
+  .daywrap thead th:first-child{z-index:3}
+  .kmat tr.we td{color:var(--accent)}
 </style>
 </head>
 <body>
@@ -662,9 +667,19 @@ function renderDetail(){
       最新データ 売上:<b style="color:var(--ink)">${DATA._salesMax}</b>／来店:<b style="color:var(--ink)">${DATA._visitMax}</b>　更新:${(DATA.generated_at||"").replace("T"," ").slice(5,16)}
     </div>
     <div style="margin:2px 0 8px"><a href="index.html?g=${GROUP}" class="chip" style="text-decoration:none">◀ 一覧に戻る</a></div>
+    <div class="grid" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+      <div class="card"><div class="k">今月の売上 <span class="sub" id="dtop-cur-note" style="font-weight:500"></span></div><div class="val" id="dtop-cur">—</div><div class="knote">税抜（月初〜最新日）</div></div>
+      <div class="card"><div class="k">着地見込み <span class="sub" style="font-weight:500">当月</span></div><div class="val" id="dtop-land">—</div><div class="knote">当月実績÷経過日数×暦日数</div></div>
+      <div class="card"><div class="k">前日の売上 <span class="sub" id="dtop-prev-note" style="font-weight:500"></span></div><div class="val" id="dtop-prev">—</div><div class="knote">税抜（最新データ日）</div></div>
+    </div>
     <div class="panel">
       <h2>KPIまとめ <span class="sub" style="font-weight:500">（前日／今週／今月）</span></h2>
       <div class="tblwrap"><table class="kmat" id="kpi2"></table></div>
+    </div>
+    <div class="panel">
+      <h2>日別KPI推移 <span class="sub" style="font-weight:500">（直近2週間／下スクロールで過去）</span></h2>
+      <p class="note">縦＝日付（<b>青字＝土日祝</b>）、横＝KPI。集計期間の設定に関わらず日次の実績を表示します。</p>
+      <div class="tblwrap daywrap"><table class="kmat" id="daykpi"></table></div>
     </div>
     <div class="panel">
       <h2>KPI（<span id="kpi-range"></span>）</h2>
@@ -707,7 +722,7 @@ function renderDetail(){
     </div>
     <div id="mdl-root"></div>
     <div class="foot">この店舗（<b>${esc(nm)}</b>）だけの数字です。◀一覧に戻るで全店ビューへ。<br>
-      <b>${ownOf(state.detail)==="直営"?"直営":brandOf(state.detail)}平均※</b>＝${ownOf(state.detail)==="直営"?"直営店":brandOf(state.detail)+"（直営含む）"}のうち<b>※デジテール（入店計測）導入済み店舗のみ</b>の平均です。差分は平均より上＝緑・下＝赤で表示（差が大きいほど濃色）。</div>`;
+      KPI比較は選択期間で、<b>同ブランド上位5平均</b>（${ownOf(state.detail)==="直営"?"直営店":brandOf(state.detail)}の税抜売上トップ5）／<b>全店平均</b>（ブランド不問）／<b>FC上位3平均</b>（直営除く税抜売上トップ3）と並べています。差分は<b>同ブランド上位5平均</b>との差で、上＝緑・下＝赤（差が大きいほど濃色）。<b>いずれも下北沢を除外</b>し、来店客数・購入率は<b>デジテール（入店計測）導入店のみ</b>の平均です。</div>`;
   wireCommon();
   draw();
 }
@@ -1854,7 +1869,7 @@ function mdLabel(f,t){ const g=s=>`${+s.slice(5,7)}/${+s.slice(8,10)}`; return f
 
 function draw(){ drawSlicer(); drawPeriod(); refresh(); }
 // 選択・期間の変更でスライサー本体以外を描き直す（チェックのたびにリストを作り直さない）
-function refresh(){ drawKpi2(); drawStoreKpi(); drawTrend2();
+function refresh(){ if(state.detail){drawDetailExtras(); drawDayKpi();} drawKpi2(); drawStoreKpi(); drawTrend2();
   const D=heatData();                                    // ⑥⑦で同じ集計・同じ列順を使う
   const cats=Object.keys(D.catTot).sort((a,b)=>D.catTot[b].a-D.catTot[a].a).slice(0,10);  // 売上降順・共通
   drawHeat("heatQ","q",D,cats); drawHeat("heatA","a",D,cats);
@@ -1962,21 +1977,71 @@ function drawPeriod(){
 }
 
 // 店舗詳細のKPI（対象期間）：実績／同ブランド平均※（デジテール導入店）／差分（緑=上・赤=下）
+// 店舗ページ最上部の3カード（今月の売上／着地見込み／前日の売上）※すべて税抜
+function drawDetailExtras(){
+  const id=state.detail; if(id==null)return;
+  const el=document.getElementById("dtop-cur"); if(!el)return;
+  const sd=DATA._salesMax||DATA._max, ym=sd.slice(0,7);
+  const cur=M("ex").calc(sumRows(rowsIn(ym+"-01",sd,id)));
+  const lv=landingMonth();                                  // 詳細ページは state.sel=当該店のみ＝この店の着地
+  const prev=M("ex").calc(sumRows(rowsIn(sd,sd,id)));
+  el.textContent=YEN(cur||0)+"円";
+  const l=document.getElementById("dtop-land"); if(l)l.textContent=YEN(lv||0)+"円";
+  const pv=document.getElementById("dtop-prev"); if(pv)pv.textContent=YEN(prev||0)+"円";
+  const cn=document.getElementById("dtop-cur-note"); if(cn)cn.textContent=`${+ym.slice(5,7)}/1〜${+sd.slice(5,7)}/${+sd.slice(8,10)}`;
+  const pn=document.getElementById("dtop-prev-note"); if(pn)pn.textContent=`${+sd.slice(5,7)}/${+sd.slice(8,10)}`;
+}
+// 日別KPI推移（縦=日付・最新が上／横=KPI）。直近2週ぶんの高さに収め、下スクロールで過去を表示。
+const WK=["日","月","火","水","木","金","土"];
+function drawDayKpi(){
+  const el=document.getElementById("daykpi"); if(!el)return;
+  const id=state.detail; if(id==null)return;
+  const sd=DATA._salesMax||DATA._max, byDate=new Map();
+  for(const r of DATA.daily){ if(r.s!==id)continue; if(r.d>sd)continue; let a=byDate.get(r.d); if(!a){a=[];byDate.set(r.d,a);} a.push(r); }
+  const dates=[...byDate.keys()].sort().reverse();
+  let h=`<thead><tr><th>日付</th>${KPI2_COLS.map(k=>`<th>${kpiLabel(k)}</th>`).join("")}</tr></thead><tbody>`;
+  if(!dates.length){ el.innerHTML=h+`<tr><td colspan="${KPI2_COLS.length+1}" class="sub">データがありません</td></tr></tbody>`; return; }
+  for(const d of dates){ const p=sumRows(byDate.get(d)); const we=isWeekendOrHoliday(d);
+    const wk=WK[new Date(d+"T00:00:00Z").getUTCDay()];
+    h+=`<tr${we?' class="we"':''}><td>${+d.slice(5,7)}/${+d.slice(8,10)}（${wk}）</td>`+
+       KPI2_COLS.map(k=>{const v=M(k).calc(p);return `<td>${M(k).fmt(v==null?0:v)}</td>`;}).join("")+`</tr>`; }
+  el.innerHTML=h+`</tbody>`;
+}
+// 選択期間・下北沢除外での税抜売上トップN店（比較ベンチマーク用）
+function topStoresBy(ids,from,to,n){
+  return ids.map(id=>({id,ex:M("ex").calc(sumRows(rowsIn(from,to,id)))||0}))
+    .filter(x=>x.ex>0).sort((a,b)=>b.ex-a.ex).slice(0,n).map(x=>x.id);
+}
+// 店舗詳細のKPI（対象期間）：自店実績と、同ブランド上位5平均／全店平均／FC上位3平均を並べて比較
 function drawStoreKpiDetail(el){
   const id=state.detail, s=storeMeta(id), p=sumRows(rowsIn(state.from,state.to,id));
-  const ids=peerIds(id);
-  const blabel=(ownOf(id)==="直営"?"直営":brandOf(id))+"平均※";
-  const rl=document.getElementById("kpi-range"); if(rl)rl.textContent=mdLabel(state.from,state.to);   // タイトル「KPI（m/d〜m/d）」
+  const own=ownOf(id), br=brandOf(id), from=state.from, to=state.to;
+  const notShimo=x=>((x.name||"").indexOf("下北沢")<0);
+  // 同ブランド（直営店→直営／FC店→同ブランド）・全店・FC のベンチマーク集合（いずれも下北沢除外）
+  const brandMembers=usableStores().filter(x=>notShimo(x)&&(own==="直営"?ownOf(x.id)==="直営":brandOf(x.id)===br)).map(x=>x.id);
+  const allIds=usableStores().filter(x=>notShimo(x)).map(x=>x.id);
+  const fcIds=usableStores().filter(x=>notShimo(x)&&ownOf(x.id)!=="直営").map(x=>x.id);
+  const brTop5=topStoresBy(brandMembers,from,to,5);
+  const fcTop3=topStoresBy(fcIds,from,to,3);
+  const brandLabel=(own==="直営"?"直営":br);
+  const benches=[
+    {label:brandLabel+" 上位5平均※", ids:brTop5},
+    {label:"全店 平均",             ids:allIds},
+    {label:"FC上位3平均（直営除く）",  ids:fcTop3},
+  ];
+  const rl=document.getElementById("kpi-range"); if(rl)rl.textContent=mdLabel(from,to);   // タイトル「KPI（m/d〜m/d）」
   let h=`<thead><tr><th></th>${KPI2_COLS.map(k=>`<th>${kpiLabel(k)}</th>`).join("")}</tr></thead><tbody>`;
-  // 実績
-  h+=`<tr><td>${esc((s&&s.name)||String(id))}</td>`+
+  // 自店（実績）
+  h+=`<tr class="prow"><td>${esc((s&&s.name)||String(id))}</td>`+
      KPI2_COLS.map(k=>{const v=M(k).calc(p);return `<td>${M(k).fmt(v==null?0:v)}</td>`;}).join("")+`</tr>`;
-  // 同ブランド平均（デジテール導入店のみ・同一期間）
-  h+=`<tr class="prow"><td>${esc(blabel)}</td>`+
-     KPI2_COLS.map(k=>{const av=peerAvg(k,state.from,state.to,ids);return `<td>${M(k).fmt(av==null?0:av)}</td>`;}).join("")+`</tr>`;
-  // 差分（実績−平均）：上回り緑・下回り赤、差が大きいほど濃色
-  h+=`<tr><td>差分</td>`+KPI2_COLS.map(k=>{
-      const cur=M(k).calc(p), av=peerAvg(k,state.from,state.to,ids);
+  // ベンチマーク各行
+  for(const b of benches){
+    h+=`<tr><td class="peer">${esc(b.label)}</td>`+
+       KPI2_COLS.map(k=>{const av=peerAvg(k,from,to,b.ids);return `<td class="peer">${M(k).fmt(av==null?0:av)}</td>`;}).join("")+`</tr>`;
+  }
+  // 差分（自店 − 同ブランド上位5平均）：上回り緑・下回り赤、差が大きいほど濃色
+  h+=`<tr><td>差分（対 ${esc(brandLabel)}上位5）</td>`+KPI2_COLS.map(k=>{
+      const cur=M(k).calc(p), av=peerAvg(k,from,to,brTop5);
       const diff=(cur!=null&&av!=null)?cur-av:null;
       const dt=diff==null?M(k).fmt(0):(diff>=0?"+":"−")+M(k).fmt(Math.abs(diff));
       return `<td style="${diffColor(cur,av)}">${dt}</td>`;}).join("")+`</tr>`;
