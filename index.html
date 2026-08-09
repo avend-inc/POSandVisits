@@ -2124,11 +2124,67 @@ async function aiWeeklyInsight(){
     try{ localStorage.setItem(key,html); }catch(_){}
     out.innerHTML=html;
   }catch(e){
-    out.innerHTML=`<span class="sub">AIのまとめを取得できませんでした（${esc((e&&e.message)||String(e))}）</span> `+
-      `<button class="chip" id="ai-retry" style="margin-left:6px">再試行</button>`;
+    // AIに繋がらないときは、同じデータから自動集計でまとめを出す（中身が空にならないように）。
+    // AI版ではないことが分かるよう明記し、原因も併記する。
+    const why=await askDiagnose((e&&e.message)||String(e));
+    const auto=autoInsight();
+    out.innerHTML=(auto?`${esc(auto).replace(/\n+/g,"<br>")}<div class="sub" style="margin-top:8px;font-size:11px">※ 自動集計による要約です（AI接続の復旧後はAIのまとめに切り替わります）。</div>`
+                       :`<span class="sub">まとめを作成できませんでした。</span>`)+
+      `<div class="sub" style="margin-top:6px;font-size:11px">AI接続エラー：${esc(why)} <button class="chip" id="ai-retry" style="margin-left:4px;padding:3px 8px">再試行</button></div>`;
     const rb=document.getElementById("ai-retry");
-    if(rb)rb.onclick=()=>{ out.textContent="⏳ 分析中…"; aiWeeklyInsight(); };
+    if(rb)rb.onclick=()=>{ out.textContent="⏳ 分析中…"; try{localStorage.removeItem(key);}catch(_){} aiWeeklyInsight(); };
   }
+}
+// AI接続の失敗原因を切り分ける：同じプロジェクトのREST APIは応答するのに
+// Edge Function だけ応答しない＝関数が未デプロイ（またはCORS設定の問題）と判定できる。
+async function askDiagnose(baseMsg){
+  if(!SUPA.url)return baseMsg;
+  const probe=async u=>{ try{ await fetch(u,{method:"POST",mode:"no-cors",body:"{}"}); return true; }catch(_){ return false; } };
+  try{
+    const restOk=await probe(SUPA.url+"/rest/v1/");
+    const fnOk=await probe(SUPA.url+"/functions/v1/ask");
+    if(restOk&&!fnOk)return "Edge Function『ask』に接続できません（サーバ側の設置が必要です）";
+    if(restOk&&fnOk)return baseMsg+"（関数は応答していますがブラウザから読めません＝CORS設定の可能性）";
+    return baseMsg+"（ネットワークに接続できません）";
+  }catch(_){ return baseMsg; }
+}
+// AIが使えないときの自動まとめ（同じデータをルールで要約する。数字は実データから計算）
+function autoInsight(){
+  const id=state.detail; if(id==null)return "";
+  const sd=DATA._salesMax||DATA._max, f=addDays(sd,-13), t=sd;
+  const own=ownOf(id), b3=rptBrand3(id);
+  const notShimo=x=>((x.name||"").indexOf("下北沢")<0);
+  const members=usableStores().filter(x=>notShimo(x)&&(own==="直営"?ownOf(x.id)==="直営":(rptBrand3(x.id)===b3&&ownOf(x.id)!=="直営"))).map(x=>x.id);
+  const top3=topStoresBy(members,f,t,3);
+  const p=sumRows(rowsIn(f,t,id));
+  const out=[];
+  // ① 上位3店平均との差が大きいKPI（弱み・強みを1つずつ）
+  const gaps=KPI2_COLS.map(k=>{const cur=M(k).calc(p),av=peerAvg(k,f,t,top3);
+    return (cur==null||av==null||!av)?null:{k,cur,av,rel:(cur-av)/Math.abs(av)*100};}).filter(Boolean);
+  const weak=gaps.slice().sort((a,b)=>a.rel-b.rel)[0], strong=gaps.slice().sort((a,b)=>b.rel-a.rel)[0];
+  const cmpName=(own==="直営"?"直営":b3)+"上位3店";
+  if(weak&&weak.rel<-3)out.push(`${cmpName}の平均と比べて${kpiLabel(weak.k)}が${Math.abs(Math.round(weak.rel))}%低く（自店${M(weak.k).fmt(weak.cur)}／平均${M(weak.k).fmt(weak.av)}）、ここが直近2週間で最も差がついている項目です。`);
+  if(strong&&strong.rel>3)out.push(`一方で${kpiLabel(strong.k)}は平均を${Math.round(strong.rel)}%上回っており（自店${M(strong.k).fmt(strong.cur)}）、この強みは維持したい点です。`);
+  // ② 週次トレンド（直近3週の売上の向き）
+  const mon0=mondayOf(sd), wk=[];
+  for(let i=2;i>=0;i--){const wf=addDays(mon0,-7*i);wk.push(M("ex").calc(sumRows(rowsIn(wf,addDays(wf,6),id)))||0);}
+  if(wk[0]>0){ const ch=(wk[2]-wk[0])/wk[0]*100;
+    out.push(Math.abs(ch)<5?`売上は直近3週間ほぼ横ばいで推移しています。`
+      :`売上は直近3週間で${ch>0?"増加":"減少"}傾向にあります（${ch>0?"+":""}${Math.round(ch)}%）。`); }
+  // ③ ブランド全体と比べて構成比の差が大きいマス
+  const selfD=heatData(undefined,f,t);
+  const bIds=new Set(usableStores().filter(x=>rptBrand3(x.id)===b3).map(x=>x.id));
+  const brD=heatData(bIds,f,t);
+  if(selfD.gQ&&brD.gQ){
+    let best=null;
+    for(const g in brD.cells)for(const c in brD.cells[g]){
+      const bs=(brD.cells[g][c].q||0)/brD.gQ*100;
+      const ss=((selfD.cells[g]&&selfD.cells[g][c]&&selfD.cells[g][c].q)||0)/selfD.gQ*100;
+      if(bs>=5&&(!best||bs-ss>best.d))best={g,c,d:bs-ss,bs,ss};
+    }
+    if(best&&best.d>=3)out.push(`販売構成では「ランク${best.g}×${best.c}」がブランド全体${F1(best.bs)}%に対し自店${F1(best.ss)}%と低く、品揃えの見直し余地があります。`);
+  }
+  return out.slice(0,4).join("");
 }
 // Edge Function "ask"（分析AI）を呼ぶ。まず直接 fetch し、だめなら supabase-js 経由で再試行する。
 // 直接 fetch にすることで、失敗時に HTTP ステータスと本文が読めて原因が分かる。
