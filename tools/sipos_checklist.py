@@ -32,9 +32,13 @@ def main():
     for h in sorted(groups):
         cs=sorted(groups[h], key=lambda x:x["id"])
         rep=cs[0]
-        ok = "sipos.services" in (h or "")
+        # 有効なレジURL: SIPOS(EZレジ) / デジテールのレジ / スマレジ。いずれでもない・空だけを不正扱い。
+        kind = ("SIPOS" if "sipos.services" in (h or "") else
+                "デジテールのレジ" if "digitail" in (h or "") or "digitel" in (h or "") else
+                "スマレジ" if "smaregi" in (h or "") else None)
+        ok = kind is not None
         if not ok: bad_url+=1
-        flag = "" if ok else "  ⚠️URL不正(sipos.servicesでない→要修正)"
+        flag = f"  [{kind}]" if ok else "  ⚠️URL空/不明(要確認)"
         print(f"\n● テナント: {h or '(URL空)'}{flag}")
         for c in cs:
             star="★" if c["id"]==rep["id"] else "  "
