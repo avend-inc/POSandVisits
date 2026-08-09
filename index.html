@@ -341,11 +341,43 @@ async function authBoot(url,anon){
   try{const {data:u}=await SB.from("app_users").select("role").eq("email",ME.email).maybeSingle();role=u&&u.role||null;}catch(e){}
   ME.role=role;
   if(!ME.role){showDenied(ME.email);return;}
+  // 加盟店（FC）判定：app_user_stores に割り当てがあれば「加盟店モード」＝自店バンドルだけ読む。
+  // 割り当てが無い＝本部（従来どおり全店 data.json）。RLS(sql/019)で data.json は本部しか読めない。
+  let frStores=[];
+  try{ const {data:us}=await SB.from("app_user_stores").select("store_id");
+       frStores=[...new Set((us||[]).map(r=>+r.store_id))]; }catch(e){}
+  if(frStores.length){ await franchiseeBoot(frStores); return; }
   screen('<div class="sub" style="padding:40px 0">データを読み込み中…</div>');
   const {data,error}=await SB.storage.from("dashboard-data").download("data.json");
   if(error)throw new Error("データを取得できませんでした（"+error.message+"）");
   DATA=JSON.parse(await data.text());
   prep();render();
+}
+// 加盟店モード：割り当て店舗の store-<id>.json（自店の明細＋事前計算した比較値）だけ読む。
+async function franchiseeBoot(ids){
+  screen('<div class="sub" style="padding:40px 0">データを読み込み中…</div>');
+  const bench={}, stores=[], daily=[], cat=[], catp=[], bundles=[]; let bundleNames={},catSeason={},gradeBands=[],gen="";
+  for(const sid of ids){
+    try{
+      const {data,error}=await SB.storage.from("dashboard-data").download("store-"+sid+".json");
+      if(error) continue;
+      const b=JSON.parse(await data.text());
+      bench[sid]=b.bench||{};
+      (b.stores||[]).forEach(s=>stores.push(s));
+      daily.push(...(b.daily||[])); cat.push(...(b.cat||[])); catp.push(...(b.catp||[]));
+      bundles.push(...(b.bundles||[])); Object.assign(bundleNames,b.bundleNames||{});
+      if(b.catSeason)catSeason=b.catSeason; if(b.gradeBands)gradeBands=b.gradeBands; if(b.generated_at)gen=b.generated_at;
+    }catch(e){}
+  }
+  if(!stores.length){ showError(new Error("割り当てられた店舗のデータが見つかりませんでした。管理者にお問い合わせください。")); return; }
+  window.FRANCHISEE=true; window.FR_STORES=stores.map(s=>s.id); window.FR_BENCH=bench;
+  DATA={generated_at:gen,stores,daily,cat,catp,bundles,bundleNames,catSeason,gradeBands};
+  prep();
+  state.detail=(DETAIL_ID&&window.FR_STORES.includes(DETAIL_ID))?DETAIL_ID:window.FR_STORES[0];
+  state.sel=new Set([state.detail]);
+  const tm=(bench[state.detail]||{}).thismonth;                 // 初期表示は今月（焼込みレンジ）
+  if(tm){state.from=tm.from;state.to=tm.to;state.kind="thismonth";}
+  render();
 }
 function showLogin(){
   screen(`<div class="gate">
@@ -593,7 +625,11 @@ function wireCommon(){
   const on=(id,ev,fn)=>{const el=document.getElementById(id);if(el)el[ev]=fn;};
   on("from","onchange",e=>{state.from=clampLo(e.target.value||DATA._min);if(state.from>state.to)state.to=state.from;state.kind="custom";syncDateInputs();savePeriod();draw();});
   on("to","onchange",e=>{state.to=clampHi(e.target.value||DATA._max);if(state.to<state.from)state.from=state.to;state.kind="custom";syncDateInputs();savePeriod();draw();});
-  document.querySelectorAll(".pchip").forEach(b=>b.onclick=()=>{const[f,t]=presetRange(b.dataset.preset);state.from=f;state.to=t;state.kind=b.dataset.preset;syncDateInputs();savePeriod();draw();});
+  document.querySelectorAll(".pchip").forEach(b=>b.onclick=()=>{
+    const pk=b.dataset.preset; let f,t;
+    const fb=window.FRANCHISEE&&window.FR_BENCH&&(window.FR_BENCH[state.detail]||{})[pk];   // 加盟店は焼込みレンジ
+    if(fb){f=fb.from;t=fb.to;}else{[f,t]=presetRange(pk);}
+    state.from=f;state.to=t;state.kind=pk;syncDateInputs();savePeriod();draw();});
   document.querySelectorAll(".gchip[data-grain]").forEach(b=>b.onclick=()=>{state.grain=b.dataset.grain;state.trendEnd=trendLatestAnchor(state.grain);drawTrend2();});
   on("tr-prev","onclick",()=>{trendShift(-1);drawTrend2();});
   on("tr-next","onclick",()=>{trendShift(1);drawTrend2();});
@@ -710,19 +746,24 @@ function renderMain(){
 // 店舗専用ページ（一覧の店名タップで ?store=<id> に遷移して表示。①店舗選択は出さない）
 function renderDetail(){
   syncAdminTab(); syncGroupTab();
+  const FRAN=!!window.FRANCHISEE;
+  if(FRAN){const tb=document.querySelector(".tabbar"); if(tb)tb.style.display="none";}   // 加盟店は他タブに行けない
   const s=storeMeta(state.detail); const nm=(s&&s.name)||("店舗"+state.detail);
   document.getElementById("app").classList.add("detail");
+  const navrow=(FRAN && (window.FR_STORES||[]).length>1)
+    ? `<div style="margin:2px 0 8px">店舗：<select id="fr-store">${window.FR_STORES.map(id=>`<option value="${id}" ${id===state.detail?"selected":""}>${esc((storeMeta(id)||{}).name||id)}</option>`).join("")}</select></div>`
+    : (FRAN ? "" : `<div style="margin:2px 0 8px"><a href="index.html?g=${GROUP}" class="chip" style="text-decoration:none">◀ 一覧に戻る</a></div>`);
   document.getElementById("app").innerHTML=`
     <header>
       <h1>${esc(nm)} <span class="gbadge">店舗別</span></h1>
-      <button class="themebtn" id="storereportbtn" style="margin-left:auto;width:auto;padding:0 12px;gap:5px">📊 レポート</button>
-      <button class="themebtn" id="themebtn" style="margin-left:6px">◐</button>
+      ${FRAN?'':'<button class="themebtn" id="storereportbtn" style="margin-left:auto;width:auto;padding:0 12px;gap:5px">📊 レポート</button>'}
+      <button class="themebtn" id="themebtn" style="margin-left:${FRAN?'auto':'6px'}">◐</button>
       ${SB?'<button class="themebtn" id="logoutbtn" style="margin-left:6px">ログアウト</button>':''}
     </header>
     <div class="sub" style="margin:2px 0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
       最新 売上<b style="color:var(--ink)">${mdShort(DATA._salesMax)}</b>・来店<b style="color:var(--ink)">${mdShort(DATA._visitMax)}</b>｜更新 ${genShort(DATA.generated_at)}
     </div>
-    <div style="margin:2px 0 8px"><a href="index.html?g=${GROUP}" class="chip" style="text-decoration:none">◀ 一覧に戻る</a></div>
+    ${navrow}
     <div class="dtop">
       <div class="card"><div class="k">今月の売上</div><div class="val" id="dtop-cur">—</div><div class="knote">税抜 <span id="dtop-cur-note"></span></div></div>
       <div class="card land"><div class="k">着地見込み</div><div class="val" id="dtop-land">—</div><div class="knote">当月の月末予測</div></div>
@@ -763,9 +804,9 @@ function renderDetail(){
         <button class="chip pchip" data-preset="prevday">前日</button>
       </div>
       <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:8px">
-        <input type="date" id="from" min="${DATA._min}" max="${DATA._max}" value="${state.from}">
+        ${FRAN?'':`<input type="date" id="from" min="${DATA._min}" max="${DATA._max}" value="${state.from}">
         <span class="sub">〜</span>
-        <input type="date" id="to" min="${DATA._min}" max="${DATA._max}" value="${state.to}">
+        <input type="date" id="to" min="${DATA._min}" max="${DATA._max}" value="${state.to}">`}
         <span class="sub" id="periodlabel"></span>
       </div>
       <div class="tblwrap"><table class="kmat" id="kpi2"></table></div>
@@ -786,18 +827,23 @@ function renderDetail(){
       </div>
       <p class="note">緑＝上位5。マスをタップで内訳</p>
       <div class="tblwrap"><table class="heat" id="heatX"></table></div>
-      <h2 style="margin-top:16px">同ブランド全体 <span class="sub" style="font-weight:500">（${esc(rptBrand3(state.detail))}・比率のみ）</span></h2>
-      <div class="tblwrap" style="margin-top:6px"><table class="heat" id="heatB"></table></div>
+      ${FRAN?'':`<h2 style="margin-top:16px">同ブランド全体 <span class="sub" style="font-weight:500">（${esc(rptBrand3(state.detail))}・比率のみ）</span></h2>
+      <div class="tblwrap" style="margin-top:6px"><table class="heat" id="heatB"></table></div>`}
     </div>
-    <div class="panel">
+    ${FRAN?'':`<div class="panel">
       <h2>AIのまとめ <span class="sub" style="font-weight:500">（直近2週間・毎週月曜更新）</span></h2>
       <div id="ai-out" style="margin-top:6px;padding:10px 12px;border-left:3px solid var(--accent);background:var(--surface2);border-radius:0 10px 10px 0;font-size:12.5px;line-height:1.9">⏳ 分析を読み込み中…</div>
-    </div>
+    </div>`}
     <div id="mdl-root"></div>
-    <div class="foot">差分の色＝上位3店平均との差（上:緑／下:赤）。来店客数・購入率はデジテール導入店のみ。</div>`;
+    <div class="foot">差分の色＝上位3店平均との差（上:緑／下:赤）。来店客数・購入率はデジテール導入店のみ。${FRAN?'比較は各店の生データではなく集計値のみを表示します。':''}</div>`;
   wireCommon();
+  if(FRAN){const sw=document.getElementById("fr-store"); if(sw)sw.onchange=()=>{
+    const nid=+sw.value; state.detail=nid; state.sel=new Set([nid]);
+    const tm=(window.FR_BENCH[nid]||{}).thismonth; if(tm){state.from=tm.from;state.to=tm.to;state.kind="thismonth";}
+    renderDetail();
+  };}
   draw();
-  aiWeeklyInsight();   // AIのまとめは非同期で読み込む（週1回だけAPIを呼び、以降はキャッシュ）
+  if(!FRAN)aiWeeklyInsight();   // AIのまとめは本部モードのみ（加盟店は集計値ベースで表示、AIは今後）
 }
 
 // ============================================================
@@ -2052,8 +2098,11 @@ function drawKpi2Detail(el,ctx){
   const own=ownOf(id), b3=rptBrand3(id), short=brandShort(id);
   const notShimo=x=>((x.name||"").indexOf("下北沢")<0);
   // 比較対象：FC店→同ブランドのFC店のみ（直営店は除く）／直営店→直営店どうし。いずれも下北沢除外
-  const members=usableStores().filter(x=>notShimo(x)&&(own==="直営"?ownOf(x.id)==="直営":(rptBrand3(x.id)===b3&&ownOf(x.id)!=="直営"))).map(x=>x.id);
-  const top3=topStoresBy(members,state.from,state.to,3);
+  // 加盟店モードは他店データを持たないため、事前計算した上位3店平均(bench)を使う（数式は同じ＝一致）。
+  const baked=window.FRANCHISEE&&window.FR_BENCH&&(window.FR_BENCH[id]||{})[state.kind];
+  const members=baked?[]:usableStores().filter(x=>notShimo(x)&&(own==="直営"?ownOf(x.id)==="直営":(rptBrand3(x.id)===b3&&ownOf(x.id)!=="直営"))).map(x=>x.id);
+  const top3=baked?[]:topStoresBy(members,state.from,state.to,3);
+  const avOf=k=>baked?baked.top3[k]:peerAvg(k,state.from,state.to,top3);
   const rl=document.getElementById("kpi-range"); if(rl)rl.textContent="期間 "+mdLabel(state.from,state.to);
   let h=`<thead><tr><th></th>
     <th class="colhdr">自店<small>${mdLabel(state.from,state.to)}</small></th>
@@ -2066,7 +2115,7 @@ function drawKpi2Detail(el,ctx){
   h+=`<tr class="land"><td>着地見込み <span class="sub" style="font-weight:500;font-size:9.5px">当月のみ</span></td>`+
      `<td>${showLand?YEN(lv||0)+"円":"対象外"}</td><td>—</td><td>—</td><td>対象外</td><td>対象外</td></tr>`;
   for(const k of KPI2_COLS){const m=M(k);
-    const cur=cellVal(selCol,k), av=peerAvg(k,state.from,state.to,top3);
+    const cur=cellVal(selCol,k), av=avOf(k);
     const diff=(cur!=null&&av!=null)?cur-av:null;
     const wd=cellVal(wdCol,k), we=cellVal(weCol,k);
     h+=`<tr><td>${kpiLabel(k)}</td>
