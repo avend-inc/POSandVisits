@@ -43,18 +43,33 @@ def main():
     print("対象:", json.dumps(info,ensure_ascii=False))
     # カレンダー月ごと集計
     rows=run(base+"select mo, count(*) 店月数, round(avg(net)) avg_net, round(sum(net)) sum_net from elig group by mo order by mo")
-    by={r["mo"]:r for r in rows}
-    janA=by.get(1,{}).get("avg_net"); janS=by.get(1,{}).get("sum_net")
+    def num(x):
+        try: return float(x)
+        except (TypeError,ValueError): return 0.0
+    by={int(r["mo"]):r for r in rows}
+    janA=num(by.get(1,{}).get("avg_net")); janS=num(by.get(1,{}).get("sum_net"))
     names=["","1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"]
     print(f"\n{'月':<4}{'店月数':>6}{'平均月商(税込)':>16}{'①平均比(1月=100)':>18}{'合計(税込)':>16}{'②合計比(1月=100)':>18}")
     for mo in range(1,13):
         r=by.get(mo)
         if not r:
             print(f"{names[mo]:<4}{'-':>6}{'-':>16}{'-':>18}{'-':>16}{'-':>18}"); continue
-        a=r["avg_net"]; s=r["sum_net"]; n=r["店月数"]
+        a=num(r["avg_net"]); s=num(r["sum_net"]); n=int(r["店月数"])
         ia=f"{round(100*a/janA)}%" if janA else "-"
         isu=f"{round(100*s/janS)}%" if janS else "-"
-        print(f"{names[mo]:<4}{n:>6}{a:>16,}{ia:>18}{s:>16,}{isu:>18}")
+        print(f"{names[mo]:<4}{n:>6}{int(a):>16,}{ia:>18}{int(s):>16,}{isu:>18}")
+    # 参考：カレンダー月×年 の1店平均月商（成長影響の切り分け用）
+    print("\n[参考] カレンダー月×年 の1店平均月商(税込)：")
+    yr=run(base+"select extract(year from ym)::int y, extract(month from ym)::int mo, count(*) n, round(avg(net)) a from elig group by 1,2 order by 2,1")
+    piv={}
+    for r in yr: piv.setdefault(int(r["mo"]),{})[int(r["y"])]=(int(num(r["a"])),int(r["n"]))
+    print(f"{'月':<4}{'2025(店数)':>18}{'2026(店数)':>18}")
+    for mo in range(1,13):
+        d=piv.get(mo,{})
+        def cell(y):
+            if y in d: return f"{d[y][0]:,}({d[y][1]})"
+            return "-"
+        print(f"{names[mo]:<4}{cell(2025):>18}{cell(2026):>18}")
     # 検算用：山形 直近の店舗×月
     print("\n[検算] NOTIME山形店 月次純売上(税込):")
     v=run("""with nt as (select id from public.stores where name='NOTIME山形店'),
