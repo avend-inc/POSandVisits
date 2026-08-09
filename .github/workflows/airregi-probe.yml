@@ -18,7 +18,7 @@ on:
         required: false
         default: "debug-dl"
         type: choice
-        options: [debug-dl, discover, fetch, db-probe, pr-probe, pos-lag-probe, conn-probe, vault-probe, sipos-checklist, season-probe, store-trend, stores-dry, stores-apply, storefix-dry, storefix-apply, cashierfix-dry, cashierfix-apply, pos-split-probe]
+        options: [debug-dl, discover, fetch, db-probe, pr-probe, pos-lag-probe, conn-probe, vault-probe, sipos-checklist, season-probe, store-trend, cat-probe, stores-dry, stores-apply, storefix-dry, storefix-apply, cashierfix-dry, cashierfix-apply, pos-split-probe]
       date_from:
         description: "fetchモードの開始日 (YYYY-MM-DD)"
         required: false
@@ -60,7 +60,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       - name: ブラウザ(Chromium)を用意
-        if: ${{ inputs.mode != 'db-probe' && inputs.mode != 'pr-probe' && inputs.mode != 'pos-lag-probe' && inputs.mode != 'conn-probe' && inputs.mode != 'vault-probe' && inputs.mode != 'sipos-checklist' && inputs.mode != 'season-probe' && inputs.mode != 'store-trend' && inputs.mode != 'storefix-dry' && inputs.mode != 'storefix-apply' && inputs.mode != 'cashierfix-dry' && inputs.mode != 'cashierfix-apply' }}
+        if: ${{ inputs.mode != 'db-probe' && inputs.mode != 'pr-probe' && inputs.mode != 'pos-lag-probe' && inputs.mode != 'conn-probe' && inputs.mode != 'vault-probe' && inputs.mode != 'sipos-checklist' && inputs.mode != 'season-probe' && inputs.mode != 'store-trend' && inputs.mode != 'cat-probe' && inputs.mode != 'storefix-dry' && inputs.mode != 'storefix-apply' && inputs.mode != 'cashierfix-dry' && inputs.mode != 'cashierfix-apply' }}
         run: python -m playwright install --with-deps chromium
       - name: 調査（DL導線 / 画面構造 / 実取得 / DB診断）
         run: |
@@ -80,6 +80,8 @@ jobs:
             python -m tools.season_probe
           elif [ "${{ inputs.mode }}" = "store-trend" ]; then
             python -m tools.store_trend
+          elif [ "${{ inputs.mode }}" = "cat-probe" ]; then
+            python -m tools.cat_probe
           elif [ "${{ inputs.mode }}" = "stores-dry" ]; then
             python -m tools.stores_recover
           elif [ "${{ inputs.mode }}" = "stores-apply" ]; then
