@@ -36,14 +36,16 @@ create table if not exists public.app_user_stores (
 alter table public.app_user_stores enable row level security;
 
 -- --- 判定関数（SECURITY DEFINER：ポリシーの再帰を避けて app_user_stores を参照）----
--- 本部か？＝登録済み かつ 割り当て行が「無い」ユーザー（＝全店閲覧）。
+-- 本部か？＝ admin/editor は常に本部（全店）。viewer は割り当てが「無い」ときだけ本部。
+--   （＝ viewer に店舗を割り当てると加盟店＝その店だけ。admin/editor は割当があっても全店のまま。）
 create or replace function public.is_hq() returns boolean
   language sql stable security definer set search_path = public as $$
-  select public.current_app_role() is not null
-     and not exists (
-       select 1 from public.app_user_stores
-       where email = public.current_app_email()
-     )
+  select public.current_app_role() in ('admin','editor')
+      or (public.current_app_role() is not null
+          and not exists (
+            select 1 from public.app_user_stores
+            where email = public.current_app_email()
+          ))
 $$;
 
 -- この店舗を閲覧できるか？（本部は全店 true。加盟店は割り当てられた店だけ true）

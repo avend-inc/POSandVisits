@@ -403,6 +403,24 @@ function renderFranchiseeHome(){
   if(SB){const lo=document.getElementById("logoutbtn"); if(lo)lo.onclick=doLogout;}
   app.querySelectorAll(".frcard").forEach(b=>b.onclick=()=>openFranchiseeStore(+b.dataset.sid));
 }
+// 加盟店：このお店を見られるアカウント一覧（RPC経由。自分の店だけ取得・追加・削除できる）
+async function drawFrMembers(){
+  const el=document.getElementById("frmem"); if(!el||!window.FRANCHISEE||!SB)return;
+  const sid=state.detail;
+  el.innerHTML=`<tbody><tr><td class="sub" style="padding:8px">読み込み中…</td></tr></tbody>`;
+  const {data,error}=await SB.rpc("franchise_list_members",{p_store_id:sid});
+  if(error){el.innerHTML=`<tbody><tr><td class="sub" style="padding:8px">読み込めませんでした（${esc(error.message)}）</td></tr></tbody>`;return;}
+  const rows=(data||[]).map(m=>`<tr><td>${esc(m.email)}${m.email===ME.email?' <span class="sub">(自分)</span>':''}</td>`+
+    `<td style="text-align:right">${m.email===ME.email?'':`<button class="stbtn" data-email="${esc(m.email)}">削除</button>`}</td></tr>`).join("")
+    ||`<tr><td colspan="2" class="sub" style="padding:8px">まだ他のアカウントはありません</td></tr>`;
+  el.innerHTML=`<thead><tr><th>メール</th><th></th></tr></thead><tbody>${rows}</tbody>`;
+  el.querySelectorAll("[data-email]").forEach(b=>b.onclick=async()=>{
+    if(!confirm(`${b.dataset.email} のアクセスを削除しますか？`))return;
+    const {error}=await SB.rpc("franchise_remove_member",{p_email:b.dataset.email,p_store_id:sid});
+    const mm=document.getElementById("frmem-msg"); if(mm)mm.textContent=error?("削除できませんでした："+error.message):"削除しました";
+    if(!error)drawFrMembers();
+  });
+}
 // 加盟店：指定店の店舗ページを開く（期間は今月の焼込みレンジで初期化）
 function openFranchiseeStore(id){
   state.detail=id; state.sel=new Set([id]);
@@ -865,10 +883,33 @@ function renderDetail(){
       <h2>AIのまとめ <span class="sub" style="font-weight:500">（直近2週間・毎週月曜更新）</span></h2>
       <div id="ai-out" style="margin-top:6px;padding:10px 12px;border-left:3px solid var(--accent);background:var(--surface2);border-radius:0 10px 10px 0;font-size:12.5px;line-height:1.9">⏳ 分析を読み込み中…</div>
     </div>`}
+    ${FRAN?`<div class="panel">
+      <h2>アカウント管理 <span class="sub" style="font-weight:500">（このお店を見られる人）</span></h2>
+      <p class="note">スタッフや共同オーナーの Google アカウントを追加すると、その人も<b>このお店だけ</b>を見られます（他店は見られません）。</p>
+      <div class="tblwrap"><table class="kmat" id="frmem"></table></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+        <input type="email" id="frmem-email" placeholder="メール（Googleアカウント）" style="flex:1;min-width:200px;padding:8px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--ink);font-family:inherit">
+        <button class="chip" id="frmem-add">追加</button>
+      </div>
+      <p class="note" id="frmem-msg" style="margin-top:6px"></p>
+    </div>`:''}
     <div id="mdl-root"></div>
     <div class="foot">差分の色＝上位3店平均との差（上:緑／下:赤）。来店客数・購入率はデジテール導入店のみ。${FRAN?'比較は各店の生データではなく集計値のみを表示します。':''}</div>`;
   wireCommon();
-  if(FRAN){const hb=document.getElementById("fr-home"); if(hb)hb.onclick=renderFranchiseeHome;}
+  if(FRAN){
+    const hb=document.getElementById("fr-home"); if(hb)hb.onclick=renderFranchiseeHome;
+    const addb=document.getElementById("frmem-add");
+    if(addb)addb.onclick=async()=>{
+      const inp=document.getElementById("frmem-email"), mm=document.getElementById("frmem-msg");
+      const email=(inp.value||"").trim().toLowerCase();
+      if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){if(mm)mm.textContent="正しいメールアドレスを入れてください";return;}
+      if(!SB){if(mm)mm.textContent="ログイン版でのみ利用できます";return;}
+      const {error}=await SB.rpc("franchise_add_member",{p_email:email,p_store_id:state.detail});
+      if(mm)mm.textContent=error?("追加できませんでした："+error.message):(email+" を追加しました");
+      if(!error){inp.value="";drawFrMembers();}
+    };
+    drawFrMembers();
+  }
   draw();
   if(!FRAN)aiWeeklyInsight();   // AIのまとめは本部モードのみ（加盟店は集計値ベースで表示、AIは今後）
 }
