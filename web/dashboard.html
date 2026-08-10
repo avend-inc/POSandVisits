@@ -266,6 +266,15 @@
   .kmat tr.adweek td:first-child::before{content:"└";position:absolute;left:8px;color:var(--border)}
   /* 直営／FC のセクション行 */
   .kmat .mom{display:block;font-size:9.5px;font-weight:700;margin-top:1px}
+  /* 週次KPI・月次KPI：項目が多いので横スクロールし、左端の列は固定して見出しを見失わないようにする */
+  #adtbl th:first-child, #adtbl td:first-child,
+  #admtbl th:first-child, #admtbl td:first-child{
+    position:sticky;left:0;z-index:2;background:var(--surface);
+    box-shadow:1px 0 0 var(--border)}
+  #adtbl tr.adsec td:first-child{background:var(--surface2)}
+  #adtbl tr.we td:first-child{background:var(--surface)}
+  #adtbl thead th:first-child, #admtbl thead th:first-child{z-index:3}
+  #adtbl th, #adtbl td, #admtbl th, #admtbl td{white-space:nowrap}
   .kmat tr.adsec td{background:var(--surface2);font-weight:800;font-size:11.5px;color:var(--ink2);border-top:2px solid var(--border)}
   /* 店舗を非表示にするボタン */
   .kmat .eye{border:none;background:none;cursor:pointer;font-size:12px;opacity:.35;margin-right:5px;padding:0}
@@ -864,7 +873,10 @@ function adMetrics(){ return AD_METRICS; }
 //   ・端末ごとに選択が保存されるため、連動させるとPCとスマホで列が変わってしまう
 //   ・一覧は表なので、横に伸びても全部見えたほうが比べやすい（幅が足りなければ横スクロール）
 // 元データがまだ無い指標（フォロー系）は列に出さない（「—」だけの列が並ぶため）。
-function adTableCols(){ return AD_METRICS.filter(m=>adHas(m.need)).map(m=>m.k); }
+// 全項目を出す。元データ待ちのものも「—」で並べる（列が減ると端末ごとに
+// 見え方が変わるうえ、何が出る予定なのかも分からなくなるため）。
+// 幅が足りないときは横スクロールし、いちばん左の列（店舗・期間）は固定する。
+function adTableCols(){ return AD_METRICS.map(m=>m.k); }
 // 指標の色。グラフの線と「表示する項目」のチップで同じ色を使う。
 // im（表示回数）・ck（クリック）・rc（リーチ）は項目として出さないが、
 // CTR＝ck÷im、CPC＝sp÷ck、FQ＝im÷rc の計算に使うので集計は続ける
