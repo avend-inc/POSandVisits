@@ -1,0 +1,38 @@
+# ============================================================
+#  Meta広告トークンの在り処を調べる（読み取りのみ）
+#
+#  Actions →「Meta広告トークンの点検」→ Run workflow
+#
+#  プロフアクセス数・フォロー数（follows / profile_visits）を、この
+#  リポジトリ側から取りにいけるかを判断するために使う。
+#   ・Supabaseの vault に meta/facebook 系の秘密が置かれていないか（名前だけ）
+#   ・Secrets に META_ACCESS_TOKEN があるか
+#   ・あれば、そのトークンで広告アカウントがいくつ見えるか
+#  秘密の中身は出さない。書き込みもしない。
+#  META_ACCESS_TOKEN が未登録でも、そのことが分かるだけで正常終了する。
+# ============================================================
+name: Meta広告トークンの点検
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    name: トークンを調べる
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TZ: Asia/Tokyo
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      META_API_VERSION: ${{ vars.META_API_VERSION }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install requests
+      - name: 点検を実行
+        run: python -m tools.meta_token_probe
