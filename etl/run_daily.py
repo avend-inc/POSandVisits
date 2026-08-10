@@ -609,6 +609,14 @@ def main() -> int:
     warn = [r for r in results if r.status == "failed" and _is_best_effort(r)]
     rejected = [r for r in results if r.status == "rejected_duplicate"]
 
+    # best-effort で握りつぶした失敗や「売上0」は Actions が緑のままなので気づけない。
+    # Slack に流して見えるようにする（SLACK_WEBHOOK 未設定なら何もしない）。
+    try:
+        from .notify import notify_etl_problems
+        notify_etl_problems(sb, business_date, results)
+    except Exception as _e:                      # noqa: BLE001（通知の失敗でETLは落とさない）
+        print(f"  （異常通知の処理に失敗: {type(_e).__name__}: {_e}）")
+
     if warn:
         names = ", ".join(r.name for r in warn)
         print(f"\n⚠️ 一部はスキップ/失敗しました（best-effort。他の取り込み・ダッシュボードには影響しません）: {names}")
