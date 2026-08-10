@@ -289,6 +289,23 @@
   .adhidden{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 8px;padding:8px 10px;
     border:1px dashed #b8860b;border-radius:10px;background:rgba(184,134,11,.08);font-size:11.5px}
   .adhidden .hidechip{font-size:11px;padding:3px 8px}
+  /* 押すと並べ替わる列見出し（クリエイティブ別） */
+  .kmat th.adsort{cursor:pointer;user-select:none;white-space:nowrap}
+  .kmat th.adsort:hover{color:var(--accent)}
+  .kmat th.adsort.on{color:var(--accent)}
+  /* 未紐付けキャンペーンの割り当て。スマホでは縦積みにして、はみ出させない */
+  .admaprow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 0;border-top:1px solid var(--line)}
+  .admaprow:first-child{border-top:none}
+  .admapname{flex:1 1 200px;min-width:0;font-size:12.5px}
+  .admapname b{word-break:break-all}
+  .admaprow select{max-width:200px;padding:5px 7px;border:1px solid var(--border);border-radius:8px;
+    background:var(--surface);color:var(--ink);font-family:inherit;font-size:12.5px}
+  .admaprow .admapsave{font-size:11.5px;padding:4px 10px;font-weight:700}
+  .admapmsg{font-size:11.5px;flex:1 1 100%}
+  @media(max-width:560px){
+    .admaprow select{max-width:100%;flex:1 1 100%}
+    .admaprow .admapsave{flex:0 0 auto}
+  }
   /* 有人来店の入力モーダル */
   .svtbl input{width:74px;padding:5px 7px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--ink);font-family:inherit;font-size:13px;text-align:right}
   .svtbl .ok{color:#2e9e5b;font-weight:800}
@@ -858,6 +875,7 @@ function render(){ if(VIEW==="ads")renderAds(); else if(state.detail)renderDetai
 // （取り込みの拡張前は フォロー数・プロフアクセス数 がまだ無いため）。
 const AD_METRICS=[
   {k:"sp",  name:"広告費",         fmt:v=>YEN(Math.round(v))+"円", sum:r=>r.sp},
+  {k:"sr",  name:"売上比率",       fmt:v=>v==null?"—":F1(v)+"%",  calc:p=>p.ex>0?p.sp/p.ex*100:null, note:"広告費÷税抜売上。売上の何％を広告に使ったか"},
   {k:"pv",  name:"プロフアクセス数",fmt:v=>NUM(Math.round(v))+"回", sum:r=>r.pv, need:"pv", src:"profile_visits", note:"広告費÷プロフアクセス数。CPCはクリック基準なので別物"},
   {k:"ctr", name:"CTR",           fmt:v=>v==null?"—":F1(v)+"%",  calc:p=>p.im>0?p.ck/p.im*100:null},
   {k:"cpc", name:"CPC",           fmt:v=>v==null?"—":YEN(Math.round(v))+"円", calc:p=>p.pv>0?p.sp/p.pv:null, need:"pv", src:"profile_visits", note:"1プロフアクセスあたりの広告費（広告費÷プロフアクセス数）"},
@@ -886,8 +904,15 @@ function adTableCols(){ return AD_METRICS.map(m=>m.k); }
 // im（表示回数）・ck（クリック）・rc（リーチ）は項目として出さないが、
 // CTR＝ck÷im、CPC＝sp÷ck、FQ＝im÷rc の計算に使うので集計は続ける
 const AD_COLOR={sp:"#2f6fd0",fl:"#d6336c",fl:"#d6336c",pv:"#e8590c",
-  ctr:"#b8860b",cpc:"#c0392b",cpf:"#7048e8",frt:"#0ca678",cpv:"#e67700",cpm:"#495057",frq:"#845ef7"};
-const AD_DEFAULT=["sp","ctr","cpc"];
+  ctr:"#b8860b",cpc:"#c0392b",cpf:"#7048e8",frt:"#0ca678",cpv:"#e67700",cpm:"#495057",frq:"#845ef7",
+  sr:"#1098ad"};
+const AD_DEFAULT=["sp","sr","ctr","cpc"];
+// 散布図の縦軸。来店数＝集客に効いているか／税抜売上＝売上につながっているか。
+let AD_SCY=(function(){try{return localStorage.getItem("notime-adscy")||"vis";}catch(e){return "vis";}})();
+// クリエイティブ別一覧の並び順（列見出しを押すと変わる）
+let AD_CRSORT={k:"sp",desc:true};
+// 割当画面で「割当済み」を開いているか
+let AD_MAPOPEN=false;
 let AD_COLS=(function(){
   try{const s=JSON.parse(localStorage.getItem("notime-adcols")||"null");
     if(Array.isArray(s)&&s.length){const v=s.filter(k=>AD_METRICS.some(m=>m.k===k)); if(v.length)return v;}}catch(e){}
@@ -936,9 +961,36 @@ function adRows(){
 function adRowsAll(){
   return (DATA.meta||[]).filter(r=>r.d>=state.from&&r.d<=state.to&&!AD_HIDE.has(r.st||UNMAPPED));
 }
+// 店舗×日 → 税抜売上・来店数。広告費と突き合わせるために一度だけ作って使い回す。
+// 結び目は店名ではなく店舗ID（si）。店名は表記ゆれがあって当てにできない。
+let AD_SALES=null;
+function adSalesIdx(){
+  if(AD_SALES)return AD_SALES;
+  AD_SALES=new Map();
+  // 行そのものを持つ（値をコピーしない）。有人来店の合算などで後から
+  // r.v が書き換わっても、こちらが古いままにならないようにするため。
+  for(const r of (DATA.daily||[]))AD_SALES.set(r.s+"|"+r.d,r);
+  return AD_SALES;
+}
+function adZero(){ return {sp:0,im:0,rc:0,ck:0,fl:0,pv:0,ex:0,vis:0,seen:null}; }
+// 広告の1行を集計に足す。
+//   売上・来店は「店舗×日」に1つしかない値なので、同じ店の同じ日に複数の
+//   キャンペーンがあっても二重に足さないよう、足した組み合わせを覚えておく。
+//   （ここを素直に足すと、キャンペーン数だけ売上が膨らんで比率が壊れる）
+function adAdd(a,r){
+  a.sp+=r.sp||0;a.im+=r.im||0;a.rc+=r.rc||0;a.ck+=r.ck||0;a.fl+=r.fl||0;a.pv+=r.pv||0;
+  if(r.si==null)return;
+  const k=r.si+"|"+r.d;
+  if(!a.seen)a.seen=new Set();
+  if(a.seen.has(k))return;
+  a.seen.add(k);
+  const s=adSalesIdx().get(k); if(!s)return;
+  if(s.ex!=null)a.ex+=s.ex;
+  if(s.v!=null)a.vis+=s.v;
+}
 function adSum(rows){
-  const p={sp:0,im:0,rc:0,ck:0,fl:0,pv:0};
-  for(const r of rows){p.sp+=r.sp||0;p.im+=r.im||0;p.rc+=r.rc||0;p.ck+=r.ck||0;p.fl+=r.fl||0;p.pv+=r.pv||0;}
+  const p=adZero();
+  for(const r of rows)adAdd(p,r);
   return p;
 }
 function adVal(k,p){
@@ -1012,6 +1064,21 @@ function renderAds(){
       <h2>月次KPI <span class="sub" style="font-weight:500">（今月を含む3か月）</span></h2>
       <div class="tblwrap"><table class="kmat" id="admtbl"></table></div>
       <p class="note">今月は途中までの実績です。集計期間の選択には連動しません（非表示にした店は除きます）。</p>
+    </div>
+    <div class="panel">
+      <h2>広告費と来店数 <span class="sub" style="font-weight:500">（店舗ごと・選んだ期間の合計）</span></h2>
+      <div id="adscatter"></div>
+      <p class="note" id="adscnote"></p>
+    </div>
+    <div class="panel">
+      <h2>クリエイティブ別 <span class="sub" style="font-weight:500">（広告費の多い順・上位20）</span></h2>
+      <div class="tblwrap"><table class="kmat" id="adcrtbl"></table></div>
+      <p class="note" id="adcrnote"></p>
+    </div>
+    <div class="panel" id="admappanel" style="display:none">
+      <h2>未紐付けキャンペーン</h2>
+      <div id="admap"></div>
+      <p class="note">ここで割り当てた内容は、取り込みが上書きしても消えません（取り込みの値の上からかぶせています）。</p>
     </div>`;
   wireCommon();
   document.querySelectorAll(".adcol").forEach(b=>b.onclick=()=>{
@@ -1165,8 +1232,7 @@ function drawAds(){
   const el=document.getElementById("adtrend");
   if(el){
     const byDay=new Map();
-    for(const r of rows){ const a=byDay.get(r.d)||{sp:0,im:0,rc:0,ck:0,fl:0,pv:0};
-      a.sp+=r.sp||0;a.im+=r.im||0;a.rc+=r.rc||0;a.ck+=r.ck||0;a.fl+=r.fl||0;a.pv+=r.pv||0; byDay.set(r.d,a); }
+    for(const r of rows){ let a=byDay.get(r.d); if(!a){a=adZero();byDay.set(r.d,a);} adAdd(a,r); }
     const days=[...byDay.keys()].sort();
     el.innerHTML=days.length?adChart(days,byDay):`<p class="note">この期間の広告データがありません。</p>`;
     if(days.length)adWireTip(days,byDay);
@@ -1179,7 +1245,7 @@ function drawAds(){
   const md=d=>`${+d.slice(5,7)}/${+d.slice(8,10)}`;
   // 店名の先頭にある管理番号（「48.」など）は画面では邪魔なので落とす
   const shortName=n=>String(n||"").replace(/^\s*\d+\s*[.．]\s*/,"");
-  const zero=()=>({sp:0,im:0,rc:0,ck:0,fl:0,pv:0});
+  const zero=adZero;
   function adBuildTable(el,rows,bucketOf,labelOf){
     if(!el)return;
     const byStore=(AD_GROUP==="st"), g=new Map();
@@ -1187,11 +1253,10 @@ function drawAds(){
       const key=byStore?(r.st||UNMAPPED):(AD_GROUP==="a"?r.a:r.c);
       let e=g.get(key); if(!e){e={own:r.ow||null,tot:zero(),bk:new Map()};g.set(key,e);}
       if(!e.own&&r.ow)e.own=r.ow;
-      const add=o=>{o.sp+=r.sp||0;o.im+=r.im||0;o.rc+=r.rc||0;o.ck+=r.ck||0;o.fl+=r.fl||0;o.pv+=r.pv||0;};
-      add(e.tot);
+      adAdd(e.tot,r);
       const b=bucketOf(r.d);
       let w=e.bk.get(b); if(!w){w=zero();e.bk.set(b,w);}
-      add(w);
+      adAdd(w,r);
     }
     const rowsOf=(nm,e)=>
       `<tr class="adparent"><td style="text-align:left">`+
@@ -1207,7 +1272,8 @@ function drawAds(){
       body=[["直営","直営店"],["FC","FC店"],[null,"区分なし"]].map(([own,label])=>{
         const part=sortEnt(all.filter(([,e])=>(e.own||null)===own));
         if(!part.length)return "";
-        const sum=part.reduce((a,[,e])=>{["sp","im","rc","ck","fl","pv"].forEach(k=>a[k]+=e.tot[k]);return a;},zero());
+        // 店舗どうしは重ならないので、売上・来店もそのまま足してよい
+        const sum=part.reduce((a,[,e])=>{["sp","im","rc","ck","fl","pv","ex","vis"].forEach(k=>a[k]+=e.tot[k]);return a;},zero());
         return `<tr class="adsec"><td style="text-align:left">${label}<span class="sub" style="font-weight:500">（${part.length}店）</span></td>${cells(sum)}</tr>`+
                part.map(([nm,e])=>rowsOf(nm,e)).join("");
       }).join("");
@@ -1245,14 +1311,263 @@ function drawAds(){
     const sa=document.getElementById("adshowall");
     if(sa)sa.onclick=()=>{ AD_HIDE.clear(); adSaveHide(); drawAds(); };
   }
+  adDrawScatter(shortName);
+  adDrawCreatives(shortName);
+  adDrawMapper();
   const nomap=adSum(adRowsAll().filter(r=>!r.st));
   const note=document.getElementById("adnote");
   if(note)note.innerHTML=
-    `CTR＝クリック÷表示回数、CPC＝広告費÷クリック、FQ＝表示回数÷リーチ`+
+    `CTR＝クリック÷表示回数、CPC＝広告費÷クリック、FQ＝表示回数÷リーチ、売上比率＝広告費÷税抜売上`+
     (adHas("fl")?`、CPF＝広告費÷フォロー数`:"")+(adHas(["fl","pv"])?`、フォロー率＝フォロー数÷プロフアクセス数`:"")+
     `。`+
     `期間をまたぐときも実額どうしで割り直しています（比率の平均はしていません）。`+
     (nomap.sp>0?`<br><b style="color:#b8860b">店舗に紐付いていない広告費が ${YEN(nomap.sp)}円あります。</b>店舗別の数字はそのぶん少なく出ます。`:"");
+}
+
+// ============================================================
+// 広告費と来店数の散布図
+//   点＝店舗。横軸に期間の広告費、縦軸に同じ期間の来店数を取る。
+//   回帰直線と相関係数を添えて、線から上に外れている店（少ない広告費で
+//   来ている）と下に外れている店（出しているのに来ていない）を見つける。
+//   ※ネブラスカ未導入の店は来店数がそもそも取れないので、図には載せず
+//     名前を下に出す。0人として原点に置くと相関を見誤るため。
+// ============================================================
+const AD_SCAXIS={
+  vis:{name:"来店数",  unit:"人", fmt:v=>NUM(Math.round(v)),
+       pick:e=>e.acc.vis, need:"ネブラスカ未導入のため来店数が取れません"},
+  ex: {name:"税抜売上", unit:"円", fmt:v=>YEN(Math.round(v)),
+       pick:e=>e.acc.ex,  need:"この期間の税抜売上がありません"},
+};
+function adDrawScatter(shortName){
+  const host=document.getElementById("adscatter"); if(!host)return;
+  const note=document.getElementById("adscnote");
+  const ax=AD_SCAXIS[AD_SCY]||AD_SCAXIS.vis;
+  const toggle=`<div class="adperiod" style="margin-bottom:8px">`+
+    Object.entries(AD_SCAXIS).map(([k,a])=>
+      `<button class="chip adscy${AD_SCY===k?" on":""}" data-y="${k}">${a.name}</button>`).join("")+
+    `<span class="sub" style="align-self:center">を縦軸にする</span></div>`;
+  const wire=()=>host.querySelectorAll(".adscy").forEach(b=>b.onclick=()=>{
+    AD_SCY=b.dataset.y;
+    try{localStorage.setItem("notime-adscy",AD_SCY);}catch(e){}
+    drawAds();
+  });
+  const g=new Map();
+  for(const r of adRowsAll()){
+    if(r.si==null)continue;
+    let e=g.get(r.si); if(!e){e={name:r.st,own:r.ow,acc:adZero()};g.set(r.si,e);}
+    adAdd(e.acc,r);
+  }
+  const pts=[],skip=[];
+  for(const [sid,e] of g){
+    if(e.acc.sp<=0)continue;
+    // 来店軸のときは、来店をKPIに使わない店（kpi_visitors=false）と記録が
+    // 1件も無い店を外す。0人なのか取れないのかが区別できないため。
+    // 売上軸のときはどの店も取れるので、そのまま全店を載せる。
+    const y=ax.pick(e);
+    const ok=(AD_SCY==="vis")?(kvOf(sid)&&y>0):(y>0);
+    if(ok)pts.push({x:e.acc.sp,y,n:shortName(e.name),own:e.own});
+    else skip.push(shortName(e.name));
+  }
+  if(pts.length<2){
+    host.innerHTML=toggle+`<p class="note">この期間に、広告費と${ax.name}がそろっている店舗が足りません。</p>`;
+    wire();
+    if(note)note.textContent="";
+    return;
+  }
+  const NARROW=(window.innerWidth||760)<560;
+  const W=NARROW?380:760,H=NARROW?260:320,L=NARROW?44:58,R=14,T=12,B=NARROW?28:32;
+  const xs=pts.map(p=>p.x),ys=pts.map(p=>p.y);
+  const xM=Math.max(...xs)*1.08||1, yM=Math.max(...ys)*1.08||1;
+  const px=v=>L+v/xM*(W-L-R), py=v=>H-B-v/yM*(H-T-B);
+  // 最小二乗法の直線と相関係数
+  const n=pts.length, sx=xs.reduce((a,b)=>a+b,0), sy=ys.reduce((a,b)=>a+b,0);
+  const mx=sx/n, my=sy/n;
+  let sxy=0,sxx=0,syy=0;
+  for(const p of pts){sxy+=(p.x-mx)*(p.y-my);sxx+=(p.x-mx)**2;syy+=(p.y-my)**2;}
+  const slope=sxx>0?sxy/sxx:0, icpt=my-slope*mx;
+  const r=(sxx>0&&syy>0)?sxy/Math.sqrt(sxx*syy):null;
+  const FS=NARROW?8:9;
+  const tick=(m,f)=>[0,.5,1].map(t=>t*m).map(f);
+  const grid=tick(yM,v=>`<line x1="${L}" y1="${py(v)}" x2="${W-R}" y2="${py(v)}" stroke="var(--line)" stroke-width="1"/>`+
+      `<text x="${L-4}" y="${py(v)+3}" font-size="${FS}" text-anchor="end" fill="var(--sub)">${ax.fmt(v)}</text>`).join("")+
+    tick(xM,v=>`<text x="${px(v)}" y="${H-B+14}" font-size="${FS}" text-anchor="middle" fill="var(--sub)">${YEN(Math.round(v))}</text>`).join("");
+  const line=`<line x1="${px(0)}" y1="${py(Math.max(0,icpt))}" x2="${px(xM)}" y2="${py(Math.max(0,icpt+slope*xM))}" stroke="var(--sub)" stroke-dasharray="4 3" stroke-width="1.5"/>`;
+  // 名前は広告費の多い上位だけに出す（全部出すと重なって読めない）
+  const named=new Set([...pts].sort((a,b)=>b.x-a.x).slice(0,NARROW?4:8).map(p=>p.n));
+  const dots=pts.map(p=>{
+    const c=p.own==="FC"?"#e8590c":"#2f6fd0";
+    return `<circle cx="${px(p.x)}" cy="${py(p.y)}" r="5" fill="${c}" fill-opacity=".75" stroke="#fff" stroke-width="1"><title>${esc(p.n)}／広告費 ${YEN(p.x)}円／${ax.name} ${ax.fmt(p.y)}${ax.unit}</title></circle>`+
+      (named.has(p.n)?`<text x="${px(p.x)+7}" y="${py(p.y)+3}" font-size="${FS}" fill="var(--ink)">${esc(p.n)}</text>`:"");
+  }).join("");
+  host.innerHTML=toggle+
+    `<div class="adlegend" style="margin-bottom:4px">`+
+      `<span><i style="background:#2f6fd0"></i>直営店</span><span><i style="background:#e8590c"></i>FC店</span>`+
+      `<span class="sub">縦＝${ax.name}（${ax.unit}）／横＝広告費（円）</span></div>`+
+    `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="xMidYMid meet">`+
+    grid+line+dots+`</svg>`;
+  wire();
+  if(note){
+    const strength=r==null?"":(Math.abs(r)>=.7?"強い":Math.abs(r)>=.4?"ゆるやかな":"ほとんど無い");
+    note.innerHTML=
+      (r==null?"":`相関係数 <b>${F2(r)}</b>（${strength}相関）。点線は最小二乗法の直線で、`+
+        `線より上＝同じ広告費で${ax.name}が多い店、下＝出しているわりに伸びていない店です。`)+
+      `<br>期間: ${state.from}〜${state.to}／${pts.length}店舗`+
+      (skip.length?`<br><b style="color:#b8860b">対象外 ${skip.length}店</b>（${skip.map(esc).join("・")}）：${ax.need}。`:"");
+  }
+}
+
+// ============================================================
+// クリエイティブ別（広告＝ad単位）
+//   広告単位のデータには プロフアクセス数 が無いため、ここのCPCは
+//   AVEND定義（＝プロフ単価）ではなく「1クリックあたりの広告費」。
+//   取り違えないよう、列名も「クリック単価」と分けてある。
+// ============================================================
+function adDrawCreatives(shortName){
+  const el=document.getElementById("adcrtbl"); if(!el)return;
+  const note=document.getElementById("adcrnote");
+  const src=(DATA.metaAds||[]).filter(r=>r.d>=state.from&&r.d<=state.to
+    &&!AD_HIDE.has(r.st||UNMAPPED)
+    &&(!AD_STORE||(r.st||UNMAPPED)===AD_STORE));
+  const g=new Map();
+  for(const r of src){
+    let e=g.get(r.an); if(!e){e={sp:0,im:0,ck:0,rc:0,st:new Set()};g.set(r.an,e);}
+    e.sp+=r.sp||0;e.im+=r.im||0;e.ck+=r.ck||0;e.rc+=r.rc||0;
+    if(r.st)e.st.add(shortName(r.st));
+  }
+  // 列の定義。val が並べ替えの値で、比率はここでも 実額÷実額 で出す。
+  //   ※CTR・クリック単価・FQ は、値が出せない行を並べ替えの最後に送る
+  //     （0として扱うと「クリック0で単価も0＝最安」に見えてしまうため）。
+  const F=(v,f)=>v==null?"—":f(v);
+  const COLS=[
+    {k:"sp", name:"広告費",     val:e=>e.sp, fmt:v=>YEN(Math.round(v))+"円"},
+    {k:"im", name:"表示回数",   val:e=>e.im, fmt:v=>NUM(v)},
+    {k:"ck", name:"クリック数", val:e=>e.ck, fmt:v=>NUM(v)},
+    {k:"ctr",name:"CTR",       val:e=>e.im>0?e.ck/e.im*100:null, fmt:v=>F1(v)+"%"},
+    {k:"cpc",name:"クリック単価",val:e=>e.ck>0?e.sp/e.ck:null,   fmt:v=>YEN(Math.round(v))+"円"},
+    {k:"frq",name:"FQ",        val:e=>e.rc>0?e.im/e.rc:null,    fmt:v=>F2(v)+"回"},
+  ];
+  const sc=COLS.find(c=>c.k===AD_CRSORT.k)||COLS[0];
+  const all=[...g.entries()].sort((a,b)=>{
+    const x=sc.val(a[1]), y=sc.val(b[1]);
+    if(x==null&&y==null)return 0;
+    if(x==null)return 1;                 // 出せない行はいつも最後
+    if(y==null)return -1;
+    return AD_CRSORT.desc?y-x:x-y;
+  });
+  const top=all.slice(0,20);
+  const body=top.length?top.map(([nm,e])=>{
+    const sts=[...e.st];
+    const where=sts.length?(sts.length===1?esc(sts[0]):`${esc(sts[0])} 他${sts.length-1}店`):`<span style="color:#b8860b">未紐付け</span>`;
+    return `<tr><td style="text-align:left"><div>${esc(nm)}</div>`+
+      `<div class="sub" style="font-weight:500">${where}</div></td>`+
+      COLS.map(c=>`<td>${F(c.val(e),c.fmt)}</td>`).join("")+`</tr>`;
+  }).join(""):`<tr><td colspan="${COLS.length+1}" class="sub">この期間のクリエイティブ別データがありません</td></tr>`;
+  el.innerHTML=`<thead><tr><th>広告</th>`+
+    COLS.map(c=>{const on=c.k===AD_CRSORT.k;
+      return `<th class="adsort${on?" on":""}" data-k="${c.k}" title="押すと並べ替え">`+
+             `${c.name}${on?(AD_CRSORT.desc?" ▼":" ▲"):""}</th>`;}).join("")+
+    `</tr></thead><tbody>${body}</tbody>`;
+  el.querySelectorAll(".adsort").forEach(th=>th.onclick=()=>{
+    const k=th.dataset.k;
+    // 同じ列をもう一度押したら昇順・降順を入れ替える
+    AD_CRSORT=(AD_CRSORT.k===k)?{k,desc:!AD_CRSORT.desc}:{k,desc:true};
+    adDrawCreatives(shortName);
+  });
+  if(note)note.innerHTML=
+    (all.length>top.length?`${all.length}種のうち、${sc.name}の${AD_CRSORT.desc?"多い":"少ない"}順に20種。`:
+     all.length?`${all.length}種。`:"")+
+    `列見出しを押すと並べ替えできます。`+
+    `<b>クリック単価</b>は1クリックあたりの広告費で、`+
+    `AVENDで言うCPC（＝1プロフアクセスあたりの広告費）とは別物です`+
+    `（広告単位のデータには プロフアクセス数 がまだ入っていないため）。`+
+    (AD_STORE?`<br>店舗「${esc(shortName(AD_STORE))}」で絞り込み中です。`:"")+
+    (DATA.metaAds&&DATA.metaAds.length?"":`<br>広告単位のデータが data.json に入っていません（データ更新後に出ます）。`);
+}
+
+// ============================================================
+// 未紐付けキャンペーンの割り当て
+//   取り込みが書く destination_id は毎回上書きされるので、ここで決めた内容は
+//   別表（meta_campaign_stores）に持つ。取り直しても消えない。
+// ============================================================
+function adDrawMapper(){
+  const panel=document.getElementById("admappanel"), host=document.getElementById("admap");
+  if(!panel||!host)return;
+  // 期間に関係なくキャンペーンを全部集める。期間で絞ると、直したいものが
+  // 期間外にあって見つからない、が起きるため。
+  const g=new Map();
+  for(const r of (DATA.meta||[])){
+    if(!r.ci)continue;
+    let e=g.get(r.ci); if(!e){e={name:r.c,acc:r.a,st:null,sp:0,min:r.d,max:r.d};g.set(r.ci,e);}
+    if(r.st)e.st=r.st;
+    e.sp+=r.sp||0;
+    if(r.d<e.min)e.min=r.d; if(r.d>e.max)e.max=r.d;
+  }
+  const bySpend=(a,b)=>b[1].sp-a[1].sp;
+  const open=[...g.entries()].filter(([,e])=>!e.st).sort(bySpend);   // 未紐付け
+  const done=[...g.entries()].filter(([,e])=>e.st).sort(bySpend);    // 割当済み
+  panel.style.display=(open.length||done.length)?"":"none";
+  if(!open.length&&!done.length)return;
+  const h2=panel.querySelector("h2");
+  if(h2)h2.innerHTML=open.length?`未紐付けキャンペーン <span class="sub" style="font-weight:500">（${open.length}件）</span>`
+    :`キャンペーンの割り当て <span class="sub" style="font-weight:500">（未紐付けはありません）</span>`;
+  const dests=DATA.metaDests||[];
+  if(!SB||!dests.length){
+    host.innerHTML=`<p class="note">`+
+      (open.length?`未紐付けが ${open.length}件あります（${open.map(([,e])=>esc(e.name)).join("・")}）。`:`未紐付けはありません。`)+
+      (dests.length?`ログインすると、この画面から割り当てを直せます。`:
+       `割り当て先の一覧がまだ data.json にありません（データ更新後に出ます）。`)+`</p>`;
+    return;
+  }
+  const row=([ci,e])=>
+    `<div class="admaprow" data-ci="${esc(ci)}">`+
+      `<div class="admapname"><b>${esc(e.name)}</b>`+
+        `<div class="sub" style="font-weight:500">${esc(e.acc)}／${YEN(e.sp)}円／${e.min}〜${e.max}`+
+        (e.st?`／いまは <b>${esc(e.st)}</b>`:"")+`</div></div>`+
+      `<select class="admapsel"><option value="">${e.st?"— 別の店舗に変える —":"— 店舗を選ぶ —"}</option>`+
+        dests.map(d=>`<option value="${esc(d.id)}"${d.name===e.st?" selected":""}>${esc(d.name)}</option>`).join("")+
+      `</select>`+
+      `<button class="chip admapsave">${e.st?"変更する":"割り当てる"}</button>`+
+      (e.st?`<button class="chip admapclear" title="店舗との紐付けを外す">外す</button>`:"")+
+      `<span class="admapmsg sub"></span>`+
+    `</div>`;
+  host.innerHTML=
+    (open.length?open.map(row).join(""):`<p class="note">未紐付けのキャンペーンはありません。</p>`)+
+    (done.length?
+      `<button class="chip" id="admaptoggle" style="margin-top:10px">`+
+        `${AD_MAPOPEN?"▼":"▶"} 割当済み ${done.length}件を${AD_MAPOPEN?"隠す":"見る"}</button>`+
+      `<div id="admapdone" style="${AD_MAPOPEN?"":"display:none"}">${done.map(row).join("")}</div>`:"");
+  const tg=document.getElementById("admaptoggle");
+  if(tg)tg.onclick=()=>{ AD_MAPOPEN=!AD_MAPOPEN; adDrawMapper(); };
+  host.querySelectorAll(".admaprow").forEach(r2=>{
+    const sel=r2.querySelector(".admapsel"), btn=r2.querySelector(".admapsave"),
+          clr=r2.querySelector(".admapclear"),
+          msg=r2.querySelector(".admapmsg"), ci=r2.dataset.ci, ent=g.get(ci)||{};
+    // 割り当てる／変える／外す。外すときは destination_id を null で送る。
+    const save=async(did,label)=>{
+      btn.disabled=true; if(clr)clr.disabled=true; msg.textContent="保存中…";
+      try{
+        const {error}=await SB.rpc("meta_campaign_store_set",
+          {p_campaign_id:ci,p_destination_id:did,p_campaign_name:ent.name||null});
+        if(error)throw error;
+        // 次のデータ更新を待たずに、いま開いている画面にも反映する
+        const d=did?(dests.find(x=>x.id===did)||{}):{};
+        for(const r of (DATA.meta||[]))if(r.ci===ci){ r.st=d.name||null; r.si=d.s??null; r.ow=d.ow||null; }
+        for(const r of (DATA.metaAds||[]))if(r.c===ent.name){ r.st=d.name||null; r.si=d.s??null; }
+        msg.innerHTML=`<b style="color:#0ca678">✓ ${label}</b>`;
+        setTimeout(drawAds,600);
+      }catch(err){
+        btn.disabled=false; if(clr)clr.disabled=false;
+        msg.innerHTML=`<b style="color:#c0392b">保存できませんでした: ${esc(String(err.message||err))}</b>`;
+      }
+    };
+    btn.onclick=()=>{
+      const did=sel.value;
+      if(!did){ msg.textContent="店舗を選んでください"; return; }
+      const d=dests.find(x=>x.id===did)||{};
+      save(did,`${esc(d.name)} に割り当てました`);
+    };
+    if(clr)clr.onclick=()=>save(null,"紐付けを外しました");
+  });
 }
 function wireCommon(){
   const on=(id,ev,fn)=>{const el=document.getElementById(id);if(el)el[ev]=fn;};
