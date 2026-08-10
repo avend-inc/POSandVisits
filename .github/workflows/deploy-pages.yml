@@ -1,0 +1,68 @@
+# ============================================================
+#  ダッシュボードを GitHub Pages に配信する
+#
+#  【なぜ必要か】
+#   このダッシュボードは gh-pages ブランチの index.html を GitHub Pages が
+#   そのまま配信している。中身は web/dashboard.html の単純コピーで、
+#   これまでは「更新したら手でコピーして push する」運用だった。
+#   その手順を忘れると、data.json（Supabase）は新しいのに画面のコードだけ古い、
+#   という気づきにくい状態になる（実際に起きた）。
+#   ここで自動化して、default ブランチの web/dashboard.html と
+#   gh-pages/index.html が必ず一致するようにする。
+#
+#  【動くタイミング】
+#   web/dashboard.html を default ブランチに push したとき（＝PRをマージしたとき）。
+#   手動実行もできる（Actions →「ダッシュボードを配信(GitHub Pages)」→ Run workflow）。
+#
+#  【やること】
+#   web/dashboard.html を gh-pages の index.html にコピーして push するだけ。
+#   中身が同じなら何もしない（空コミットは作らない）。
+#   gh-pages にある他のファイル（他タブのHTML・アイコン・robots.txt 等）は触らない。
+# ============================================================
+name: ダッシュボードを配信(GitHub Pages)
+
+on:
+  push:
+    branches: [feature/supabase-etl]
+    paths: ["web/dashboard.html"]
+  workflow_dispatch:
+
+# 同時に2つ走ると push がぶつかるので直列化する
+concurrency:
+  group: deploy-gh-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: gh-pages の index.html を更新
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: 配信元（default ブランチ）を取得
+        uses: actions/checkout@v4
+        with:
+          path: src
+
+      - name: 配信先（gh-pages）を取得
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: pages
+
+      - name: コピーして push
+        run: |
+          set -e
+          cp src/web/dashboard.html pages/index.html
+          cd pages
+          if git diff --quiet -- index.html; then
+            echo "変更はありません（配信済みと同じ内容）。"
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git commit -m "デプロイ: web/dashboard.html を配信 (${GITHUB_SHA::7})"
+          git push
+          echo "✅ 配信しました。GitHub Pages の反映まで1分ほどかかります。"
