@@ -397,7 +397,8 @@ function renderFranchiseeHome(){
   app.innerHTML=`
     <header>
       <h1>売上KPI管理 <span class="gbadge">加盟店</span></h1>
-      <button class="themebtn" id="themebtn" style="margin-left:auto">◐</button>
+      ${whoHtml()}
+      <button class="themebtn" id="themebtn" style="margin-left:${ME.email?'8px':'auto'}">◐</button>
       ${SB?'<button class="themebtn" id="logoutbtn" style="margin-left:6px">ログアウト</button>':''}
     </header>
     <div class="sub" style="margin:8px 0 12px">ご覧になる店舗を選んでください。</div>
@@ -672,6 +673,12 @@ function loadSel(){
   return new Set(allIds);
 }
 
+// ヘッダー右上に出す「ログイン中のアカウント」表示（メール＋権限）。公開モード(メール無し)では空。
+function whoHtml(){
+  if(!(ME&&ME.email))return "";
+  const rj={viewer:"閲覧",editor:"編集",admin:"管理"}[ME.role]||ME.role||"";
+  return `<span class="sub" id="whoami" title="${esc(ME.email)}" style="margin-left:auto;max-width:44vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">👤 ${esc(ME.email)}${rj?`<span style="opacity:.65">（${esc(rj)}）</span>`:""}</span>`;
+}
 function render(){ if(state.detail)renderDetail(); else renderMain(); }
 function wireCommon(){
   const on=(id,ev,fn)=>{const el=document.getElementById(id);if(el)el[ev]=fn;};
@@ -711,7 +718,8 @@ function renderMain(){
   document.getElementById("app").innerHTML=`
     <header>
       <h1>売上KPI管理 <span class="gbadge">${GROUP_LABEL}</span></h1>
-      <button class="themebtn" id="reportbtn" style="margin-left:auto;width:auto;padding:0 12px;gap:5px">📊 レポート</button>
+      ${whoHtml()}
+      <button class="themebtn" id="reportbtn" style="margin-left:${ME.email?'8px':'auto'};width:auto;padding:0 12px;gap:5px">📊 レポート</button>
       <button class="themebtn" id="themebtn" style="margin-left:6px">◐</button>
       ${SB?'<button class="themebtn" id="logoutbtn" style="margin-left:6px">ログアウト</button>':''}
     </header>
@@ -808,8 +816,9 @@ function renderDetail(){
   document.getElementById("app").innerHTML=`
     <header>
       <h1>${esc(nm)} <span class="gbadge">店舗別</span></h1>
-      ${FRAN?'':'<button class="themebtn" id="storereportbtn" style="margin-left:auto;width:auto;padding:0 12px;gap:5px">📊 レポート</button>'}
-      <button class="themebtn" id="themebtn" style="margin-left:${FRAN?'auto':'6px'}">◐</button>
+      ${whoHtml()}
+      ${FRAN?'':`<button class="themebtn" id="storereportbtn" style="margin-left:${ME.email?'8px':'auto'};width:auto;padding:0 12px;gap:5px">📊 レポート</button>`}
+      <button class="themebtn" id="themebtn" style="margin-left:6px">◐</button>
       ${SB?'<button class="themebtn" id="logoutbtn" style="margin-left:6px">ログアウト</button>':''}
     </header>
     <div class="sub" style="margin:2px 0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
