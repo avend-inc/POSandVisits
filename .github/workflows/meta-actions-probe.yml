@@ -1,0 +1,55 @@
+# ============================================================
+#  Meta広告 actions の点検（読み取りのみ）
+#
+#  Actions →「Meta広告 actionsの点検」→ Run workflow
+#
+#  プロフアクセス数・フォロー数が insights の actions のどのキー
+#  (action_type) に入っているかを、実際のデータで確かめる。
+#  Meta は同じ出来事を名前違いで複数返すことがあり、当てずっぽうで
+#  拾うと「それらしい間違った数字」が出てしまうため、実装の前に確認する。
+#
+#  必要な Secrets:
+#    META_ACCESS_TOKEN … ads_read 権限つきのアクセストークン
+#  未登録なら、そのことを伝えて正常終了する（設定前に動かしても壊れない）。
+# ============================================================
+name: Meta広告 actionsの点検
+
+on:
+  workflow_dispatch:
+    inputs:
+      since:
+        description: "開始日 (YYYY-MM-DD)"
+        required: false
+        default: "2026-07-07"
+      until:
+        description: "終了日 (YYYY-MM-DD)"
+        required: false
+        default: "2026-07-13"
+      campaign:
+        description: "キャンペーン名に含む文字（日別の中身も出す）"
+        required: false
+        default: "つくば"
+
+jobs:
+  probe:
+    name: actions を調べる
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TZ: Asia/Tokyo
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      META_API_VERSION: ${{ vars.META_API_VERSION }}
+      META_AD_ACCOUNTS: ${{ vars.META_AD_ACCOUNTS }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install requests
+      - name: 点検を実行
+        run: |
+          python -m tools.meta_actions_probe \
+            --since "${{ inputs.since }}" \
+            --until "${{ inputs.until }}" \
+            --campaign "${{ inputs.campaign }}"
