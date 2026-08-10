@@ -91,6 +91,36 @@ def build_data(sb: Supabase) -> dict:
         order="id",
     )
 
+    # --- レジの営業形態（無人／有人）。下北沢のように1店で2レジを使い分ける店で、
+    #     売上を「無人時間（SIPOS＝EZレジ）」と「有人時間（Airレジ）」に分けるために使う。
+    #     判定はまず store_pos の pos_type（登録済みの接続情報）を正とし、
+    #     未登録のレジ名は名前から推定する（履歴データや手動取り込みぶんの保険）。
+    pos_type_by_name: dict[tuple, str] = {}   # (store_id, pos_name) -> pos_type
+    try:
+        for r in sb.select("store_pos", {"select": "store_id,pos_type,pos_name"}):
+            pn = (r.get("pos_name") or "").strip()
+            if pn:
+                pos_type_by_name[(r["store_id"], pn)] = r.get("pos_type") or ""
+    except Exception:
+        pass
+
+    def _pos_mode(store_id, pos_name: str) -> str:
+        """そのレジが無人営業(u)か有人営業(m)か。判別できなければ有人(m)扱い。"""
+        pn = (pos_name or "").strip()
+        t = pos_type_by_name.get((store_id, pn)) or ""
+        if t == "ezregi":
+            return "u"
+        if t in ("airregi", "cashier"):
+            return "m"
+        u = pn.upper()
+        if u.startswith("AIR"):          # AirREGI＝有人（スタッフがレジを打つ）
+            return "m"
+        if u in ("SIPOS", "SI", "EZREGI") or "SIPOS" in u or u.startswith("EZ"):
+            return "u"                   # SIPOS/EZレジ＝無人営業時間のセルフレジ
+        if u == "DIGITEL":               # デジテール日次売上＝無人店の売上
+            return "u"
+        return "m"
+
     # バンドル名（コード→名称）。bundle_master が未作成でも動く。
     bundle_names: dict[str, str] = {}
     try:
@@ -149,7 +179,11 @@ def build_data(sb: Supabase) -> dict:
         # ex=税抜の「実額」合計（明細/伝票に税抜がある店）。
         # ex_est=税抜が元データに無く 税込÷1.1 で“近似”した分（デジテールの日次合計のみの店）。
         #   → 実額が1円も無く近似だけの店日は、税抜KPIを「—」にする（推定値を出さない）。
+        # ex_u/ex_m=税抜売上の営業形態別内訳（u=無人営業時間・m=有人営業時間）。
+        #   2レジ運用の店（下北沢＝SIPOS＋Airレジ）の内訳表示に使う。
+        # v_staffed=有人営業時間の来店数（画面から手入力したぶん。visits.source='staffed'）
         return {"in": 0.0, "ex": 0.0, "ex_est": 0.0, "tx": 0, "it": 0.0, "v": None,
+                "ex_u": 0.0, "ex_m": 0.0, "v_staffed": None,
                 "bag_in": 0.0, "bag_ex": 0.0, "bag_q": 0.0, "reji_in": 0.0, "reji_ex": 0.0,
                 "coup_in": 0.0, "coup_q": 0.0}   # クーポン割引額・点数（レジ袋と分離）
 
@@ -184,6 +218,8 @@ def build_data(sb: Supabase) -> dict:
                 rec["ex_est"] += ex_tax
             else:
                 rec["ex"] += ex_tax
+            # 税抜売上を「無人営業／有人営業」に振り分ける（レジ単位で判定）。
+            rec["ex_u" if _pos_mode(sid, r.get("pos_name")) == "u" else "ex_m"] += ex_tax
             rec["tx"] += 1
             # 点数は tx_qty ではなく明細(line_qty)の合計で数える（下で加算）。
             # こうするとレジ袋・クーポンを点数から自然に除ける。
@@ -240,17 +276,37 @@ def build_data(sb: Supabase) -> dict:
             prec["q"] += qty
 
     # --- visits: 来店客数を日別×店舗に載せる
+    #   source='digitel' … 入店計測の自動取得（無人営業時間ぶん）
+    #   source='staffed' … 有人営業時間ぶんの手入力（店舗ページから登録。sql/021）
     visits = _select_all(
         sb, "visits",
-        "business_date,store_id,visitors",
-        order="id", extra={"source": "eq.digitel"},
+        "business_date,store_id,source,visitors",
+        order="id", extra={"source": "in.(digitel,staffed)"},
     )
     for r in visits:
         if str(r["business_date"]) >= _today_jst:   # 進行中の当日は締めない
             continue
         dk = (r["business_date"], r["store_id"])
         rec = daily.setdefault(dk, _new())
-        rec["v"] = (rec["v"] or 0) + int(r["visitors"] or 0)
+        key = "v_staffed" if r.get("source") == "staffed" else "v"
+        rec[key] = (rec[key] or 0) + int(r["visitors"] or 0)
+
+    # --- 無人／有人の内訳を出す店（＝1店で両方のレジを使っている店。下北沢など）。
+    #     1レジだけの店に内訳を持たせても意味が無いので、data.json にも載せない。
+    mix_u: set = set()
+    mix_m: set = set()
+    for (_d, _sid), v in daily.items():
+        if v["ex_u"] > 0:
+            mix_u.add(_sid)
+        if v["ex_m"] > 0:
+            mix_m.add(_sid)
+    mixed_stores = mix_u & mix_m
+
+    def _mix(sid, v) -> dict:
+        """2レジ運用の店だけ、税抜売上の内訳（exU=無人／exM=有人）を付ける。"""
+        if sid not in mixed_stores or (v["ex"] <= 0 and v["ex_est"] > 0):
+            return {}
+        return {"exU": round(v["ex_u"]), "exM": round(v["ex_m"])}
 
     daily_rows = [
         {"d": d, "s": sid,

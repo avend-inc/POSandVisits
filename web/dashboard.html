@@ -183,6 +183,15 @@
   .dtop .card.land .val{color:#fff}
   .dtop .card.land .val small{color:#cadcfc}
   .dtop .card.land .knote{color:#8fa3c8}
+  /* 無人／有人の内訳（1店で2レジを使い分ける店＝下北沢のみ表示）。スマホ幅でも1行ずつ収める */
+  .dtop .card .ksplit{display:none;margin-top:5px;padding-top:4px;border-top:1px dotted var(--border);font-size:9.5px;line-height:1.65;color:var(--ink2)}
+  .dtop .card .ksplit div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dtop .card .ksplit b{font-weight:800;color:var(--ink)}
+  .dtop .card.land .ksplit{border-top-color:#3a4d75;color:#8fa3c8}
+  .dtop .card.land .ksplit b{color:#fff}
+  /* 有人来店の入力モーダル */
+  .svtbl input{width:74px;padding:5px 7px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--ink);font-family:inherit;font-size:13px;text-align:right}
+  .svtbl .ok{color:#2e9e5b;font-weight:800}
   .detail .panel h2{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
   .detail .panel h2::before{content:"";width:4px;height:14px;border-radius:2px;background:linear-gradient(180deg,var(--accent),#b8860b);flex:none}
   /* 日別推移の表はスマホ幅でも横スクロールなしで収まるよう圧縮 */
@@ -282,16 +291,36 @@ function tCanon(c){ c=(c||"");
   if(c.indexOf("バンド")>=0||c.indexOf("ミュージック")>=0) return "バンド/ミュージックTシャツ";
   if(c.indexOf("Tシャツ")>=0||c.indexOf("Ｔシャツ")>=0) return "Tシャツ";
   return c; }
+// ---- 来店数の合算（無人＋有人）--------------------------------------------
+// 下北沢のように「無人営業＝SIPOS／有人営業＝Airレジ」の2レジで回している店は、
+// 入店計測（デジテール）が無人時間ぶんしか取れない。有人時間ぶんは店舗ページの
+// 「有人来店を入力」から日別に手入力し（visits.source='staffed' / sql/021）、
+// r.v0＝無人・r.vm＝有人・r.v＝合算 として持つ。以降の画面はすべて r.v を見るので、
+// 日別推移・購入率・推移グラフ・KPIまとめが自動的に合算値になる。
+// ※ 何度呼んでも同じ結果になるよう、元の無人ぶんは r.v0 に退避しておく。
+function mergeStaffedVisits(){
+  for(const r of DATA.daily){
+    if(r.v0===undefined)r.v0=(r.v==null?null:r.v);
+    r.v=(r.v0==null&&r.vm==null)?null:((r.v0||0)+(r.vm||0));
+  }
+}
+// 来店データのある店舗・最新日を作り直す（手入力の保存後にも呼ぶ）。
+function recomputeVisitIndex(){
+  const vd=DATA.daily.filter(r=>r.v!=null).map(r=>r.d).sort();
+  DATA._visitMax=vd.length?vd[vd.length-1]:DATA._max;
+  // 来店（入店計測）が入っている店舗の集合。来店客数・購入率はこの店だけで計算する。
+  DATA._visitStores=new Set(DATA.daily.filter(r=>r.v!=null).map(r=>r.s));
+}
 function prep(){
   if(!DATA||!DATA.daily)throw new Error("データが空です");
   const ds=DATA.daily.map(r=>r.d).sort();
   DATA._min=ds[0]; DATA._max=ds[ds.length-1];
   const sd=DATA.daily.filter(r=>(r.tx||0)>0||(r.in||0)>0).map(r=>r.d).sort();
-  const vd=DATA.daily.filter(r=>r.v!=null).map(r=>r.d).sort();
   DATA._salesMax=sd.length?sd[sd.length-1]:DATA._max;
-  DATA._visitMax=vd.length?vd[vd.length-1]:DATA._max;
-  // デジテール（入店計測）が入っている店舗の集合。来店客数・購入率はこの店だけで計算する。
-  DATA._visitStores=new Set(DATA.daily.filter(r=>r.v!=null).map(r=>r.s));
+  mergeStaffedVisits();      // 有人時間の来店（手入力）を来店数へ合算してから各種の集計を作る
+  recomputeVisitIndex();     // 来店データのある店・最新日
+  // 無人／有人の売上内訳を持っている店（＝1店で2レジを使い分ける店。下北沢）。
+  DATA._posMix=new Set(DATA.daily.filter(r=>r.exU!=null||r.exM!=null).map(r=>r.s));
   // ※ DATA.cat / DATA.catp は原本のまま（画面のカテゴリ表示はTシャツ細分を分けて出す）。
   //   Tシャツ統合・セール除外はレポート集計側（rptCatAgg等）だけで行う。
   // リロード／直アクセスなら選択・期間をデフォルトに戻す（タブ移動のときだけ引き継ぐ）
@@ -485,6 +514,9 @@ function sumRows(rows){
   // txv=購入率の分子（購入客数＝取引数）、v=分母（来店客数）。どちらも
   // 「デジテール（入店計測）が入っていて、かつKPIに来店を使う店」だけを対象にする
   //（＝来店の分母が無い店の取引を分子に混ぜない。POSだけの店は購入率に含めない）。
+  // 例外：いま開いている店舗ページの店だけは、KPI対象外(kpi_visitors=false)でも来店を使う。
+  //   下北沢は無人＋有人の合算をこの画面の中では正しい来店数として扱いたい一方、
+  //   全店・直営合計の購入率は従来どおり除外したままにするため（state.detail のときだけ許可）。
   const p={in:0,ex:0,tx:0,txv:0,it:0,txIt:0,v:0,bagIn:0,bagEx:0,hasV:false,hasEx:false,hasIt:false};
   const isVS=DATA._visitStores||new Set();
   for(const r of rows){p.in+=r.in||0;p.tx+=r.tx||0;
@@ -492,7 +524,7 @@ function sumRows(rows){
     if(r.it!=null){p.it+=r.it;p.hasIt=true;p.txIt+=r.tx||0;}  // 点数と、その分母となる取引数（明細のある店だけ）
     // レジ袋の税込/税抜（客単価・商品単価から差し引く用。bagEx未提供の旧データは税込÷1.1で近似＝レジ袋は10%課税なので厳密）
     p.bagIn+=r.bag||0; p.bagEx+=(r.bagEx!=null?r.bagEx:(r.bag?Math.round(r.bag/1.1):0));
-    if(kvOf(r.s)&&isVS.has(r.s)){p.txv+=r.tx||0; if(r.v!=null){p.v+=r.v;p.hasV=true;}}}
+    if((kvOf(r.s)||r.s===state.detail)&&isVS.has(r.s)){p.txv+=r.tx||0; if(r.v!=null){p.v+=r.v;p.hasV=true;}}}
   if(!p.hasV)p.v=0; return p;
 }
 // 店舗スコープ判定：'all'=全店 / 'own'=直営 / 'fc'=FC / 'sf'=SELFURUGI / 'nt'=NOTIME / それ以外=店舗id
@@ -814,12 +846,13 @@ function renderDetail(){
     </div>
     ${navrow}
     <div class="dtop">
-      <div class="card"><div class="k">今月の売上</div><div class="val" id="dtop-cur">—</div><div class="knote">税抜 <span id="dtop-cur-note"></span></div></div>
-      <div class="card land"><div class="k">着地見込み</div><div class="val" id="dtop-land">—</div><div class="knote">当月の月末予測</div></div>
-      <div class="card"><div class="k">前日の売上</div><div class="val" id="dtop-prev">—</div><div class="knote">税抜 <span id="dtop-prev-note"></span></div></div>
+      <div class="card"><div class="k">今月の売上</div><div class="val" id="dtop-cur">—</div><div class="knote">税抜 <span id="dtop-cur-note"></span></div><div class="ksplit" id="dtop-cur-split"></div></div>
+      <div class="card land"><div class="k">着地見込み</div><div class="val" id="dtop-land">—</div><div class="knote">当月の月末予測</div><div class="ksplit" id="dtop-land-split"></div></div>
+      <div class="card"><div class="k">前日の売上</div><div class="val" id="dtop-prev">—</div><div class="knote">税抜 <span id="dtop-prev-note"></span></div><div class="ksplit" id="dtop-prev-split"></div></div>
     </div>
     <div class="panel">
-      <h2>日別推移 <span class="sub" style="font-weight:500">（下スクロールで過去）</span></h2>
+      <h2>日別推移 <span class="sub" style="font-weight:500">（下スクロールで過去）</span>
+        ${posMixed(state.detail)?'<button class="chip" id="stf-btn" style="margin-left:auto;flex:none;white-space:nowrap">👥 有人来店を入力</button>':''}</h2>
       <div class="tblwrap daywrap"><table class="kmat daykpi" id="daykpi"></table></div>
       <p class="note" style="margin:7px 0 0"><b>青字＝土日祝</b>／気温は最高・最低</p>
     </div>
@@ -894,7 +927,7 @@ function renderDetail(){
       <p class="note" id="frmem-msg" style="margin-top:6px"></p>
     </div>`:''}
     <div id="mdl-root"></div>
-    <div class="foot">差分の色＝上位3店平均との差（上:緑／下:赤）。来店客数・購入率はデジテール導入店のみ。${FRAN?'比較は各店の生データではなく集計値のみを表示します。':''}</div>`;
+    <div class="foot">差分の色＝上位3店平均との差（上:緑／下:赤）。来店客数・購入率はデジテール導入店のみ。${posMixed(state.detail)?'この店は<b>無人営業（SIPOS）＋有人営業（Airレジ）</b>の2レジ運用です。上段カードの売上内訳はレジ別、来店数は<b>無人（自動計測）＋有人（手入力）</b>の合算で、全店・直営合計の集計には含めていません。':''}${FRAN?'比較は各店の生データではなく集計値のみを表示します。':''}</div>`;
   wireCommon();
   if(FRAN){
     const hb=document.getElementById("fr-home"); if(hb)hb.onclick=renderFranchiseeHome;
@@ -910,7 +943,10 @@ function renderDetail(){
     };
     drawFrMembers();
   }
+  const stf=document.getElementById("stf-btn"); if(stf)stf.onclick=openStaffedModal;
   draw();
+  // 有人来店（手入力）は data.json より新しいことがあるので、開いたら読み直して反映する。
+  if(posMixed(state.detail))loadStaffedVisits(state.detail).then(ok=>{ if(ok)refresh(); });
   if(!FRAN)aiWeeklyInsight();   // AIのまとめは本部モードのみ（加盟店は集計値ベースで表示、AIは今後）
 }
 
@@ -2379,6 +2415,130 @@ function drawDetailExtras(){
   const pv=document.getElementById("dtop-prev"); if(pv)pv.innerHTML=YEN(prev||0)+"<small>円</small>";
   const cn=document.getElementById("dtop-cur-note"); if(cn)cn.textContent=`${+ym.slice(5,7)}/1〜${+sd.slice(5,7)}/${+sd.slice(8,10)}`;
   const pn=document.getElementById("dtop-prev-note"); if(pn)pn.textContent=`${+sd.slice(5,7)}/${+sd.slice(8,10)}`;
+  // 無人／有人の内訳（2レジ運用の店だけ）。着地見込みは当月実績の比率で按分する。
+  const cs=sumSplit(ym+"-01",sd,id), tot=cs?(cs.u+cs.m):0;
+  fillSplit("dtop-cur-split",cs,1);
+  fillSplit("dtop-land-split",(cs&&tot>0&&lv!=null)?cs:null,(cs&&tot>0&&lv!=null)?lv/tot:1);
+  fillSplit("dtop-prev-split",sumSplit(sd,sd,id),1);
+}
+// この店は「無人営業＋有人営業」の2レジ運用か（＝内訳と有人来店入力を出す店か）。
+function posMixed(id){ return id!=null && (DATA._posMix||new Set()).has(id); }
+// 税抜売上の内訳合計（u=無人営業時間／m=有人営業時間）。対象外の店は null。
+function sumSplit(from,to,id){
+  if(!posMixed(id))return null;
+  let u=0,m=0,has=false;
+  for(const r of DATA.daily){
+    if(r.s!==id||r.d<from||r.d>to)continue;
+    if(r.exU==null&&r.exM==null)continue;
+    u+=r.exU||0; m+=r.exM||0; has=true;
+  }
+  return has?{u:u,m:m}:null;
+}
+// カード下段に「無人 ○○円／有人 ○○円」を出す。sp が null のときは行ごと隠す。
+function fillSplit(elId,sp,scale){
+  const el=document.getElementById(elId); if(!el)return;
+  if(!sp){el.style.display="none"; el.innerHTML=""; return;}
+  const k=(scale==null?1:scale);
+  el.style.display="block";
+  el.innerHTML=`<div>無人 <b>${YEN(Math.round(sp.u*k))}</b>円</div><div>有人 <b>${YEN(Math.round(sp.m*k))}</b>円</div>`;
+}
+
+// ============================================================
+//  有人時間の来店数（手入力）
+//  無人時間の来店は自動取得できるが、有人時間ぶんは計測できない。ここで日別に
+//  入力してもらい、無人＋有人の合算をこの店の来店数として画面全体に反映する。
+//  保存先は visits(source='staffed')。書き込みは RPC 経由（sql/021）。
+// ============================================================
+let STAFFED={};          // {"YYYY-MM-DD": 人数} 表示中の店のぶん
+let STAFFED_SID=null;    // STAFFED がどの店のものか
+// 保存済みの有人来店を読み直して、DATA.daily に反映する（data.json より新しい入力も拾う）。
+async function loadStaffedVisits(sid){
+  if(!SB||!posMixed(sid))return false;
+  const to=todayStr(), from=DATA._min||to;
+  const {data,error}=await SB.rpc("staffed_visits_list",{p_store_id:sid,p_from:from,p_to:to});
+  if(error){ console.warn("有人来店の読み込みに失敗:",error.message); return false; }
+  STAFFED={}; STAFFED_SID=sid;
+  (data||[]).forEach(r=>{ if(r.visitors!=null)STAFFED[r.d]=+r.visitors; });
+  applyStaffed(sid);
+  return true;
+}
+// STAFFED（保存済みの有人来店）を DATA.daily に載せ直して、来店数を合算し直す。
+function applyStaffed(sid){
+  if(STAFFED_SID!==sid)return;
+  const have=new Set();
+  for(const r of DATA.daily){
+    if(r.s!==sid)continue;
+    have.add(r.d);
+    const m=STAFFED[r.d];
+    r.vm=(m==null?null:m);
+  }
+  // 売上行が無い日に有人来店だけ入力された場合は、その日の行を足す（来店だけの日）。
+  for(const d in STAFFED){
+    if(have.has(d))continue;
+    DATA.daily.push({d:d,s:sid,in:0,ex:0,tx:0,it:0,v:null,v0:null,vm:STAFFED[d]});
+  }
+  mergeStaffedVisits();
+  recomputeVisitIndex();
+}
+// 入力モーダル：直近31日ぶんを日別に入力／修正する。欄から外れた時点で保存。
+function openStaffedModal(){
+  const id=state.detail; if(id==null)return;
+  const s=storeMeta(id), nm=(s&&s.name)||"この店舗";
+  const last=DATA._salesMax||DATA._max, from=addDays(last,-30);
+  const byDate=new Map();
+  for(const r of DATA.daily){ if(r.s===id)byDate.set(r.d,r); }
+  const dates=[]; for(let d=last; d>=from; d=addDays(d,-1))dates.push(d);
+  const cells=dates.map(d=>{
+    const r=byDate.get(d)||{}, wk=WK[new Date(d+"T00:00:00Z").getUTCDay()];
+    const we=isWeekendOrHoliday(d);
+    return `<tr${we?' class="we"':''} data-d="${d}">
+      <td style="text-align:left;white-space:nowrap">${+d.slice(5,7)}/${+d.slice(8,10)}(${wk})</td>
+      <td>${r.v0==null?"—":NUM(r.v0)+"人"}</td>
+      <td><input type="number" min="0" step="1" inputmode="numeric" data-d="${d}" value="${r.vm==null?"":r.vm}"></td>
+      <td class="sv-t">${r.v==null?"—":NUM(r.v)+"人"}</td>
+      <td class="sv-msg" style="width:64px"></td></tr>`;
+  }).join("");
+  showModal(`有人来店の入力｜${nm}`,
+    `<p class="note" style="margin:0 0 8px">無人営業時間（SIPOS）の来店は自動で入ります。<b>有人営業時間（Airレジ）の来店数</b>をここに入れてください。
+      入力すると、この店舗ページの<b>来店数・購入率</b>がすべて「無人＋有人」の合算に切り替わります（全店・直営合計の集計には影響しません）。</p>
+     <div class="tblwrap svtbl" style="max-height:50vh"><table class="kmat">
+       <thead><tr><th>日付</th><th>無人</th><th>有人</th><th>合計</th><th></th></tr></thead>
+       <tbody>${cells}</tbody></table></div>
+     <p class="note" style="margin:8px 0 0">空欄にすると入力を取り消せます。数字を入れて欄の外をタップすると保存されます。</p>`);
+  const root=document.getElementById("mdl-root");
+  root.querySelectorAll("input[data-d]").forEach(inp=>{
+    inp.dataset.prev=inp.value;
+    inp.onblur=()=>saveStaffedDay(inp);
+    inp.onkeydown=e=>{ if(e.key==="Enter")inp.blur(); };
+  });
+}
+// 1日ぶんを保存して、画面全体（カード・日別推移・推移・KPI）を作り直す。
+async function saveStaffedDay(inp){
+  const d=inp.dataset.d, raw=(inp.value||"").trim();
+  const tr=inp.closest("tr"), msg=tr&&tr.querySelector(".sv-msg");
+  const show=(t,ok)=>{ if(msg){msg.textContent=t; msg.className="sv-msg"+(ok?" ok":"");} };
+  if(raw===inp.dataset.prev)return;                    // 変わっていなければ何もしない
+  let v=null;
+  if(raw!==""){
+    v=Number(raw);
+    if(!isFinite(v)||v<0){ show("数字で",false); inp.value=inp.dataset.prev; return; }
+    v=Math.round(v);
+  }
+  if(!SB){ show("ログイン版のみ",false); inp.value=inp.dataset.prev; return; }
+  show("保存中…",false);
+  const {error}=await SB.rpc("staffed_visits_upsert",{p_store_id:state.detail,p_date:d,p_visitors:v});
+  if(error){ show("失敗",false); console.warn("有人来店の保存に失敗:",error.message); return; }
+  if(v==null)delete STAFFED[d]; else STAFFED[d]=v;
+  inp.dataset.prev=raw;
+  applyStaffed(state.detail);
+  refresh();                                           // 店舗ページ全体を合算値で描き直す
+  // モーダル内の「合計」列も更新する（開いたまま続けて入力できるように）
+  const byDate=new Map(); for(const r of DATA.daily){ if(r.s===state.detail)byDate.set(r.d,r); }
+  document.getElementById("mdl-root").querySelectorAll("tr[data-d]").forEach(row=>{
+    const rr=byDate.get(row.dataset.d), td=row.querySelector(".sv-t");
+    if(td)td.textContent=(!rr||rr.v==null)?"—":NUM(rr.v)+"人";
+  });
+  show("✓ 保存済み",true);
 }
 // 日別推移（縦=日付・最新が上／横=KPI）。直近7日ぶんの高さに収め、下スクロールで過去を表示。
 // 列は客単価まで（販売数・平均購入数・商品単価は出さない）＝スマホ幅で横スクロールなしで収める。
