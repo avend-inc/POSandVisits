@@ -275,6 +275,12 @@
   #adtbl tr.we td:first-child{background:var(--surface)}
   #adtbl thead th:first-child, #admtbl thead th:first-child{z-index:3}
   #adtbl th, #adtbl td, #admtbl th, #admtbl td{white-space:nowrap}
+  /* 固定列は幅を詰めて、数字を左に寄せる（店名から番号を落としたぶん狭くできる） */
+  #adtbl th:first-child, #adtbl td:first-child,
+  #admtbl th:first-child, #admtbl td:first-child{max-width:132px;overflow:hidden;text-overflow:ellipsis;padding-right:4px}
+  #adtbl tr.adweek td:first-child, #admtbl tr.adweek td:first-child{padding-left:16px}
+  #adtbl tr.adweek td:first-child::before, #admtbl tr.adweek td:first-child::before{left:5px}
+  .kmat .eye{margin-right:3px}
   .kmat tr.adsec td{background:var(--surface2);font-weight:800;font-size:11.5px;color:var(--ink2);border-top:2px solid var(--border)}
   /* 店舗を非表示にするボタン */
   .kmat .eye{border:none;background:none;cursor:pointer;font-size:12px;opacity:.35;margin-right:5px;padding:0}
@@ -852,7 +858,6 @@ function render(){ if(VIEW==="ads")renderAds(); else if(state.detail)renderDetai
 // （取り込みの拡張前は フォロー数・プロフアクセス数 がまだ無いため）。
 const AD_METRICS=[
   {k:"sp",  name:"広告費",         fmt:v=>YEN(Math.round(v))+"円", sum:r=>r.sp},
-  {k:"fl",  name:"フォロー数",     fmt:v=>NUM(Math.round(v))+"人", sum:r=>r.fl, need:"fl", src:"follows"},
   {k:"pv",  name:"プロフアクセス数",fmt:v=>NUM(Math.round(v))+"回", sum:r=>r.pv, need:"pv", src:"profile_visits", note:"広告費÷プロフアクセス数。CPCはクリック基準なので別物"},
   {k:"ctr", name:"CTR",           fmt:v=>v==null?"—":F1(v)+"%",  calc:p=>p.im>0?p.ck/p.im*100:null},
   {k:"cpc", name:"CPC",           fmt:v=>v==null?"—":YEN(Math.round(v))+"円", calc:p=>p.pv>0?p.sp/p.pv:null, need:"pv", src:"profile_visits", note:"1プロフアクセスあたりの広告費（広告費÷プロフアクセス数）"},
@@ -880,7 +885,7 @@ function adTableCols(){ return AD_METRICS.map(m=>m.k); }
 // 指標の色。グラフの線と「表示する項目」のチップで同じ色を使う。
 // im（表示回数）・ck（クリック）・rc（リーチ）は項目として出さないが、
 // CTR＝ck÷im、CPC＝sp÷ck、FQ＝im÷rc の計算に使うので集計は続ける
-const AD_COLOR={sp:"#2f6fd0",fl:"#d6336c",pv:"#e8590c",
+const AD_COLOR={sp:"#2f6fd0",fl:"#d6336c",fl:"#d6336c",pv:"#e8590c",
   ctr:"#b8860b",cpc:"#c0392b",cpf:"#7048e8",frt:"#0ca678",cpv:"#e67700",cpm:"#495057",frq:"#845ef7"};
 const AD_DEFAULT=["sp","ctr","cpc"];
 let AD_COLS=(function(){
@@ -1004,9 +1009,9 @@ function renderAds(){
       <p class="note" id="adnote"></p>
     </div>
     <div class="panel">
-      <h2>月次KPI <span class="sub" style="font-weight:500">（今月を含む3か月・前月比）</span></h2>
+      <h2>月次KPI <span class="sub" style="font-weight:500">（今月を含む3か月）</span></h2>
       <div class="tblwrap"><table class="kmat" id="admtbl"></table></div>
-      <p class="note">今月は途中までの実績なので、前月比はそのぶん小さく出ます。店舗の絞り込みには連動しません（非表示にした店は除きます）。</p>
+      <p class="note">今月は途中までの実績です。集計期間の選択には連動しません（非表示にした店は除きます）。</p>
     </div>`;
   wireCommon();
   document.querySelectorAll(".adcol").forEach(b=>b.onclick=()=>{
@@ -1166,95 +1171,79 @@ function drawAds(){
     el.innerHTML=days.length?adChart(days,byDay):`<p class="note">この期間の広告データがありません。</p>`;
     if(days.length)adWireTip(days,byDay);
   }
-  // ---- 内訳：選んだ区分ごとに、週（月〜日）を下にぶら下げる ----
-  //   店舗別のときは 直営／FC でセクションに分け、店舗ごとに非表示にできる。
-  //   週は月曜始まり・日曜終わり。対象期間の端に掛かる週は、実際に集計した範囲だけを出す
-  //   （例: 8/1〜8/9 を選ぶと最初の週は「8/1〜8/2」）。無い日ぶんまで入っているように見せない。
-  const byStore=(AD_GROUP==="st");
-  const g=new Map();
-  for(const r of adRowsAll()){        // ← 一覧は店舗の絞り込みに連動しない
-    const key=byStore?(r.st||UNMAPPED):(AD_GROUP==="a"?r.a:r.c);
-    let e=g.get(key); if(!e){e={own:r.ow||null,tot:{sp:0,im:0,rc:0,ck:0,fl:0,pv:0},wk:new Map()};g.set(key,e);}
-    if(!e.own&&r.ow)e.own=r.ow;
-    const add=o=>{o.sp+=r.sp||0;o.im+=r.im||0;o.rc+=r.rc||0;o.ck+=r.ck||0;o.fl+=r.fl||0;o.pv+=r.pv||0;};
-    add(e.tot);
-    const mon=mondayOf(r.d);
-    let w=e.wk.get(mon); if(!w){w={sp:0,im:0,rc:0,ck:0,fl:0,pv:0};e.wk.set(mon,w);}
-    add(w);
-  }
-  const md=d=>`${+d.slice(5,7)}/${+d.slice(8,10)}`;
-  const wkLabel=mon=>{
-    const sun=addDays(mon,6);
-    const a=mon<state.from?state.from:mon, b=sun>state.to?state.to:sun;   // 期間の端で切る
-    return a===b?md(a):`${md(a)}〜${md(b)}`;
-  };
+  // ---- 週次KPI／月次KPI ----
+  //   どちらも同じ作り：区分（店舗/キャンペーン/アカウント）を親にして、その下に期間を並べる。
+  //   違いは期間の刻みだけ（週＝月曜〜日曜／月）。店舗の絞り込みには連動しない。
   const TCOLS=adTableCols();
   const cells=p2=>TCOLS.map(k=>{const m=AD_METRICS.find(x=>x.k===k);return `<td>${m.fmt(adVal(k,p2))}</td>`;}).join("");
-  const rowsOf=(nm,e)=>
-    `<tr class="adparent"><td style="text-align:left">`+
-      (byStore?`<button class="eye" data-hide="${esc(nm)}" title="この店舗を非表示にする">👁</button>`:"")+
-      (nm===UNMAPPED?`<b style="color:#b8860b">${nm}</b>`:esc(nm))+`</td>${cells(e.tot)}</tr>`+
-    [...e.wk.keys()].sort().map(mon=>
-      `<tr class="adweek"><td style="text-align:left">${wkLabel(mon)}</td>${cells(e.wk.get(mon))}</tr>`).join("");
-  const sortEnt=arr=>arr.sort((x,y)=>y[1].tot.sp-x[1].tot.sp);
-  const all=[...g.entries()];
-  let body="";
-  if(!all.length){
-    body=`<tr><td colspan="${AD_COLS.length+1}" class="sub">データがありません</td></tr>`;
-  }else if(byStore){
-    // 直営 → FC → 区分なし の順。区分は pos_store_links 経由で店舗マスタから引いている。
-    const secs=[["直営","直営店"],["FC","FC店"],[null,"区分なし"]];
-    body=secs.map(([own,label])=>{
-      const part=sortEnt(all.filter(([,e])=>(e.own||null)===own));
-      if(!part.length)return "";
-      const sum=part.reduce((a,[,e])=>{["sp","im","rc","ck","fl","pv"].forEach(k=>a[k]+=e.tot[k]);return a;},
-                            {sp:0,im:0,rc:0,ck:0,fl:0,pv:0});
-      return `<tr class="adsec"><td style="text-align:left">${label}<span class="sub" style="font-weight:500">（${part.length}店）</span></td>${cells(sum)}</tr>`+
-             part.map(([nm,e])=>rowsOf(nm,e)).join("");
-    }).join("");
-  }else{
-    body=sortEnt(all).map(([nm,e])=>rowsOf(nm,e)).join("");
+  const md=d=>`${+d.slice(5,7)}/${+d.slice(8,10)}`;
+  // 店名の先頭にある管理番号（「48.」など）は画面では邪魔なので落とす
+  const shortName=n=>String(n||"").replace(/^\s*\d+\s*[.．]\s*/,"");
+  const zero=()=>({sp:0,im:0,rc:0,ck:0,fl:0,pv:0});
+  function adBuildTable(el,rows,bucketOf,labelOf){
+    if(!el)return;
+    const byStore=(AD_GROUP==="st"), g=new Map();
+    for(const r of rows){
+      const key=byStore?(r.st||UNMAPPED):(AD_GROUP==="a"?r.a:r.c);
+      let e=g.get(key); if(!e){e={own:r.ow||null,tot:zero(),bk:new Map()};g.set(key,e);}
+      if(!e.own&&r.ow)e.own=r.ow;
+      const add=o=>{o.sp+=r.sp||0;o.im+=r.im||0;o.rc+=r.rc||0;o.ck+=r.ck||0;o.fl+=r.fl||0;o.pv+=r.pv||0;};
+      add(e.tot);
+      const b=bucketOf(r.d);
+      let w=e.bk.get(b); if(!w){w=zero();e.bk.set(b,w);}
+      add(w);
+    }
+    const rowsOf=(nm,e)=>
+      `<tr class="adparent"><td style="text-align:left">`+
+        (byStore?`<button class="eye" data-hide="${esc(nm)}" title="この店舗を非表示にする">👁</button>`:"")+
+        (nm===UNMAPPED?`<b style="color:#b8860b">${nm}</b>`:esc(shortName(nm)))+`</td>${cells(e.tot)}</tr>`+
+      [...e.bk.keys()].sort().map(b=>
+        `<tr class="adweek"><td style="text-align:left">${labelOf(b)}</td>${cells(e.bk.get(b))}</tr>`).join("");
+    const sortEnt=a=>a.sort((x,y)=>y[1].tot.sp-x[1].tot.sp);
+    const all=[...g.entries()];
+    let body="";
+    if(!all.length){ body=`<tr><td colspan="${TCOLS.length+1}" class="sub">データがありません</td></tr>`; }
+    else if(byStore){
+      body=[["直営","直営店"],["FC","FC店"],[null,"区分なし"]].map(([own,label])=>{
+        const part=sortEnt(all.filter(([,e])=>(e.own||null)===own));
+        if(!part.length)return "";
+        const sum=part.reduce((a,[,e])=>{["sp","im","rc","ck","fl","pv"].forEach(k=>a[k]+=e.tot[k]);return a;},zero());
+        return `<tr class="adsec"><td style="text-align:left">${label}<span class="sub" style="font-weight:500">（${part.length}店）</span></td>${cells(sum)}</tr>`+
+               part.map(([nm,e])=>rowsOf(nm,e)).join("");
+      }).join("");
+    }else body=sortEnt(all).map(([nm,e])=>rowsOf(nm,e)).join("");
+    el.innerHTML=`<thead><tr><th>${AD_GROUPS.find(x=>x[0]===AD_GROUP)[1].replace("別","")}</th>`+
+      TCOLS.map(k=>`<th>${AD_METRICS.find(x=>x.k===k).name}</th>`).join("")+`</tr></thead><tbody>${body}</tbody>`;
+    el.querySelectorAll(".eye").forEach(b2=>b2.onclick=()=>{
+      AD_HIDE.add(b2.dataset.hide); adSaveHide(); drawAds(); });
   }
-  const t=document.getElementById("adtbl");
-  if(t)t.innerHTML=`<thead><tr><th>${AD_GROUPS.find(x=>x[0]===AD_GROUP)[1].replace("別","")}</th>`+
-    TCOLS.map(k=>`<th>${AD_METRICS.find(x=>x.k===k).name}</th>`).join("")+`</tr></thead><tbody>${body}</tbody>`;
-  // 非表示にしている店舗の案内（何を隠しているかが分かるように名前も出す）
+  // 週次：選んでいる期間を月曜〜日曜で刻む。期間の端に掛かる週は集計した範囲だけを出す。
+  adBuildTable(document.getElementById("adtbl"), adRowsAll(), mondayOf, mon=>{
+    const sun=addDays(mon,6), a=mon<state.from?state.from:mon, b=sun>state.to?state.to:sun;
+    return a===b?md(a):`${md(a)}〜${md(b)}`;
+  });
+  // 月次：期間に関係なく、今月を含む直近3か月。
+  {
+    const last=(DATA.meta||[]).reduce((a,r)=>r.d>a?r.d:a,"")||state.to;
+    const yms=[2,1,0].map(i=>{let[y,m]=last.slice(0,7).split("-").map(Number);m-=i;while(m<1){m+=12;y--;}
+      return y+"-"+String(m).padStart(2,"0");});
+    const mrows=(DATA.meta||[]).filter(r=>yms.includes(r.d.slice(0,7))&&!AD_HIDE.has(r.st||UNMAPPED));
+    adBuildTable(document.getElementById("admtbl"), mrows, d=>d.slice(0,7),
+      ym=>`${+ym.slice(5,7)}月${ym===yms[2]?"（今月）":""}`);
+  }
+  // 非表示にしている店舗の案内
   const hb=document.getElementById("adhidden");
   if(hb){
     const hid=[...AD_HIDE];
     hb.innerHTML=hid.length?
       `<b>${hid.length}店舗を非表示中：</b>`+
-      hid.map(n=>`<button class="chip hidechip" data-show="${esc(n)}" title="表示に戻す">${esc(n)} ✕</button>`).join("")+
-      `<button class="chip" id="adshowall" style="font-weight:800">すべて表示に戻す</button>`
-      :"";
+      hid.map(n=>`<button class="chip hidechip" data-show="${esc(n)}" title="表示に戻す">${esc(shortName(n))} ✕</button>`).join("")+
+      `<button class="chip" id="adshowall" style="font-weight:800">すべて表示に戻す</button>`:"";
     hb.style.display=hid.length?"":"none";
-  }
-  if(t)t.querySelectorAll(".eye").forEach(b2=>b2.onclick=()=>{
-    AD_HIDE.add(b2.dataset.hide); adSaveHide(); drawAds(); });
-  if(hb){
     hb.querySelectorAll(".hidechip").forEach(b2=>b2.onclick=()=>{
       AD_HIDE.delete(b2.dataset.show); adSaveHide(); drawAds(); });
     const sa=document.getElementById("adshowall");
     if(sa)sa.onclick=()=>{ AD_HIDE.clear(); adSaveHide(); drawAds(); };
-  }
-  // ---- 月次KPI：今月を含む3か月ぶんを並べ、前月比を出す ----
-  //   期間の選択には連動しない（月次は月で見たいため）。非表示にした店だけ除く。
-  const mt=document.getElementById("admtbl");
-  if(mt){
-    const last=(DATA.meta||[]).reduce((a,r)=>r.d>a?r.d:a,"")||state.to;
-    const yms=[2,1,0].map(i=>{let[y,m]=last.slice(0,7).split("-").map(Number);m-=i;while(m<1){m+=12;y--;}
-      return y+"-"+String(m).padStart(2,"0");});
-    const sums=yms.map(ym=>adSum((DATA.meta||[]).filter(r=>r.d.slice(0,7)===ym&&!AD_HIDE.has(r.st||UNMAPPED))));
-    const mom=(cur,prev)=>{ if(cur==null||prev==null||!prev)return "";
-      const d=(cur-prev)/Math.abs(prev)*100, up=d>=0;
-      return `<span class="mom" style="color:${up?"#2e9e5b":"#c0392b"}">${up?"+":""}${F1(d)}%</span>`; };
-    mt.innerHTML=`<thead><tr><th>項目</th>`+
-      yms.map((ym,i)=>`<th>${+ym.slice(5,7)}月${i===2?"<small>（今月）</small>":""}</th>`).join("")+`</tr></thead><tbody>`+
-      TCOLS.map(k=>{const m=AD_METRICS.find(x=>x.k===k);
-        return `<tr><td style="text-align:left">${m.name}</td>`+
-          sums.map((p2,i)=>{const v=adVal(k,p2), pv=i?adVal(k,sums[i-1]):null;
-            return `<td>${m.fmt(v)}${i?mom(v,pv):""}</td>`;}).join("")+`</tr>`;}).join("")+
-      `</tbody>`;
   }
   const nomap=adSum(adRowsAll().filter(r=>!r.st));
   const note=document.getElementById("adnote");
