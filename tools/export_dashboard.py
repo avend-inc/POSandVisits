@@ -421,9 +421,16 @@ def build_data(sb: Supabase) -> dict:
                 dest_name[str(d["id"])] = d.get("name")
         except Exception:
             pass
-        for r in _select_all(sb, "meta_insights_daily",
-                             "date,account_name,campaign_name,destination_id,"
-                             "spend,impressions,reach,clicks", order="date"):
+        # follows / profile_visits は取り込みの拡張後に増える列。まだ無い環境でも動くよう、
+        # 付きで取りに行って失敗したら基本の列だけで取り直す（列が増えたら自動で拾う）。
+        BASE = ("date,account_name,campaign_name,destination_id,"
+                "spend,impressions,reach,clicks")
+        try:
+            meta_src = _select_all(sb, "meta_insights_daily",
+                                   BASE + ",follows,profile_visits", order="date")
+        except Exception:
+            meta_src = _select_all(sb, "meta_insights_daily", BASE, order="date")
+        for r in meta_src:
             did = r.get("destination_id")
             meta_rows.append({
                 "d": str(r["date"]),
@@ -436,6 +443,11 @@ def build_data(sb: Supabase) -> dict:
                 "rc": int(r.get("reach") or 0),
                 "ck": int(r.get("clicks") or 0),
             })
+            # フォロー数・プロフアクセス数は、列がある環境だけ載せる（無い日は付けない）
+            if r.get("follows") is not None:
+                meta_rows[-1]["fl"] = int(r["follows"] or 0)
+            if r.get("profile_visits") is not None:
+                meta_rows[-1]["pv"] = int(r["profile_visits"] or 0)
         runs = sb.select("meta_sync_runs", {
             "select": "started_at,status,unmapped_campaigns,rows_upserted,since,until",
             "order": "started_at.desc", "limit": "1"})

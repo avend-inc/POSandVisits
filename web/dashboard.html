@@ -198,6 +198,11 @@
   .bdg{margin-left:5px;padding:1px 6px;border-radius:9px;background:#b8860b;color:#fff;font-size:9.5px;font-weight:800;white-space:nowrap}
   .kmat td .mk{margin-left:3px;font-size:9px;font-weight:800;color:#b8860b}
   .svtbl tr.miss td{background:rgba(184,134,11,.10)}
+  /* 広告タブ：選んだ項目ぶんの折れ線を並べる */
+  .adcharts{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
+  .adchart{border:1px solid var(--border);border-radius:12px;padding:8px 10px 6px;background:var(--surface)}
+  .adchart .t{font-size:11.5px;font-weight:800;color:var(--ink2);margin-bottom:2px}
+  .adchart .r{display:flex;justify-content:space-between;gap:6px;font-size:9.5px;color:var(--muted);margin-top:2px}
   /* 有人来店の入力モーダル */
   .svtbl input{width:74px;padding:5px 7px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--ink);font-family:inherit;font-size:13px;text-align:right}
   .svtbl .ok{color:#2e9e5b;font-weight:800}
@@ -763,16 +768,30 @@ function render(){ if(VIEW==="ads")renderAds(); else if(state.detail)renderDetai
 //  加盟店には配っていないデータなので、この画面はAVENDメンバー専用。
 // ============================================================
 // 表示できる指標。sum=実額の合計 / calc=合計から比率を出す。
+// need を持つ指標は、その実額がデータに入っている時だけ選択肢に出す
+// （取り込みの拡張前は フォロー数・プロフアクセス数 がまだ無いため）。
 const AD_METRICS=[
-  {k:"sp",  name:"消化額",         fmt:v=>YEN(Math.round(v))+"円", sum:r=>r.sp},
+  {k:"sp",  name:"広告費",         fmt:v=>YEN(Math.round(v))+"円", sum:r=>r.sp},
   {k:"im",  name:"表示回数",       fmt:v=>NUM(Math.round(v))+"回", sum:r=>r.im},
   {k:"rc",  name:"リーチ",         fmt:v=>NUM(Math.round(v))+"人", sum:r=>r.rc, note:"日をまたぐと重複を含みます"},
   {k:"ck",  name:"クリック",       fmt:v=>NUM(Math.round(v))+"回", sum:r=>r.ck},
+  {k:"fl",  name:"フォロー数",     fmt:v=>NUM(Math.round(v))+"人", sum:r=>r.fl, need:"fl"},
+  {k:"pv",  name:"プロフアクセス数",fmt:v=>NUM(Math.round(v))+"回", sum:r=>r.pv, need:"pv"},
   {k:"ctr", name:"CTR",           fmt:v=>v==null?"—":F1(v)+"%",  calc:p=>p.im>0?p.ck/p.im*100:null},
   {k:"cpc", name:"CPC",           fmt:v=>v==null?"—":YEN(Math.round(v))+"円", calc:p=>p.ck>0?p.sp/p.ck:null},
+  {k:"frt", name:"フォロー率",     fmt:v=>v==null?"—":F1(v)+"%", calc:p=>p.pv>0?p.fl/p.pv*100:null, need:["fl","pv"], note:"フォロー数÷プロフアクセス数"},
+  {k:"cpf", name:"CPF",           fmt:v=>v==null?"—":YEN(Math.round(v))+"円", calc:p=>p.fl>0?p.sp/p.fl:null, need:"fl", note:"フォロー獲得単価＝広告費÷フォロー数"},
+  {k:"cpv", name:"プロフアクセス単価",fmt:v=>v==null?"—":YEN(Math.round(v))+"円", calc:p=>p.pv>0?p.sp/p.pv:null, need:"pv"},
   {k:"cpm", name:"CPM",           fmt:v=>v==null?"—":YEN(Math.round(v))+"円", calc:p=>p.im>0?p.sp/p.im*1000:null},
   {k:"frq", name:"フリークエンシー",fmt:v=>v==null?"—":F2(v)+"回",  calc:p=>p.rc>0?p.im/p.rc:null},
 ];
+// その指標の元データが1行でも入っているか（入っていない指標は出さない）
+function adHas(need){
+  if(!need)return true;
+  const ks=Array.isArray(need)?need:[need];
+  return ks.every(k=>(DATA.meta||[]).some(r=>r[k]!=null));
+}
+function adMetrics(){ return AD_METRICS.filter(m=>adHas(m.need)); }
 const AD_DEFAULT=["sp","im","ck","ctr","cpc","cpm"];
 let AD_COLS=(function(){
   try{const s=JSON.parse(localStorage.getItem("notime-adcols")||"null");
@@ -780,15 +799,23 @@ let AD_COLS=(function(){
   return AD_DEFAULT.slice();
 })();
 let AD_GROUP=(function(){try{return localStorage.getItem("notime-adgroup")||"c";}catch(e){return "c";}})();
+let AD_STORE=(function(){try{return localStorage.getItem("notime-adstore")||"";}catch(e){return "";}})();
+// 期間内に広告費が動いた店舗（＋未紐付け）をプルダウンの選択肢にする
+function adStoreList(){
+  const set=new Set();
+  for(const r of (DATA.meta||[]))set.add(r.st||UNMAPPED);
+  return [...set].sort((a,b)=>a===UNMAPPED?1:b===UNMAPPED?-1:a.localeCompare(b,"ja"));
+}
 const AD_GROUPS=[["c","キャンペーン別"],["st","店舗別"],["a","アカウント別"]];
 const UNMAPPED="（未紐付け）";
 
-function adRows(){                      // 対象期間の広告行
-  return (DATA.meta||[]).filter(r=>r.d>=state.from&&r.d<=state.to);
+function adRows(){                      // 対象期間＋選んだ店舗の広告行
+  return (DATA.meta||[]).filter(r=>r.d>=state.from&&r.d<=state.to
+    &&(!AD_STORE||(r.st||UNMAPPED)===AD_STORE));
 }
 function adSum(rows){
-  const p={sp:0,im:0,rc:0,ck:0};
-  for(const r of rows){p.sp+=r.sp||0;p.im+=r.im||0;p.rc+=r.rc||0;p.ck+=r.ck||0;}
+  const p={sp:0,im:0,rc:0,ck:0,fl:0,pv:0};
+  for(const r of rows){p.sp+=r.sp||0;p.im+=r.im||0;p.rc+=r.rc||0;p.ck+=r.ck||0;p.fl+=r.fl||0;p.pv+=r.pv||0;}
   return p;
 }
 function adVal(k,p){
@@ -824,14 +851,21 @@ function renderAds(){
         <input type="date" id="to" min="${DATA._min}" max="${DATA._max}" value="${state.to}">
         <span class="sub" id="periodlabel"></span>
       </div>
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+        <span class="sub" style="font-weight:700">店舗</span>
+        <select id="adstore" style="max-width:220px">
+          <option value="">すべての店舗</option>
+          ${adStoreList().map(n=>`<option value="${esc(n)}"${AD_STORE===n?" selected":""}>${esc(n)}</option>`).join("")}
+        </select>
+      </div>
       <div class="sub" style="font-weight:700;margin:6px 0 4px">表示する項目</div>
       <div id="adpick" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">
-        ${AD_METRICS.map(m=>`<button class="chip adcol${AD_COLS.includes(m.k)?" on":""}" data-k="${m.k}">${m.name}</button>`).join("")}
+        ${adMetrics().map(m=>`<button class="chip adcol${AD_COLS.includes(m.k)?" on":""}" data-k="${m.k}"${m.note?` title="${esc(m.note)}"`:""}>${m.name}</button>`).join("")}
       </div>
       <div class="dtop four" id="adcards"></div>
     </div>
     <div class="panel">
-      <h2>日別の推移</h2>
+      <h2>日別の推移 <span class="sub" style="font-weight:500">（選んだ項目ぶん）</span></h2>
       <div id="adtrend"></div>
     </div>
     <div class="panel">
@@ -851,6 +885,12 @@ function renderAds(){
     try{localStorage.setItem("notime-adcols",JSON.stringify(AD_COLS));}catch(e){}
     b.classList.toggle("on"); drawAds();
   });
+  const stSel=document.getElementById("adstore");
+  if(stSel)stSel.onchange=()=>{
+    AD_STORE=stSel.value;
+    try{localStorage.setItem("notime-adstore",AD_STORE);}catch(e){}
+    drawAds();
+  };
   document.querySelectorAll(".adgrp").forEach(b=>b.onclick=()=>{
     AD_GROUP=b.dataset.g;
     try{localStorage.setItem("notime-adgroup",AD_GROUP);}catch(e){}
@@ -858,6 +898,28 @@ function renderAds(){
     drawAds();
   });
   drawPeriod(); drawAds();
+}
+// 折れ線1枚ぶん。値が無い日(null)は線を切って、点にマウスを載せると日付と値が出る。
+function adSpark(days,vals,m){
+  const W=560,H=88,P=8;
+  const fin=vals.filter(v=>v!=null&&isFinite(v));
+  if(!fin.length)return `<div class="sub" style="padding:8px 0">データがありません</div>`;
+  const max=Math.max(...fin), min=Math.min(...fin), span=(max-min)||Math.abs(max)||1;
+  const x=i=>days.length<2?W/2:P+i*(W-P*2)/(days.length-1);
+  const y=v=>H-P-((v-min)/span)*(H-P*2);
+  // 値が途切れたら線も切る（欠測日をまっすぐ結んで“あったこと”にしない）
+  let d="",pen=false;
+  vals.forEach((v,i)=>{
+    if(v==null||!isFinite(v)){pen=false;return;}
+    d+=(pen?" L":" M")+x(i).toFixed(1)+" "+y(v).toFixed(1); pen=true;
+  });
+  const dots=days.map((dd,i)=>{const v=vals[i];
+    return (v==null||!isFinite(v))?"":`<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="${days.length>45?1.6:2.4}" fill="var(--accent)"><title>${dd}　${m.fmt(v)}</title></circle>`;}).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:88px;display:block">
+      <path d="${d.trim()}" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>
+      ${dots}
+    </svg>
+    <div class="r"><span>${m.fmt(min)}</span><span>${days[0].slice(5)}〜${days[days.length-1].slice(5)}</span><span>${m.fmt(max)}</span></div>`;
 }
 function drawAds(){
   const rows=adRows(), tot=adSum(rows);
@@ -868,23 +930,21 @@ function drawAds(){
     return `<div class="card"><div class="k">${m.name}</div><div class="val">${m.fmt(v)}</div>`+
            `<div class="knote">${m.note||""}</div></div>`;
   }).join("");
-  // ---- 日別の推移（1つ目の項目を棒で）----
+  // ---- 日別の推移：選んだ項目ぶんの折れ線を並べる ----
+  //   指標ごとに単位も桁も違う（円・回・%）ので、1枚に重ねずに1指標＝1枚にする。
+  //   縦軸は各指標の最小〜最大に合わせる（0起点にすると変化が潰れて見えないため）。
   const el=document.getElementById("adtrend");
   if(el){
-    const key=AD_COLS[0], m=AD_METRICS.find(x=>x.k===key);
     const byDay=new Map();
-    for(const r of rows){ const a=byDay.get(r.d)||{sp:0,im:0,rc:0,ck:0}; a.sp+=r.sp||0;a.im+=r.im||0;a.rc+=r.rc||0;a.ck+=r.ck||0; byDay.set(r.d,a); }
+    for(const r of rows){ const a=byDay.get(r.d)||{sp:0,im:0,rc:0,ck:0,fl:0,pv:0};
+      a.sp+=r.sp||0;a.im+=r.im||0;a.rc+=r.rc||0;a.ck+=r.ck||0;a.fl+=r.fl||0;a.pv+=r.pv||0; byDay.set(r.d,a); }
     const days=[...byDay.keys()].sort();
-    const vals=days.map(d=>adVal(key,byDay.get(d))).map(v=>v==null?0:v);
-    const max=Math.max(1,...vals), W=Math.max(days.length*14,120), H=120;
-    el.innerHTML=days.length?
-      `<div class="sub" style="margin-bottom:4px">${m.name}（${days.length}日）</div>
-       <div style="overflow-x:auto"><svg width="${W}" height="${H}" style="display:block">
-       ${days.map((d,i)=>{const h=Math.round(vals[i]/max*(H-18));
-         return `<rect x="${i*14+2}" y="${H-h-14}" width="10" height="${h}" rx="2" fill="var(--accent)"><title>${d} ${m.fmt(vals[i])}</title></rect>`;}).join("")}
-       </svg></div>
-       <div class="sub" style="font-size:10px">${days[0]} 〜 ${days[days.length-1]}｜最大 ${m.fmt(max)}</div>`
-      : `<p class="note">この期間の広告データがありません。</p>`;
+    el.innerHTML=!days.length?`<p class="note">この期間の広告データがありません。</p>`
+      :`<div class="adcharts">`+AD_COLS.map(k=>{
+        const m=AD_METRICS.find(x=>x.k===k);
+        const vals=days.map(d=>adVal(k,byDay.get(d)));
+        return `<div class="adchart"><div class="t">${m.name}</div>${adSpark(days,vals,m)}</div>`;
+      }).join("")+`</div>`;
   }
   // ---- 内訳テーブル ----
   const g=new Map();
@@ -902,7 +962,9 @@ function drawAds(){
   const nomap=adSum(rows.filter(r=>!r.st));
   const note=document.getElementById("adnote");
   if(note)note.innerHTML=
-    `CTR＝クリック÷表示回数、CPC＝消化額÷クリック、CPM＝消化額÷表示回数×1000、フリークエンシー＝表示回数÷リーチ。`+
+    `CTR＝クリック÷表示回数、CPC＝広告費÷クリック、CPM＝広告費÷表示回数×1000、フリークエンシー＝表示回数÷リーチ`+
+    (adHas("fl")?`、CPF＝広告費÷フォロー数`:"")+(adHas(["fl","pv"])?`、フォロー率＝フォロー数÷プロフアクセス数`:"")+
+    (adHas("pv")?`、プロフアクセス単価＝広告費÷プロフアクセス数`:"")+`。`+
     `期間をまたぐときも実額どうしで割り直しています（比率の平均はしていません）。`+
     (nomap.sp>0?`<br><b style="color:#b8860b">店舗に紐付いていない広告費が ${YEN(nomap.sp)}円あります。</b>店舗別の数字はそのぶん少なく出ます。`:"");
 }
