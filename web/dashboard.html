@@ -230,6 +230,11 @@
   .adwarn{margin:0 0 8px;padding:8px 10px;border:1px dashed #b8860b;border-radius:10px;
     background:rgba(184,134,11,.08);font-size:11.5px;line-height:1.7}
   .adwarn code{background:rgba(0,0,0,.06);border-radius:4px;padding:1px 4px;font-size:11px}
+  /* 期間のボタンは折り返さず1行。入りきらないときは横にスクロールさせる */
+  .adperiod{display:flex;flex-wrap:nowrap;gap:6px;margin:0 0 8px;overflow-x:auto;
+    -webkit-overflow-scrolling:touch;scrollbar-width:none;padding-bottom:2px}
+  .adperiod::-webkit-scrollbar{display:none}
+  .adperiod .chip{flex:none;white-space:nowrap}
   /* 選択中の区分（店舗別など）をはっきり見せる */
   .chip.adgrp.on{background:var(--accent);border-color:var(--accent);color:#fff}
   @media(max-width:560px){
@@ -826,13 +831,12 @@ const AD_METRICS=[
   {k:"rc",  name:"リーチ",         fmt:v=>NUM(Math.round(v))+"人", sum:r=>r.rc, note:"日をまたぐと重複を含みます"},
   {k:"ck",  name:"クリック",       fmt:v=>NUM(Math.round(v))+"回", sum:r=>r.ck},
   {k:"fl",  name:"フォロー数",     fmt:v=>NUM(Math.round(v))+"人", sum:r=>r.fl, need:"fl", src:"follows"},
-  {k:"pv",  name:"プロフアクセス数",fmt:v=>NUM(Math.round(v))+"回", sum:r=>r.pv, need:"pv", src:"profile_visits"},
+  {k:"pv",  name:"プロフアクセス数",fmt:v=>NUM(Math.round(v))+"回", sum:r=>r.pv, need:"pv", src:"profile_visits", note:"広告費÷プロフアクセス数。CPCはクリック基準なので別物"},
   {k:"ctr", name:"CTR",           fmt:v=>v==null?"—":F1(v)+"%",  calc:p=>p.im>0?p.ck/p.im*100:null},
   {k:"cpc", name:"CPC",           fmt:v=>v==null?"—":YEN(Math.round(v))+"円", calc:p=>p.ck>0?p.sp/p.ck:null},
   {k:"frt", name:"フォロー率",     fmt:v=>v==null?"—":F1(v)+"%", calc:p=>p.pv>0?p.fl/p.pv*100:null, need:["fl","pv"], src:"follows / profile_visits", note:"フォロー数÷プロフアクセス数"},
   {k:"cpf", name:"CPF",           fmt:v=>v==null?"—":YEN(Math.round(v))+"円", calc:p=>p.fl>0?p.sp/p.fl:null, need:"fl", src:"follows", note:"フォロー獲得単価＝広告費÷フォロー数"},
   {k:"cpv", name:"プロフ単価",   fmt:v=>v==null?"—":YEN(Math.round(v))+"円", calc:p=>p.pv>0?p.sp/p.pv:null, need:"pv", src:"profile_visits"},
-  {k:"cpm", name:"CPM",           fmt:v=>v==null?"—":YEN(Math.round(v))+"円", calc:p=>p.im>0?p.sp/p.im*1000:null},
   {k:"frq", name:"FQ",            fmt:v=>v==null?"—":F2(v)+"回",  calc:p=>p.rc>0?p.im/p.rc:null, note:"フリークエンシー＝表示回数÷リーチ"},
 ];
 // その指標の元データが1行でも入っているか（入っていない指標は出さない）
@@ -847,10 +851,10 @@ function adMetrics(){ return AD_METRICS; }
 // 指標の色。グラフの線と「表示する項目」のチップで同じ色を使う。
 const AD_COLOR={sp:"#2f6fd0",im:"#8e5bd0",rc:"#0aa2c0",ck:"#1a8a5a",fl:"#d6336c",pv:"#e8590c",
   ctr:"#b8860b",cpc:"#c0392b",cpf:"#7048e8",frt:"#0ca678",cpv:"#e67700",cpm:"#495057",frq:"#845ef7"};
-const AD_DEFAULT=["sp","im","ck","ctr","cpc","cpm"];
+const AD_DEFAULT=["sp","im","ck","ctr","cpc"];
 let AD_COLS=(function(){
   try{const s=JSON.parse(localStorage.getItem("notime-adcols")||"null");
-    if(Array.isArray(s)&&s.length)return s.filter(k=>AD_METRICS.some(m=>m.k===k));}catch(e){}
+    if(Array.isArray(s)&&s.length){const v=s.filter(k=>AD_METRICS.some(m=>m.k===k)); if(v.length)return v;}}catch(e){}
   return AD_DEFAULT.slice();
 })();
 let AD_GROUP=(function(){try{return localStorage.getItem("notime-adgroup")||"st";}catch(e){return "st";}})();
@@ -916,7 +920,7 @@ function renderAds(){
     </div>
     <div class="panel">
       <div class="sub" style="font-weight:700;margin:2px 0 4px">集計期間</div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px">
+      <div class="adperiod">
         <button class="chip" id="ad4w">直近4週</button>
         <button class="chip pchip" data-preset="thismonth">今月</button>
         <button class="chip pchip" data-preset="lastmonth">前月</button>
@@ -1185,7 +1189,7 @@ function drawAds(){
   const nomap=adSum(adRowsAll().filter(r=>!r.st));
   const note=document.getElementById("adnote");
   if(note)note.innerHTML=
-    `CTR＝クリック÷表示回数、CPC＝広告費÷クリック、CPM＝広告費÷表示回数×1000、FQ＝表示回数÷リーチ`+
+    `CTR＝クリック÷表示回数、CPC＝広告費÷クリック、FQ＝表示回数÷リーチ`+
     (adHas("fl")?`、CPF＝広告費÷フォロー数`:"")+(adHas(["fl","pv"])?`、フォロー率＝フォロー数÷プロフアクセス数`:"")+
     (adHas("pv")?`、プロフアクセス単価＝広告費÷プロフアクセス数`:"")+`。`+
     `期間をまたぐときも実額どうしで割り直しています（比率の平均はしていません）。`+
