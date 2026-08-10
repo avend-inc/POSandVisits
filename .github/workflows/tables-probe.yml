@@ -1,0 +1,39 @@
+# ============================================================
+#  DBのテーブル一覧を見る（読み取りのみ）
+#
+#  Actions →「DBのテーブル一覧」→ Run workflow
+#    keywords : 名前に含む語（空白区切り。例: meta ad）
+#
+#  このSupabaseプロジェクトには複数のアプリが同居していて、
+#  リポジトリに定義が無いテーブルもある。新しい画面を作れるかを
+#  判断するときに「そのデータが本当にDBにあるか」を確かめる。
+#  中身は出さず、テーブル名・列・件数・日付の範囲だけを出す。
+# ============================================================
+name: DBのテーブル一覧
+
+on:
+  workflow_dispatch:
+    inputs:
+      keywords:
+        description: "名前に含む語（空白区切り。例: meta ad campaign）。空なら一覧だけ"
+        required: false
+        default: ""
+
+jobs:
+  probe:
+    name: テーブルを調べる
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TZ: Asia/Tokyo
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install requests
+      - name: 一覧を出す
+        run: python -m tools.tables_probe ${{ inputs.keywords }}
