@@ -117,5 +117,22 @@ ctx.adSales(acc, "2026-08-08", "2026-08-09");
 ctx.adSales(acc, "2026-08-08", "2026-08-08");
 eq("集計し直すと前回の売上は消える", acc.ex, 100000);
 
+
+// --- 段の合計から「売上が無い店」を外しているか -----------------------
+//   オープン前の店は広告費だけがあって売上が無い。合計に混ぜると、
+//   直営店ぜんたいの売上比率が実態より高く出て、判断を誤らせる。
+{
+  const secLine = src.split("\n").find((l) => l.includes("const live=part.filter"));
+  if (!secLine || !/e\.tot\.ex>0/.test(secLine)) {
+    console.log("  NG  段の合計から売上が無い店を外していません");
+    ng++;
+  } else {
+    console.log("  OK  段の合計は売上がある店だけで作っている");
+  }
+  const exLine = src.split("\n").find((l) => l.includes("const exNote="));
+  if (!exLine) { console.log("  NG  外した店を知らせる文がありません"); ng++; }
+  else console.log("  OK  外した店は名前と広告費つきで知らせる");
+}
+
 console.log(ng ? `\n❌ ${ng}件ずれています。` : "\n✅ すべて期待どおりです。");
 process.exit(ng ? 1 : 0);
