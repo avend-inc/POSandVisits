@@ -175,7 +175,22 @@
   .dtop{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:10px 0 4px}
   /* 直営店は「売上予算」を足して4枚。スマホ幅では3枚を横に並べると潰れるので2×2にする */
   .dtop.four{grid-template-columns:repeat(4,minmax(0,1fr))}
-  @media(max-width:620px){ .dtop.four{grid-template-columns:repeat(2,minmax(0,1fr))} }
+  /* カードは常に横4列。スマホでは中身を詰めて4つ入るようにする */
+  @media(max-width:620px){
+    .dtop.four{gap:5px}
+    .dtop.four .card{padding:7px 7px}
+    .dtop.four .card .k{font-size:9.5px;margin-bottom:3px}
+    .dtop.four .card .val{font-size:clamp(11px,3.6vw,15px)}
+    .dtop.four .card .val small{font-size:9px}
+    .dtop.four .card .knote{font-size:8.5px;margin-top:2px}
+  }
+  /* カードはタップでグラフの表示/非表示。色は項目の線と同じ */
+  .dtop .card.adcard{cursor:pointer;-webkit-tap-highlight-color:transparent}
+  .dtop .card.adcard .k{display:flex;align-items:center;gap:4px}
+  .dtop .card.adcard .k i{width:7px;height:7px;border-radius:50%;flex:none}
+  .dtop .card.adcard.goff{opacity:.5;border-top-color:var(--border)}
+  .dtop .card.adcard.goff .k i{background:var(--border) !important}
+  .dtop .card.adcard.goff .knote{color:var(--muted)}
   .dtop .card.bud{border-top-color:#2e9e5b}
   .dtop .card .rate{margin-top:4px;font-size:10px;font-weight:800;white-space:nowrap}
   .dtop .card{padding:11px 12px;border-radius:12px;border-top:3px solid var(--accent)}
@@ -869,6 +884,12 @@ let AD_HIDE=(function(){
   catch(e){return new Set();}
 })();
 function adSaveHide(){ try{localStorage.setItem("notime-adhide",JSON.stringify([...AD_HIDE]));}catch(e){} }
+// カードをタップするとグラフから外せる（カード自体は残す）。線が多すぎるときに使う。
+let AD_GOFF=(function(){
+  try{const v=JSON.parse(localStorage.getItem("notime-adgoff")||"[]"); return new Set(Array.isArray(v)?v:[]);}
+  catch(e){return new Set();}
+})();
+function adSaveGoff(){ try{localStorage.setItem("notime-adgoff",JSON.stringify([...AD_GOFF]));}catch(e){} }
 // 広告タブの既定期間＝直近4週（最新日を含む週の月曜から数えて4週ぶん）。
 // 店舗別一覧が月曜〜日曜の週で並ぶので、週がちょうど4本立つ範囲にそろえる。
 let AD_PERIOD_INIT=false;
@@ -1008,7 +1029,7 @@ function adChart(days,byDay){
   const W=NARROW?380:760, H=NARROW?190:230, L=NARROW?40:54, R=NARROW?40:54, T=NARROW?8:12, B=NARROW?22:26;
   const FS=NARROW?8:9;
   const x=i=>days.length<2?(L+(W-R))/2:L+i*(W-L-R)/(days.length-1);
-  const series=AD_COLS.map(k=>{
+  const series=AD_COLS.filter(k=>!AD_GOFF.has(k)).map(k=>{
     const m=AD_METRICS.find(z=>z.k===k), vals=days.map(d=>adVal(k,byDay.get(d)));
     const fin=vals.filter(v=>v!=null&&isFinite(v));
     if(!fin.length)return null;
@@ -1019,7 +1040,7 @@ function adChart(days,byDay){
       d+=(pen?" L":" M")+x(i).toFixed(1)+" "+y(v).toFixed(1); pen=true; });
     return {k:k,m:m,vals:vals,min:min,max:max,y:y,d:d.trim(),c:AD_COLOR[k]||"var(--accent)"};
   }).filter(Boolean);
-  if(!series.length)return `<p class="note">表示する項目を選んでください。値が「—」の項目は、元データがDBに入ると出ます。</p>`;
+  if(!series.length)return `<p class="note">グラフに出す項目がありません。上のカードをタップすると、その項目をグラフに出せます。</p>`;
   const dot=days.length>45?1.7:2.6;
   const step=Math.max(1,Math.ceil(days.length/(NARROW?5:8)));
   // 左右の軸（3等分の目盛り）。short=軸に置くので短く丸める。
@@ -1073,7 +1094,7 @@ function adWireTip(days,byDay){
     if(cur){const gx=days.length<2?(L+(W-R))/2:L+i*(W-L-R)/(days.length-1);
       cur.setAttribute("x1",gx);cur.setAttribute("x2",gx);cur.setAttribute("opacity","1");}
     tip.innerHTML=`<div class="d">${d.slice(0,4)}/${+d.slice(5,7)}/${+d.slice(8,10)}（${WK[new Date(d+"T00:00:00Z").getUTCDay()]}）</div>`+
-      AD_COLS.map(k=>{const m=AD_METRICS.find(z=>z.k===k);
+      AD_COLS.filter(k=>!AD_GOFF.has(k)).map(k=>{const m=AD_METRICS.find(z=>z.k===k);
         return `<div class="l"><i style="background:${AD_COLOR[k]||"#fff"}"></i>${m.name}<b>${m.fmt(adVal(k,p))}</b></div>`;}).join("");
     tip.style.display="block";
     const box=wrap.getBoundingClientRect();
@@ -1094,10 +1115,18 @@ function drawAds(){
   if(cards)cards.innerHTML=AD_COLS.map(k=>{
     const m=AD_METRICS.find(x=>x.k===k), ready=adHas(m.need), v=adVal(k,tot);
     // 元データが未取込の項目は「—」だけだと理由が分からないので、必要な列名を書く
-    return `<div class="card${ready?"":" nodata"}"><div class="k">${m.name}</div>`+
+    const off=AD_GOFF.has(k);
+    return `<div class="card adcard${ready?"":" nodata"}${off?" goff":""}" data-k="${k}"`+
+           ` title="タップでグラフの表示/非表示">`+
+           `<div class="k"><i style="background:${AD_COLOR[k]||"var(--accent)"}"></i>${m.name}</div>`+
            `<div class="val">${ready?m.fmt(v):"—"}</div>`+
-           `<div class="knote">${ready?(m.note||""):`${m.src} が未取込`}</div></div>`;
+           `<div class="knote">${off?"グラフ非表示":(ready?(m.note||""):`${m.src} が未取込`)}</div></div>`;
   }).join("");
+  if(cards)cards.querySelectorAll(".adcard").forEach(c2=>c2.onclick=()=>{
+    const k=c2.dataset.k;
+    if(AD_GOFF.has(k))AD_GOFF.delete(k); else AD_GOFF.add(k);
+    adSaveGoff(); drawAds();
+  });
   // 選んだ項目のうち、元データがまだDBに無いものをまとめて知らせる
   const warn=document.getElementById("adwarn");
   if(warn){
