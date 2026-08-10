@@ -219,8 +219,20 @@
   .adtip .l i{width:8px;height:8px;border-radius:2px;flex:none}
   .adtip .l b{margin-left:auto;padding-left:10px;font-weight:800}
   /* 元データがまだ無い指標のチップ */
-  .chip.adcol.nodata{opacity:.55}
-  .chip.adcol.nodata small{font-size:9px;opacity:.8}
+  /* 項目チップ：色は丸ドットで示す（左端の帯だと折り返しで崩れるため） */
+  .chip.adcol{display:inline-flex;align-items:center;gap:5px}
+  .chip.adcol .dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .chip.adcol.on .dot{background:#fff !important;opacity:.9}
+  .chip.adcol.nodata{opacity:.5}
+  /* 選択中の区分（店舗別など）をはっきり見せる */
+  .chip.adgrp.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  @media(max-width:560px){
+    .adlegend{gap:4px 10px}
+    .adlegend span{font-size:10.5px}
+    .adlegend small{display:none}          /* 幅が足りないのでレンジは隠す（値は吹き出しで見る） */
+    .kmat .eye{font-size:11px}
+    .adtip{font-size:10.5px;padding:6px 8px}
+  }
   /* 内訳：親（店舗など）と、その下にぶら下がる週 */
   .kmat tr.adparent td{font-weight:800;border-top:1px solid var(--border)}
   .kmat tr.adweek td{color:var(--ink2);font-size:12px}
@@ -925,7 +937,8 @@ function renderAds(){
           const on=AD_COLS.includes(m.k), ready=adHas(m.need);
           const tip=(m.note?m.note:"")+(ready?"":(m.note?" / ":"")+"元データ（フォロー数・プロフアクセス数）がDBに入ると値が出ます");
           return `<button class="chip adcol${on?" on":""}${ready?"":" nodata"}" data-k="${m.k}"${tip?` title="${esc(tip)}"`:""}`+
-                 ` style="${on?`background:${c};border-color:${c};color:#fff`:`border-left:3px solid ${c}`}">${m.name}${ready?"":" <small>—</small>"}</button>`;}).join("")}
+                 ` style="${on?`background:${c};border-color:${c};color:#fff`:""}">`+
+                 `<i class="dot" style="background:${c}"></i>${m.name}</button>`;}).join("")}
       </div>
       <div class="dtop four" id="adcards"></div>
     </div>
@@ -974,7 +987,10 @@ function renderAds(){
 //     そのまま目盛りにしているので、1番目・2番目の線は軸の数字と一致する。
 //   ・グラフに触れると、その日の全項目をまとめて黒い吹き出しで出す。
 function adChart(days,byDay){
-  const W=760,H=230,L=54,R=54,T=12,B=26;
+  // スマホは座標系ごと小さくする。760幅のまま縮めると目盛りの文字が潰れて読めないため。
+  const NARROW=(window.innerWidth||760)<560;
+  const W=NARROW?380:760, H=NARROW?190:230, L=NARROW?40:54, R=NARROW?40:54, T=NARROW?8:12, B=NARROW?22:26;
+  const FS=NARROW?8:9;
   const x=i=>days.length<2?(L+(W-R))/2:L+i*(W-L-R)/(days.length-1);
   const series=AD_COLS.map(k=>{
     const m=AD_METRICS.find(z=>z.k===k), vals=days.map(d=>adVal(k,byDay.get(d)));
@@ -989,24 +1005,24 @@ function adChart(days,byDay){
   }).filter(Boolean);
   if(!series.length)return `<p class="note">表示する項目を選んでください。値が「—」の項目は、元データがDBに入ると出ます。</p>`;
   const dot=days.length>45?1.7:2.6;
-  const step=Math.max(1,Math.ceil(days.length/8));
+  const step=Math.max(1,Math.ceil(days.length/(NARROW?5:8)));
   // 左右の軸（3等分の目盛り）。short=軸に置くので短く丸める。
   const axis=(s2,side)=>{
     if(!s2)return "";
     const at=side==="L"?L-6:W-R+6, an=side==="L"?"end":"start";
     return [0,.5,1].map(f=>{
       const v=s2.min+(s2.max-s2.min)*f, yy=s2.y(v);
-      return `<text x="${at}" y="${(yy+3).toFixed(1)}" font-size="9" fill="${s2.c}" text-anchor="${an}">${esc(adShort(s2.m,v))}</text>`;
-    }).join("")+`<text x="${at}" y="${T-2}" font-size="9" font-weight="700" fill="${s2.c}" text-anchor="${an}">${s2.m.name}</text>`;
+      return `<text x="${at}" y="${(yy+3).toFixed(1)}" font-size="${FS}" fill="${s2.c}" text-anchor="${an}">${esc(adShort(s2.m,v))}</text>`;
+    }).join("");
   };
   const tot=adSum(adRows());
   return `<div class="adlegend">`+series.map((s2,i)=>
       `<span><i style="background:${s2.c}"></i>${s2.m.name}${i<2?`<em>${i?"右軸":"左軸"}</em>`:""}<b>${s2.m.fmt(adVal(s2.k,tot))}</b>`+
       `<small>${s2.m.fmt(s2.min)}〜${s2.m.fmt(s2.max)}</small></span>`).join("")+`</div>
-    <div class="adwrap"><svg viewBox="0 0 ${W} ${H}" style="width:100%;min-width:520px;height:230px;display:block"
+    <div class="adwrap"><svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;display:block"
         data-l="${L}" data-r="${R}" data-w="${W}" data-n="${days.length}">
       ${axis(series[0],"L")}${axis(series[1],"R")}
-      ${days.map((d,i)=>i%step?"":`<text x="${x(i).toFixed(1)}" y="${H-8}" font-size="9" fill="var(--muted)" text-anchor="middle">${+d.slice(5,7)}/${+d.slice(8,10)}</text>`).join("")}
+      ${days.map((d,i)=>i%step?"":`<text x="${x(i).toFixed(1)}" y="${H-7}" font-size="${FS}" fill="var(--muted)" text-anchor="middle">${+d.slice(5,7)}/${+d.slice(8,10)}</text>`).join("")}
       <line class="adcursor" x1="0" y1="${T}" x2="0" y2="${H-B}" stroke="var(--ink2)" stroke-width="1" stroke-dasharray="3 3" opacity="0"/>
       ${series.map(s2=>`<path d="${s2.d}" fill="none" stroke="${s2.c}" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round"/>`).join("")}
       ${series.map(s2=>days.map((dd,i)=>{const v=s2.vals[i];
