@@ -384,10 +384,9 @@ async function franchiseeBoot(ids){
   window.FRANCHISEE=true; window.FR_STORES=stores.map(s=>s.id); window.FR_BENCH=bench;
   DATA={generated_at:gen,stores,daily,cat,catp,bundles,bundleNames,catSeason,gradeBands};
   prep();
-  // 割当が1店 or URLで店指定 → その店へ直行。複数店 → まず「自分の店舗」一覧を出す。
-  const pick=(DETAIL_ID&&window.FR_STORES.includes(DETAIL_ID))?DETAIL_ID
-            :(window.FR_STORES.length===1?window.FR_STORES[0]:null);
-  if(pick!=null)openFranchiseeStore(pick); else renderFranchiseeHome();
+  // URLで店指定（共有リンク）→ その店へ直行。それ以外は必ず「自分の店舗」選択画面をはさむ（1店でも）。
+  if(DETAIL_ID&&window.FR_STORES.includes(DETAIL_ID)) openFranchiseeStore(DETAIL_ID);
+  else renderFranchiseeHome();
 }
 // 加盟店：許可された店舗の一覧（ログイン直後に表示）。名前をタップでその店へ。
 function renderFranchiseeHome(){

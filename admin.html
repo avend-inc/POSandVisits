@@ -45,6 +45,17 @@
   .roletag{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;}
   .r-admin{background:#7c3aed22;color:#7c3aed;} .r-editor{background:var(--accent-weak);color:var(--accent);} .r-viewer{background:var(--surface2);color:var(--ink2);}
   .addrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px;padding-top:10px;border-top:1px dashed var(--border);}
+  /* 店舗を選ぶドロップダウン（スライサー） */
+  .dd{position:relative;}
+  .dd summary{list-style:none;display:inline-flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:10px;padding:8px 12px;background:var(--surface);font-weight:700;font-size:13px;cursor:pointer;}
+  .dd summary::-webkit-details-marker{display:none}
+  .dd[open] summary{border-color:var(--accent);}
+  .dd .ddwrap{margin-top:6px;border:1px solid var(--border);border-radius:10px;padding:8px;background:var(--surface);}
+  .dd .ddgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:2px 12px;max-height:280px;overflow:auto;}
+  .dd .ddgrid label{display:flex;align-items:center;gap:6px;font-size:13px;padding:3px 0;cursor:pointer;}
+  .stchip{display:inline-flex;align-items:center;gap:5px;background:var(--surface2);border:1px solid var(--border);border-radius:14px;padding:3px 9px;font-size:12px;margin:2px 3px 2px 0;}
+  .stchip button{border:none;background:none;color:var(--bad);cursor:pointer;font-weight:800;font-size:14px;line-height:1;padding:0;}
+  select.addsel{border:1px solid var(--border);border-radius:8px;padding:5px 8px;font-size:12px;background:var(--surface);color:var(--ink);cursor:pointer;}
   .msg{font-size:12.5px;font-weight:600;margin:8px 0 0;}
   .msg.ok{color:var(--good);} .msg.err{color:var(--bad);}
   .secbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:12px;}
@@ -166,17 +177,20 @@ async function render(){
         <b>店舗の割り当てが有る人＝その店だけ</b>／<b>割り当てが無い人＝本部（全店）</b>。<b>admin/編集は割り当てても全店のまま</b>です。
         メールを入れて<b>見せる店舗をチェック（複数可）</b>し「割り当てを追加」を押すと、そのメールを viewer（閲覧）として登録し、選んだ店に一括で割り当てます。</p>
       <div class="tblwrap"><table id="atbl"><tbody><tr><td class="sub">読み込み中…</td></tr></tbody></table></div>
-      <div class="addrow">
+      <div class="addrow" style="align-items:flex-start">
         <input id="a_email" class="wide" type="email" placeholder="メール（Googleアカウント）">
+        <details class="dd" id="a_dd">
+          <summary>店舗を選択 <span class="sub" id="a_cnt">（未選択）</span> ▼</summary>
+          <div class="ddwrap">
+            <div style="display:flex;gap:8px;margin-bottom:6px">
+              <button class="btn ghost" id="a_all" type="button" style="padding:4px 10px;font-size:12px">全選択</button>
+              <button class="btn ghost" id="a_none" type="button" style="padding:4px 10px;font-size:12px">全解除</button>
+            </div>
+            <div class="ddgrid" id="a_stores"><span class="sub">読み込み中…</span></div>
+          </div>
+        </details>
         <button class="btn" id="a_add">割り当てを追加</button>
       </div>
-      <div style="margin:8px 0 4px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <b style="font-size:12px">見せる店舗を選択（複数可）</b>
-        <button class="btn ghost" id="a_all" type="button" style="padding:5px 10px;font-size:12px">全選択</button>
-        <button class="btn ghost" id="a_none" type="button" style="padding:5px 10px;font-size:12px">全解除</button>
-        <span class="sub" id="a_cnt"></span>
-      </div>
-      <div id="a_stores" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:2px 12px;max-height:260px;overflow:auto;border:1px solid var(--border);border-radius:10px;padding:8px"><span class="sub">読み込み中…</span></div>
       <p class="msg" id="a_msg"></p>
     </div>
     <div class="panel">
@@ -241,24 +255,38 @@ async function render(){
 }
 
 // 加盟店の店舗割り当て（admin が直接管理。RLSで admin のみ書込み可）
-function updateAcnt(){const n=document.querySelectorAll("#a_stores .achk:checked").length;const el=document.getElementById("a_cnt");if(el)el.textContent=n?`${n}店 選択中`:"";}
+function updateAcnt(){const n=document.querySelectorAll("#a_stores .achk:checked").length;const el=document.getElementById("a_cnt");if(el)el.textContent=n?`（${n}店選択）`:"（未選択）";}
+function nameOfStore(id){const s=STORESCACHE.find(x=>String(x.id)===String(id));return s?s.name:("店舗"+id);}
 async function loadAssignments(){
   const tb=document.querySelector("#atbl"); if(!tb)return;
+  // ① 新規割り当て用：ドロップダウン内のチェックボックス（店舗一覧）
   const box=document.getElementById("a_stores");
-  if(box){ box.innerHTML=STORESCACHE.map(s=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px;padding:3px 0;cursor:pointer"><input type="checkbox" class="achk" value="${s.id}"><span>${esc(s.name)}</span></label>`).join("")||'<span class="sub">店舗がありません</span>';
+  if(box){ box.innerHTML=STORESCACHE.map(s=>`<label><input type="checkbox" class="achk" value="${s.id}"><span>${esc(s.name)}</span></label>`).join("")||'<span class="sub">店舗がありません</span>';
     box.querySelectorAll(".achk").forEach(c=>c.onchange=updateAcnt); updateAcnt(); }
-  const nameOf=id=>{const s=STORESCACHE.find(x=>String(x.id)===String(id));return s?s.name:("店舗"+id);};
+  // ② 割り当て済み一覧：メールごとにまとめ、店舗チップ（×で解除）＋「＋店舗を追加」プルダウン
   const {data,error}=await SB.from("app_user_stores").select("email,store_id").order("email");
   if(error){tb.innerHTML=`<tbody><tr><td class="err">読み込み失敗：${esc(error.message)}</td></tr></tbody>`;return;}
-  const head=`<thead><tr><th>メール</th><th>店舗</th><th></th></tr></thead>`;
-  const rows=(data||[]).map(a=>`<tr><td>${esc(a.email)}</td><td>${esc(nameOf(a.store_id))} <span class="sub">#${a.store_id}</span></td>
-    <td><button class="btn danger" data-email="${esc(a.email)}" data-sid="${a.store_id}">解除</button></td></tr>`).join("")
-    ||`<tr><td colspan="3" class="sub">割り当てはまだありません（登録済みユーザーは全員 本部＝全店閲覧）</td></tr>`;
+  const byEmail=new Map();
+  (data||[]).forEach(a=>{ if(!byEmail.has(a.email))byEmail.set(a.email,[]); byEmail.get(a.email).push(a.store_id); });
+  const head=`<thead><tr><th>メール</th><th>見せている店舗</th><th>店舗を追加</th></tr></thead>`;
+  const rows=[...byEmail.entries()].map(([email,sids])=>{
+    const chips=sids.map(id=>`<span class="stchip">${esc(nameOfStore(id))}<button title="解除" data-rm-email="${esc(email)}" data-rm-sid="${id}">×</button></span>`).join("")||'<span class="sub">なし</span>';
+    const remaining=STORESCACHE.filter(s=>!sids.includes(s.id));
+    const addsel=`<select class="addsel" data-add-email="${esc(email)}"><option value="">＋店舗を追加…</option>${remaining.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join("")}</select>`;
+    return `<tr><td>${esc(email)}</td><td>${chips}</td><td>${addsel}</td></tr>`;
+  }).join("")||`<tr><td colspan="3" class="sub">割り当てはまだありません（登録済みユーザーは全員 本部＝全店閲覧）</td></tr>`;
   tb.innerHTML=head+"<tbody>"+rows+"</tbody>";
-  tb.querySelectorAll("[data-email]").forEach(b=>b.onclick=async()=>{
-    if(!confirm(`${b.dataset.email} の「${nameOf(b.dataset.sid)}」割り当てを解除しますか？`))return;
-    const {error}=await SB.from("app_user_stores").delete().eq("email",b.dataset.email).eq("store_id",b.dataset.sid);
-    msg("a_msg", error?("解除失敗："+error.message):"解除しました", !error);
+  tb.querySelectorAll("[data-rm-email]").forEach(b=>b.onclick=async()=>{
+    const email=b.dataset.rmEmail, sid=b.dataset.rmSid;
+    if(!confirm(`${email} から「${nameOfStore(sid)}」を解除しますか？`))return;
+    const {error}=await SB.from("app_user_stores").delete().eq("email",email).eq("store_id",sid);
+    msg("a_msg", error?("解除失敗："+error.message):`${email} から「${nameOfStore(sid)}」を解除しました`, !error);
+    if(!error)loadAssignments();
+  });
+  tb.querySelectorAll(".addsel").forEach(sel=>sel.onchange=async()=>{
+    const email=sel.dataset.addEmail, sid=+sel.value; if(!sid)return;
+    const {error}=await SB.from("app_user_stores").upsert({email,store_id:sid},{onConflict:"email,store_id",ignoreDuplicates:true});
+    msg("a_msg", error?("追加失敗："+error.message):`${email} に「${nameOfStore(sid)}」を追加しました`, !error);
     if(!error)loadAssignments();
   });
 }
