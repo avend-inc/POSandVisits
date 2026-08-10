@@ -414,7 +414,8 @@ async function authBoot(url,anon){
   ME.role=role;
   if(!ME.role){showDenied(ME.email);return;}
   // 加盟店（FC）判定：app_user_stores に割り当てがあれば「加盟店モード」＝自店バンドルだけ読む。
-  // 割り当てが無い＝本部（従来どおり全店 data.json）。RLS(sql/019)で data.json は本部しか読めない。
+  // 割り当てが無い＝AVENDメンバー（従来どおり全店 data.json）。
+  // RLS(sql/019)により data.json は AVENDメンバーしか読めない（加盟店は自店バンドルのみ）。
   let frStores=[];
   try{ const {data:us}=await SB.from("app_user_stores").select("store_id");
        frStores=[...new Set((us||[]).map(r=>+r.store_id))]; }catch(e){}
@@ -987,7 +988,7 @@ function renderDetail(){
   // 売上予算（事業計画）も開いたときに読む。読めたらカードを描き直す。
   if(budgetShown(state.detail))
     loadBudget(state.detail,(DATA._salesMax||DATA._max).slice(0,7)).then(()=>refresh());
-  if(!FRAN)aiWeeklyInsight();   // AIのまとめは本部モードのみ（加盟店は集計値ベースで表示、AIは今後）
+  if(!FRAN)aiWeeklyInsight();   // AIのまとめはAVENDメンバーのみ（加盟店は集計値ベースで表示、AIは今後）
 }
 
 // ============================================================
