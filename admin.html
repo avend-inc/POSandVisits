@@ -164,13 +164,19 @@ async function render(){
       <h2>加盟店の店舗割り当て</h2>
       <p class="note"><b>「ユーザー管理」に登録した人だけがログインできます</b>（未登録の人はログインできず、何も見えません）。登録済みの人のうち、
         <b>店舗の割り当てが有る人＝その店だけ</b>／<b>割り当てが無い人＝本部（全店）</b>。<b>admin/編集は割り当てても全店のまま</b>です。
-        ここでメールを追加すると、そのメールを viewer（閲覧）として登録し、その店に割り当てます。1メールに複数店も可（1行ずつ追加）。</p>
+        メールを入れて<b>見せる店舗をチェック（複数可）</b>し「割り当てを追加」を押すと、そのメールを viewer（閲覧）として登録し、選んだ店に一括で割り当てます。</p>
       <div class="tblwrap"><table id="atbl"><tbody><tr><td class="sub">読み込み中…</td></tr></tbody></table></div>
       <div class="addrow">
         <input id="a_email" class="wide" type="email" placeholder="メール（Googleアカウント）">
-        <select id="a_store"></select>
         <button class="btn" id="a_add">割り当てを追加</button>
       </div>
+      <div style="margin:8px 0 4px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <b style="font-size:12px">見せる店舗を選択（複数可）</b>
+        <button class="btn ghost" id="a_all" type="button" style="padding:5px 10px;font-size:12px">全選択</button>
+        <button class="btn ghost" id="a_none" type="button" style="padding:5px 10px;font-size:12px">全解除</button>
+        <span class="sub" id="a_cnt"></span>
+      </div>
+      <div id="a_stores" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:2px 12px;max-height:260px;overflow:auto;border:1px solid var(--border);border-radius:10px;padding:8px"><span class="sub">読み込み中…</span></div>
       <p class="msg" id="a_msg"></p>
     </div>
     <div class="panel">
@@ -224,6 +230,8 @@ async function render(){
   document.getElementById("logout").onclick=async()=>{try{await SB.auth.signOut();}catch(e){}location.reload();};
   document.getElementById("u_add").onclick=addUser;
   document.getElementById("a_add").onclick=addAssignment;
+  document.getElementById("a_all").onclick=()=>{document.querySelectorAll("#a_stores .achk").forEach(c=>c.checked=true);updateAcnt();};
+  document.getElementById("a_none").onclick=()=>{document.querySelectorAll("#a_stores .achk").forEach(c=>c.checked=false);updateAcnt();};
   document.getElementById("s_add").onclick=addStore;
   document.getElementById("p_add").onclick=addPos;
   document.getElementById("u_update").onclick=updateUsers;
@@ -233,10 +241,12 @@ async function render(){
 }
 
 // 加盟店の店舗割り当て（admin が直接管理。RLSで admin のみ書込み可）
+function updateAcnt(){const n=document.querySelectorAll("#a_stores .achk:checked").length;const el=document.getElementById("a_cnt");if(el)el.textContent=n?`${n}店 選択中`:"";}
 async function loadAssignments(){
   const tb=document.querySelector("#atbl"); if(!tb)return;
-  const asel=document.getElementById("a_store");
-  if(asel)asel.innerHTML=STORESCACHE.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join("");
+  const box=document.getElementById("a_stores");
+  if(box){ box.innerHTML=STORESCACHE.map(s=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px;padding:3px 0;cursor:pointer"><input type="checkbox" class="achk" value="${s.id}"><span>${esc(s.name)}</span></label>`).join("")||'<span class="sub">店舗がありません</span>';
+    box.querySelectorAll(".achk").forEach(c=>c.onchange=updateAcnt); updateAcnt(); }
   const nameOf=id=>{const s=STORESCACHE.find(x=>String(x.id)===String(id));return s?s.name:("店舗"+id);};
   const {data,error}=await SB.from("app_user_stores").select("email,store_id").order("email");
   if(error){tb.innerHTML=`<tbody><tr><td class="err">読み込み失敗：${esc(error.message)}</td></tr></tbody>`;return;}
@@ -254,15 +264,15 @@ async function loadAssignments(){
 }
 async function addAssignment(){
   const email=(document.getElementById("a_email").value||"").trim().toLowerCase();
-  const sid=document.getElementById("a_store").value;
+  const ids=[...document.querySelectorAll("#a_stores .achk:checked")].map(c=>+c.value);
   if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){msg("a_msg","正しいメールアドレスを入れてください",false);return;}
-  if(!sid){msg("a_msg","店舗を選んでください",false);return;}
+  if(!ids.length){msg("a_msg","見せる店舗を1つ以上チェックしてください",false);return;}
   // 新規メールは viewer で登録（既存ユーザーのロールは変えない）
   const {error:e1}=await SB.from("app_users").upsert({email,role:"viewer"},{onConflict:"email",ignoreDuplicates:true});
   if(e1){msg("a_msg","ユーザー登録失敗："+e1.message,false);return;}
-  const {error:e2}=await SB.from("app_user_stores").upsert({email,store_id:sid},{onConflict:"email,store_id",ignoreDuplicates:true});
-  msg("a_msg", e2?("割り当て失敗："+e2.message):`${email} に「${STORESCACHE.find(s=>String(s.id)===String(sid))?.name||sid}」を割り当てました`, !e2);
-  if(!e2){document.getElementById("a_email").value="";loadAssignments();loadUsers();}
+  const {error:e2}=await SB.from("app_user_stores").upsert(ids.map(store_id=>({email,store_id})),{onConflict:"email,store_id",ignoreDuplicates:true});
+  msg("a_msg", e2?("割り当て失敗："+e2.message):`${email} に ${ids.length}店 を割り当てました`, !e2);
+  if(!e2){document.getElementById("a_email").value="";document.querySelectorAll("#a_stores .achk").forEach(c=>c.checked=false);updateAcnt();loadAssignments();loadUsers();}
 }
 
 // バンドル名は日次ETLが自動で取得・登録するので、ここは「確認用の一覧」（読み取り専用）。
