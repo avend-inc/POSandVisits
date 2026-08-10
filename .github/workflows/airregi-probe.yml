@@ -13,8 +13,30 @@ name: Airレジ 調査
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: "調査モード"
+        required: false
+        default: "debug-dl"
+        type: choice
+        options: [debug-dl, discover, fetch, db-probe, pr-probe, pos-lag-probe, conn-probe, vault-probe, sipos-checklist, season-probe, store-trend, cat-probe, season-cfg, season-set-dry, season-set-apply, catname-probe, prodtbl-probe, stores-dry, stores-apply, storefix-dry, storefix-apply, cashierfix-dry, cashierfix-apply, pos-split-probe, apply-sql, export-dashboard]
+      sql_files:
+        description: "apply-sqlモードで実行する .sql（カンマ区切り）"
+        required: false
+        default: "sql/019_franchisee_access.sql,sql/020_store_members.sql"
+      date_from:
+        description: "fetchモードの開始日 (YYYY-MM-DD)"
+        required: false
+        default: "2026-08-03"
+      date_to:
+        description: "fetchモードの終了日 (YYYY-MM-DD)"
+        required: false
+        default: "2026-08-03"
       sales_url:
         description: "会計明細画面のURL（分かっていれば。空なら既定を試す）"
+        required: false
+        default: ""
+      trend_stores:
+        description: "store-trendモードの対象店（カンマ区切り。空=既定）"
         required: false
         default: ""
 
@@ -31,6 +53,12 @@ jobs:
       AIRREGI_ID: ${{ secrets.AIRREGI_ID }}
       AIRREGI_PW: ${{ secrets.AIRREGI_PW }}
       AIRREGI_SALES_URL: ${{ inputs.sales_url }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      TREND_STORES: ${{ inputs.trend_stores }}
+      SQL_FILES: ${{ inputs.sql_files }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -42,14 +70,63 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       - name: ブラウザ(Chromium)を用意
+        if: ${{ inputs.mode != 'db-probe' && inputs.mode != 'pr-probe' && inputs.mode != 'pos-lag-probe' && inputs.mode != 'conn-probe' && inputs.mode != 'vault-probe' && inputs.mode != 'sipos-checklist' && inputs.mode != 'season-probe' && inputs.mode != 'store-trend' && inputs.mode != 'cat-probe' && inputs.mode != 'season-cfg' && inputs.mode != 'season-set-dry' && inputs.mode != 'season-set-apply' && inputs.mode != 'catname-probe' && inputs.mode != 'prodtbl-probe' && inputs.mode != 'storefix-dry' && inputs.mode != 'storefix-apply' && inputs.mode != 'cashierfix-dry' && inputs.mode != 'cashierfix-apply' && inputs.mode != 'apply-sql' && inputs.mode != 'export-dashboard' }}
         run: python -m playwright install --with-deps chromium
-      - name: 設定確認
+      - name: 調査（DL導線 / 画面構造 / 実取得 / DB診断）
         run: |
-          if [ -z "$AIRREGI_ID" ] || [ -z "$AIRREGI_PW" ]; then
-            echo "::error::AIRREGI_ID / AIRREGI_PW が未登録です（Settings → Secrets → Actions）"; exit 1
+          if [ "${{ inputs.mode }}" = "db-probe" ]; then
+            python -m tools.db_probe
+          elif [ "${{ inputs.mode }}" = "pr-probe" ]; then
+            python -m tools.pr_probe
+          elif [ "${{ inputs.mode }}" = "pos-lag-probe" ]; then
+            python -m tools.pos_lag_probe
+          elif [ "${{ inputs.mode }}" = "conn-probe" ]; then
+            python -m tools.conn_probe
+          elif [ "${{ inputs.mode }}" = "vault-probe" ]; then
+            python -m tools.vault_probe
+          elif [ "${{ inputs.mode }}" = "sipos-checklist" ]; then
+            python -m tools.sipos_checklist
+          elif [ "${{ inputs.mode }}" = "season-probe" ]; then
+            python -m tools.season_probe
+          elif [ "${{ inputs.mode }}" = "store-trend" ]; then
+            python -m tools.store_trend
+          elif [ "${{ inputs.mode }}" = "cat-probe" ]; then
+            python -m tools.cat_probe
+          elif [ "${{ inputs.mode }}" = "season-cfg" ]; then
+            python -m tools.season_cfg_probe
+          elif [ "${{ inputs.mode }}" = "season-set-dry" ]; then
+            python -m tools.season_cfg_apply
+          elif [ "${{ inputs.mode }}" = "season-set-apply" ]; then
+            APPLY=1 python -m tools.season_cfg_apply
+          elif [ "${{ inputs.mode }}" = "catname-probe" ]; then
+            python -m tools.catname_probe
+          elif [ "${{ inputs.mode }}" = "prodtbl-probe" ]; then
+            python -m tools.prodtbl_probe
+          elif [ "${{ inputs.mode }}" = "stores-dry" ]; then
+            python -m tools.stores_recover
+          elif [ "${{ inputs.mode }}" = "stores-apply" ]; then
+            APPLY=1 python -m tools.stores_recover
+          elif [ "${{ inputs.mode }}" = "storefix-dry" ]; then
+            python -m tools.store_fix
+          elif [ "${{ inputs.mode }}" = "storefix-apply" ]; then
+            APPLY=1 python -m tools.store_fix
+          elif [ "${{ inputs.mode }}" = "cashierfix-dry" ]; then
+            python -m tools.cashier_fix
+          elif [ "${{ inputs.mode }}" = "cashierfix-apply" ]; then
+            APPLY=1 python -m tools.cashier_fix
+          elif [ "${{ inputs.mode }}" = "pos-split-probe" ]; then
+            python -m tools.pos_split_probe
+          elif [ "${{ inputs.mode }}" = "apply-sql" ]; then
+            python -m tools.apply_sql
+          elif [ "${{ inputs.mode }}" = "export-dashboard" ]; then
+            python -m tools.export_dashboard
+          elif [ "${{ inputs.mode }}" = "discover" ]; then
+            python -m etl.airregi_fetch --discover
+          elif [ "${{ inputs.mode }}" = "fetch" ]; then
+            python -m etl.airregi_fetch --from "${{ inputs.date_from }}" --to "${{ inputs.date_to }}"
+          else
+            python -m etl.airregi_fetch --debug-dl
           fi
-      - name: 調査（ログイン→画面構造ダンプ）
-        run: python -m etl.airregi_fetch --discover
       - name: 調査ファイルを保存（debug/）
         if: always()
         uses: actions/upload-artifact@v4

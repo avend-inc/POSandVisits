@@ -1,0 +1,44 @@
+# ============================================================
+#  Airレジ データ連携API 調査
+#
+#  仕様書が無い状態で、実際の連携手順・エンドポイント・認証方式を洗い出す。
+#    1. Airレジ公式FAQ（Zendeskの公開JSON）から「データ連携API」記事の本文を取得・表示
+#    2. AIRREGI_API_KEY / AIRREGI_API_TOKEN で候補エンドポイントを実際に叩いてダンプ
+#
+#  必要な Secrets: AIRREGI_API_KEY / AIRREGI_API_TOKEN
+#  → 実行後、ログの [FAQ] 本文と [エンドポイント探索] の結果を見て本実装する。
+# ============================================================
+name: Airレジ API調査
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: notime-airregi-api-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TZ: Asia/Tokyo
+      AIRREGI_API_KEY: ${{ secrets.AIRREGI_API_KEY }}
+      AIRREGI_API_TOKEN: ${{ secrets.AIRREGI_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: ライブラリをインストール
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: 設定確認
+        run: |
+          if [ -z "$AIRREGI_API_KEY" ] && [ -z "$AIRREGI_API_TOKEN" ]; then
+            echo "::warning::AIRREGI_API_KEY / AIRREGI_API_TOKEN が未登録です。認証なしの応答のみ確認します。"
+          fi
+      - name: 調査（FAQ本文＋エンドポイント探索）
+        run: python -m etl.airregi_api --probe

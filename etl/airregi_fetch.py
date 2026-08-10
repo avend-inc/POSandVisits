@@ -100,6 +100,40 @@ def _first_visible(page, selectors: list[str]):
     return None
 
 
+def _click_exact(page, label: str, timeout: int = 4000) -> bool:
+    """innerText/valueが「完全一致」する可視要素をクリックする。
+    部分一致だと『ダウンロードの準備を開始する』が『開始する』に引っかかる等の
+    取り違えが起きるため、確認ダイアログのボタン等はこちらで正確に押す。"""
+    try:
+        loc = page.get_by_role("button", name=label, exact=True)
+        n = loc.count()
+        for i in range(n):
+            el = loc.nth(i)
+            if el.is_visible():
+                el.click(timeout=timeout)
+                return True
+    except Exception:
+        pass
+    # role で当たらない場合の保険：厳密テキスト一致で走査
+    try:
+        loc = page.locator(
+            f'button, a, [role=button]'
+        ).filter(has_text=_re_exact(label))
+        n = loc.count()
+        for i in range(min(n, 8)):
+            el = loc.nth(i)
+            if el.is_visible():
+                el.click(timeout=timeout)
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _re_exact(label: str):
+    return re.compile(r"^\s*" + re.escape(label) + r"\s*$")
+
+
 def _click_by_text(page, texts: list[str]) -> str | None:
     """文字を含むボタン/リンクを押す。押した文字を返す。無ければ None。"""
     for t in texts:
@@ -566,10 +600,114 @@ def decode_csv(data: bytes) -> str:
 
 
 # ------------------------------------------------------------
+# ジャーナルCSVの取得（export API 直叩き。UI操作より堅牢）
+# ------------------------------------------------------------
+#  実通信で確定した手順（2026-08）:
+#    1) POST /CLP/api/exportJournalData/start/
+#         paramStr={"targetDateFrom":"YYYYMMDD","targetDateTo":"YYYYMMDD"}  → returnCode 0000
+#    2) POST /CLP/api/exportJournalData/getStatus/  paramStr=null
+#         → results.resultsData.status=="02" & progressRate==100 で生成完了
+#    3) POST /CLP/api/exportJournalData/download/   paramStr={}  → CSV本体(cp932, bytes)
+#  セッション(cookie/店舗コンテキスト)は login→select_store→salesJournal表示で確立する。
+API_BASE = "https://airregi.jp/CLP"
+API_START = "/api/exportJournalData/start/"
+API_STATUS = "/api/exportJournalData/getStatus/"
+API_DOWNLOAD = "/api/exportJournalData/download/"
+
+
+def _download_via_ui(page, start_date: str, end_date: str) -> bytes:
+    """ジャーナルCSVを取得する。UI操作でSPA自身にexportさせるので、CSRFトークン等の
+    付随情報はブラウザが正しく付ける（raw APIの直叩きは returnCode 4001 で弾かれる）。
+
+    唯一の難所「対象期間がreadonlyの日付ピッカー」は、SPAが投げる
+      POST /CLP/api/exportJournalData/start/  (body: paramStr={"targetDateFrom","targetDateTo"})
+    を page.route で捕まえ、ペイロードの日付を希望の期間に書き換えて回避する。
+    手順: ダウンロードメニュー→ジャーナル履歴(CSV)→準備を開始する→(確認)開始する→
+          生成完了→ダウンロードする（downloadイベントでCSVを受け取る）。
+    """
+    import json
+    import urllib.parse
+    ymd_from = start_date.replace("-", "").replace("/", "")
+    ymd_to = end_date.replace("-", "").replace("/", "")
+
+    downloads: list = []
+    try:
+        page.on("download", lambda d: downloads.append(d))
+    except Exception:
+        pass
+
+    # start/ のペイロードを希望日付へ書き換える（readonly日付ピッカーを回避）。
+    def _route_start(route):
+        try:
+            if route.request.method == "POST":
+                body = "paramStr=" + urllib.parse.quote(
+                    json.dumps({"targetDateFrom": ymd_from, "targetDateTo": ymd_to}))
+                route.continue_(post_data=body)
+                return
+        except Exception:
+            pass
+        try:
+            route.continue_()
+        except Exception:
+            pass
+    try:
+        page.route("**/exportJournalData/start/**", _route_start)
+    except Exception:
+        pass
+
+    if not _open_download_menu(page):
+        dump_page(page, "airregi_dl_icon_notfound")
+        raise EtlError("Airレジのダウンロードメニュー（ジャーナル履歴）を開けませんでした。")
+    if not _click_by_text(page, JOURNAL_MENU_TEXTS):
+        dump_page(page, "airregi_journal_menu_notfound")
+        raise EtlError("「ジャーナル履歴(CSV)」を押せませんでした。")
+    page.wait_for_timeout(1500)
+    if not _click_by_text(page, PREP_TEXTS):
+        dump_page(page, "airregi_prep_notfound")
+        raise EtlError("「ダウンロードの準備を開始する」を押せませんでした。")
+    page.wait_for_timeout(1200)
+    _click_exact(page, "開始する")   # 確認ダイアログ（完全一致で押す）
+
+    # 生成完了を待って「ダウンロードする」を押す（downloadイベントで受け取る）。
+    deadline = time.time() + 150
+    while time.time() < deadline and not downloads:
+        try:
+            btn = page.get_by_text("ダウンロードする").first
+            if btn and btn.is_visible():
+                btn.click(timeout=4000)
+        except Exception:
+            pass
+        for _ in range(6):
+            if downloads:
+                break
+            page.wait_for_timeout(500)
+
+    if not downloads:
+        dump_page(page, "airregi_download_not_fired")
+        raise EtlError("Airレジのダウンロードが発火しませんでした（生成待ちタイムアウト）。")
+    path = downloads[0].path()
+    if not path:
+        raise EtlError("Airレジのダウンロードファイルのパスが取得できませんでした。")
+    with open(path, "rb") as fh:
+        raw = fh.read()
+    # Airレジのダウンロードは ZIP（PK…）で「ジャーナル履歴_YYYYMMDD-YYYYMMDD.csv」を
+    # 内包する。ZIPなら展開して中のCSV(cp932)を返す。生CSVならそのまま返す。
+    if raw[:2] == b"PK":
+        import io
+        import zipfile
+        with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+            csv_names = [n for n in zf.namelist() if n.lower().endswith(".csv")]
+            if not csv_names:
+                raise EtlError(f"AirレジのZIPにCSVが見つかりません: {zf.namelist()}")
+            return zf.read(csv_names[0])
+    return raw
+
+
+# ------------------------------------------------------------
 # まとめ
 # ------------------------------------------------------------
 def fetch_range(start_date: str, end_date: str, headless: bool = True) -> str:
-    """start_date〜end_date の会計明細CSVを取得して文字列で返す。失敗時3回まで再試行。"""
+    """start_date〜end_date の会計明細CSVを取得して文字列で返す。失敗時は再試行。"""
     airid = require_env("AIRREGI_ID", "Airレジ（AirID）のログインID")
     password = require_env("AIRREGI_PW", "Airレジ（AirID）のパスワード")
 
@@ -585,30 +723,22 @@ def fetch_range(start_date: str, end_date: str, headless: bool = True) -> str:
             with browser_page(headless=headless) as (page, context):
                 login(page, airid, password)
                 select_store(page)   # 複数店アカウント→下北沢を選ぶ
-                if _env("AIRREGI_DEBUG"):
-                    discover(page)
+                # 取引履歴画面を開いてセッションに「対象店舗」を固定させる。
                 try:
                     open_sales(page)
-                    text = decode_csv(
-                        download_csv(page, context, start_date, end_date))
-                    # 取得物がCSVか検証。Airレジがエラー時に返すJSON
-                    #   {"results":{"returnCode":"4001","errMsg":"システムエラー"...}}
-                    # を「売上0」と誤判定しないよう、CSVでなければ失敗として扱う。
-                    head = text.lstrip()[:1000]
-                    if head[:1] in ("{", "[") or ("取引No" not in head and "取引日" not in head):
-                        raise EtlError(
-                            "AirレジのCSVダウンロードに失敗しました"
-                            "（CSVではない応答＝ダウンロード導線の変更/システムエラーの可能性）。\n"
-                            f"  応答の先頭: {text[:200]!r}")
-                    return text
+                    page.wait_for_timeout(1500)
                 except Exception:
-                    # 失敗時は画面構造をログに残して次の調整に使えるようにする。
-                    try:
-                        print("  ⚠️ 会計明細/CSV取得で失敗。画面構造を洗い出します（調査用）:")
-                        discover(page)
-                    except Exception:
-                        pass
-                    raise
+                    pass
+                # UI操作でSPAにexportさせCSVを取得（start/のペイロードを書き換えて期間指定）。
+                text = decode_csv(_download_via_ui(page, start_date, end_date))
+                # 取得物がCSVか検証。エラー時のJSON {"results":{"returnCode":...}} を
+                # 「売上0」と誤判定しないよう、CSVでなければ失敗として扱う。
+                head = text.lstrip()[:1000]
+                if head[:1] in ("{", "[") or ("取引No" not in head and "取引日" not in head):
+                    raise EtlError(
+                        "AirレジのCSV取得に失敗しました（CSVではない応答）。\n"
+                        f"  応答の先頭: {text[:200]!r}")
+                return text
         except Exception as e:
             last_error = e
             if attempt < max_try:
@@ -623,10 +753,155 @@ def fetch(business_date: str, headless: bool = True) -> str:
     return fetch_range(business_date, business_date, headless=headless)
 
 
+def _safe_url(page) -> str:
+    try:
+        return page.url or ""
+    except Exception:
+        return "(url取得不可)"
+
+
+def debug_download(start_date: str = "2026-08-03", end_date: str | None = None,
+                   headless: bool = True) -> None:
+    """高速診断：短timeout・リトライ無しで、ログイン→取引履歴→ダウンロード導線を
+    1ステップずつ試し、どこで壊れるかと画面構造を即ダンプして抜ける。
+
+    本番の fetch_range は既定60秒timeout×リトライで失敗時に十数分かかるため、
+    「壊れ箇所の特定」にはこちらを使う（Actions 1回 ≈ 1〜2分）。"""
+    from .browser import browser_page, dump_controls
+    end_date = end_date or start_date
+    airid = require_env("AIRREGI_ID", "Airレジ（AirID）のログインID")
+    password = require_env("AIRREGI_PW", "Airレジ（AirID）のパスワード")
+
+    with browser_page(headless=headless) as (page, context):
+        # 失敗を即座に返させる（60秒も粘らせない）。ログイン内部の明示waitはそのまま。
+        context.set_default_timeout(6000)
+        downloads: list = []
+        try:
+            page.on("download", lambda d: downloads.append(d))
+        except Exception:
+            pass
+
+        def step(name, fn) -> bool:
+            print(f"\n=== {name} ===")
+            try:
+                fn()
+                print(f"  ✅ OK  url={_safe_url(page)}")
+                return True
+            except Exception as e:
+                print(f"  ❌ {type(e).__name__}: {str(e)[:240]}")
+                return False
+
+        ok_login = step("① ログイン", lambda: login(page, airid, password))
+        print(f"  （ログイン後URL: {_safe_url(page)}）")
+        if not ok_login:
+            dump_controls(page, "ログイン画面")
+            print("  → ログインで停止。ID/PW誤り or 追加認証(2FA/CAPTCHA)の可能性。")
+            return
+        step("② 店舗選択（下北沢）", lambda: select_store(page))
+        step("③ 取引履歴へ移動", lambda: open_sales(page))
+
+        # 取引履歴画面の構造（ダウンロードアイコンの目印確定）
+        dump_controls(page, "取引履歴画面")
+
+        opened = _open_download_menu(page)
+        print(f"\n=== ④ ダウンロードメニューを開く -> {opened} ===")
+        dump_controls(page, "DLメニュー試行後")
+        if not opened:
+            print("  → ダウンロードアイコン/メニューが開けず。上のダンプで目印を確定する。")
+            return
+
+        clicked = _click_by_text(page, JOURNAL_MENU_TEXTS)
+        print(f"\n=== ⑤ 「ジャーナル履歴(CSV)」クリック -> {clicked!r} ===")
+        page.wait_for_timeout(1500)
+        _dump_modal(page, "ジャーナル履歴モーダル")
+
+        # 期間SELECTの選択肢＋日付入力欄の詳細（readonly? outerHTML）を採取
+        try:
+            meta = page.evaluate(r"""
+            () => {
+              const cut=(s,n=120)=>(s||'').toString().replace(/\s+/g,' ').trim().slice(0,n);
+              const sels=[...document.querySelectorAll('select')].map(s=>({
+                name:s.name, id:s.id, value:s.value,
+                options:[...s.options].map(o=>({v:o.value,t:cut(o.text,30),sel:o.selected}))}));
+              const ins=[...document.querySelectorAll('input[type=text]')].map(i=>({
+                value:cut(i.value,40), readonly:i.readOnly, name:i.name, id:i.id,
+                cls:cut(i.className,80), outer:cut(i.outerHTML,200)}));
+              return {selects:sels, textInputs:ins};
+            }""")
+            print("\n=== ⑥ 期間コントロール ===")
+            print(f"  SELECT: {meta.get('selects')}")
+            print(f"  text inputs: {meta.get('textInputs')}")
+        except Exception as e:
+            print(f"  期間コントロール採取失敗: {e}")
+
+        # exportJournalAPI の 送信ペイロード / 応答本文 / ダウンロードURL を採取
+        captured: list[str] = []
+
+        def _cap_req(req):
+            try:
+                if "exportJournalData" in req.url or "download" in req.url.lower():
+                    body = None
+                    try:
+                        body = req.post_data
+                    except Exception:
+                        body = None
+                    captured.append(f"REQ {req.method} {req.url}\n        body={(body or '')[:600]}")
+            except Exception:
+                pass
+
+        def _cap_resp(resp):
+            try:
+                if "exportJournalData" in resp.url:
+                    txt = ""
+                    try:
+                        txt = resp.text()[:600]
+                    except Exception:
+                        txt = "(本文取得不可)"
+                    captured.append(f"RESP {resp.status} {resp.url}\n        {txt}")
+            except Exception:
+                pass
+        try:
+            page.on("request", _cap_req)
+            page.on("response", _cap_resp)
+        except Exception:
+            pass
+
+        prep = _click_by_text(page, PREP_TEXTS)
+        print(f"\n=== ⑦ 「準備を開始」クリック -> {prep!r} ===")
+        page.wait_for_timeout(1500)
+        _dump_modal(page, "準備を開始 押下後（確認ダイアログ？）")
+        confirm = _click_exact(page, "開始する")   # 完全一致で確認ボタンを押す
+        print(f"=== ⑧ 確認「開始する」（完全一致）クリック -> {confirm} ===")
+
+        got = None
+        for i in range(20):   # 最大 ~40秒 生成待ち
+            page.wait_for_timeout(2000)
+            if downloads:
+                got = "download-event"
+                break
+            try:
+                btn = page.get_by_text("ダウンロードする").first
+                if btn and btn.is_visible():
+                    btn.click(timeout=3000)
+            except Exception:
+                pass
+        if downloads:
+            got = "download-event"
+        print(f"=== ⑨ 生成待ち結果 -> downloads={len(downloads)} ({got}) ===")
+
+        print(f"\n=== ⑩ exportJournalData 通信の中身（{len(captured)}件） ===")
+        for c in captured[-24:]:
+            print(f"  {c}")
+        print("\n  → SELECTの選択肢・APIペイロード・応答で、"
+              "最終修正（期間指定の入れ方 or API直叩き）を確定する。")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Airレジ 会計明細CSVの自動取得")
     ap.add_argument("--discover", action="store_true",
                     help="ログイン後の画面構造を洗い出すだけ（目印確定用）")
+    ap.add_argument("--debug-dl", action="store_true",
+                    help="高速診断：短timeout・リトライ無しでDL導線を1ステップずつ試して即ダンプ")
     ap.add_argument("--date", help="1日ぶん取得（YYYY-MM-DD）")
     ap.add_argument("--from", dest="date_from", help="期間の開始（YYYY-MM-DD）")
     ap.add_argument("--to", dest="date_to", help="期間の終了（YYYY-MM-DD）")
@@ -635,6 +910,12 @@ def main() -> int:
 
     load_dotenv()
     headless = not args.headful
+
+    if args.debug_dl:
+        start = args.date or args.date_from or "2026-08-03"
+        end = args.date_to or start
+        debug_download(start, end, headless=headless)
+        return 0
 
     if args.discover:
         airid = require_env("AIRREGI_ID", "Airレジ（AirID）のログインID")

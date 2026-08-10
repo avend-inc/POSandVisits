@@ -69,7 +69,10 @@ def _select_all(sb: Supabase, table: str, select: str,
 
 def build_data(sb: Supabase) -> dict:
     # "*" で全列取得。ownership 列が未追加でも動くよう .get で既定「直営」にする。
-    stores = sb.select("stores", {"select": "*", "order": "id"})
+    # id が NULL の行（＝共有storesに在庫アプリだけが持つ店。私たちのPOS対象外で
+    # 売上も無い）は、ダッシュボードの店舗リスト・選択肢に混ざらないよう除外する。
+    stores = [s for s in sb.select("stores", {"select": "*", "order": "id"})
+              if s.get("id") is not None]
     name_by_id = {s["id"]: s["name"] for s in stores}
     own_by_id = {s["id"]: (s.get("ownership") or "直営") for s in stores}
     # KPIに来店数を使うか（列が未追加でも既定 True）。False の店は来店・購入率をKPIから外す。
@@ -115,6 +118,12 @@ def build_data(sb: Supabase) -> dict:
     except Exception:
         pass
 
+    # 進行中の「当日(JST)」は“途中”なのでダッシュボードには出さない（締日＝最後の
+    # 完全な日）。データ自体はDBに残す：翌朝の通常ETLが当日ぶんを「前日＝完全な日」
+    # として取り込み、翌日以降このカットオフを自然に通過して表示される。
+    # （誰かが当日を backfill しても、途中の数字を確定日と誤認させない安全弁）
+    _today_jst = datetime.now(JST).date().isoformat()
+
     tx_seen: set[tuple] = set()
     daily: dict[tuple, dict] = {}     # (date, store_id) -> 伝票合計
     cat: dict[tuple, dict] = {}       # (date, store_id, category) -> 明細合計
@@ -152,6 +161,8 @@ def build_data(sb: Supabase) -> dict:
 
     for r in sales:
         d = r["business_date"]
+        if str(d) >= _today_jst:   # 進行中の当日は締めない
+            continue
         sid = r["store_id"]
         dk = (d, sid)
         rec = daily.setdefault(dk, _new())
@@ -235,6 +246,8 @@ def build_data(sb: Supabase) -> dict:
         order="id", extra={"source": "eq.digitel"},
     )
     for r in visits:
+        if str(r["business_date"]) >= _today_jst:   # 進行中の当日は締めない
+            continue
         dk = (r["business_date"], r["store_id"])
         rec = daily.setdefault(dk, _new())
         rec["v"] = (rec["v"] or 0) + int(r["visitors"] or 0)
@@ -494,11 +507,36 @@ def main() -> int:
         # index.html は常に公開バケット（URLを変えないため）
         _ensure_bucket(sb, BUCKET_PUBLIC, public=True)
 
+        # 静的サブページ（推移・予実・販促・棚卸・分析AI・経営・管理）も毎回配信する。
+        # これらは実行時に config.json を自分で読むため設定の埋め込みは不要（そのまま配信）。
+        # → dashboard.html だけでなく trends.html 等の更新も、この集計・配信で反映される。
+        for _pg in ("trends.html", "pl.html", "promo.html", "stock.html",
+                    "ask.html", "keiei.html", "admin.html", "forecast.html"):
+            _fp = ROOT / "web" / _pg
+            if _fp.exists():
+                _upload(sb, BUCKET_PUBLIC, _pg,
+                        _fp.read_text(encoding="utf-8").encode("utf-8"),
+                        "text/html; charset=utf-8", public=True)
+
         if auth_mode:
             # data.json は非公開バケットへ。HTMLに公開情報を埋め込む。
             _ensure_bucket(sb, BUCKET_PRIVATE, public=False)
             _upload(sb, BUCKET_PRIVATE, "data.json", data_bytes,
                     "application/json; charset=utf-8", public=False)
+            # 加盟店(FC)向け：店舗ごとのバンドル store-<id>.json を書き出す。
+            #   中身＝自店の明細＋事前計算した比較集計（他店の生データは含めない）。
+            #   RLS（sql/019）で「その店の割当者＋本部」だけが読める。
+            try:
+                from tools.store_bundles import build_store_bundles
+                from datetime import datetime as _dt
+                bundles = build_store_bundles(data, _dt.now(JST).date().isoformat())
+                for _sid, _b in bundles.items():
+                    _body = json.dumps(_b, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+                    _upload(sb, BUCKET_PRIVATE, f"store-{_sid}.json", _body,
+                            "application/json; charset=utf-8", public=False)
+                print(f"  店舗バンドル: {len(bundles)}件（store-<id>.json）")
+            except Exception as _e:
+                print(f"  ⚠️ 店舗バンドル生成をスキップ: {_e}")
             html = _inject_config(html_text, sb.url, anon, "")
             _upload(sb, BUCKET_PUBLIC, "index.html", html,
                     "text/html; charset=utf-8", public=True)
