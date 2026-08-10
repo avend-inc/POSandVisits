@@ -844,7 +844,6 @@ const AD_METRICS=[
   {k:"sp",  name:"広告費",         fmt:v=>YEN(Math.round(v))+"円", sum:r=>r.sp},
   {k:"im",  name:"表示回数",       fmt:v=>NUM(Math.round(v))+"回", sum:r=>r.im},
   {k:"rc",  name:"リーチ",         fmt:v=>NUM(Math.round(v))+"人", sum:r=>r.rc, note:"日をまたぐと重複を含みます"},
-  {k:"ck",  name:"クリック",       fmt:v=>NUM(Math.round(v))+"回", sum:r=>r.ck},
   {k:"fl",  name:"フォロー数",     fmt:v=>NUM(Math.round(v))+"人", sum:r=>r.fl, need:"fl", src:"follows"},
   {k:"pv",  name:"プロフアクセス数",fmt:v=>NUM(Math.round(v))+"回", sum:r=>r.pv, need:"pv", src:"profile_visits", note:"広告費÷プロフアクセス数。CPCはクリック基準なので別物"},
   {k:"ctr", name:"CTR",           fmt:v=>v==null?"—":F1(v)+"%",  calc:p=>p.im>0?p.ck/p.im*100:null},
@@ -869,9 +868,10 @@ function adMetrics(){ return AD_METRICS; }
 // 元データがまだ無い指標（フォロー系）は列に出さない（「—」だけの列が並ぶため）。
 function adTableCols(){ return AD_METRICS.filter(m=>adHas(m.need)).map(m=>m.k); }
 // 指標の色。グラフの線と「表示する項目」のチップで同じ色を使う。
-const AD_COLOR={sp:"#2f6fd0",im:"#8e5bd0",rc:"#0aa2c0",ck:"#1a8a5a",fl:"#d6336c",pv:"#e8590c",
+// ck（クリック）は項目としては出さないが、CTR/CPCの計算には使うので集計は続ける
+const AD_COLOR={sp:"#2f6fd0",im:"#8e5bd0",rc:"#0aa2c0",fl:"#d6336c",pv:"#e8590c",
   ctr:"#b8860b",cpc:"#c0392b",cpf:"#7048e8",frt:"#0ca678",cpv:"#e67700",cpm:"#495057",frq:"#845ef7"};
-const AD_DEFAULT=["sp","im","ck","ctr","cpc"];
+const AD_DEFAULT=["sp","im","ctr","cpc"];
 let AD_COLS=(function(){
   try{const s=JSON.parse(localStorage.getItem("notime-adcols")||"null");
     if(Array.isArray(s)&&s.length){const v=s.filter(k=>AD_METRICS.some(m=>m.k===k)); if(v.length)return v;}}catch(e){}
