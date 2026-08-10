@@ -1,0 +1,130 @@
+"""
+Meta広告データ（meta_insights_daily / meta_sync_runs）の点検（読み取りのみ）。
+
+    python -m tools.meta_probe
+
+【何を見るか】
+  ① 同期の実行記録 … いつ・どこから走っているか。実行時刻が毎日ほぼ同じなら
+     自動（cron）、バラバラで日中だけなら手動/PC実行の疑い。
+  ② 未紐付け … destination_id（店舗）が付いていない行がどれだけあるか。
+     ここが多いと「店舗別の広告費」が実態より小さく出る。
+  ③ カバレッジ … 直近の日で抜けている日が無いか。
+  ④ アカウント別 … どのアカウントが、いつからいつまで、いくら使っているか。
+
+  中身の生データは出さず、件数・合計・名称だけを出す。書き込みは一切しない。
+"""
+from __future__ import annotations
+
+import os
+import re
+import sys
+from pathlib import Path
+
+import requests
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+URL = (os.environ.get("SUPABASE_URL") or "").strip().rstrip("/")
+TOKEN = (os.environ.get("SUPABASE_ACCESS_TOKEN") or "").strip()
+REF = re.sub(r"^https?://([^.]+)\..*$", r"\1", URL) if URL else ""
+
+
+def run(sql: str):
+    if not REF or not TOKEN:
+        raise SystemExit("SUPABASE_URL / SUPABASE_ACCESS_TOKEN が設定されていません。")
+    r = requests.post(
+        f"https://api.supabase.com/v1/projects/{REF}/database/query",
+        headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"},
+        json={"query": sql}, timeout=60)
+    if r.status_code >= 400:
+        raise SystemExit(f"HTTP {r.status_code}: {r.text[:400]}")
+    return r.json()
+
+
+def show(title: str, rows, cols=None) -> None:
+    print(f"\n===== {title} =====")
+    if not rows:
+        print("  （該当なし）")
+        return
+    cols = cols or list(rows[0].keys())
+    print("  " + " | ".join(cols))
+    for r in rows:
+        print("  " + " | ".join(str(r.get(c)) for c in cols))
+
+
+def main() -> int:
+    # ① 同期の実行記録（JSTに直して表示）
+    show("同期の実行記録（直近15件・JST）", run("""
+        select to_char(started_at at time zone 'Asia/Tokyo','MM/DD HH24:MI') as 開始JST,
+               to_char(finished_at at time zone 'Asia/Tokyo','HH24:MI')      as 終了,
+               since::text as 取得開始, until::text as 取得終了,
+               rows_upserted as 件数, accounts_ok as 成功ac, accounts_failed as 失敗ac,
+               unmapped_campaigns as 未紐付, status,
+               left(coalesce(message,''),40) as message
+          from meta_sync_runs order by started_at desc limit 15
+    """))
+
+    show("実行時刻の分布（JSTの時間帯ごとの回数）", run("""
+        select extract(hour from started_at at time zone 'Asia/Tokyo')::int as 時,
+               count(*) as 回数
+          from meta_sync_runs group by 1 order by 1
+    """))
+
+    # ② 未紐付け
+    show("全体サマリ", run("""
+        select count(*) as 行数,
+               min(date)::text as 最古, max(date)::text as 最新,
+               count(*) filter (where destination_id is null) as 未紐付行数,
+               round(100.0 * count(*) filter (where destination_id is null) / nullif(count(*),0), 1) as 未紐付率pct,
+               round(sum(spend))::bigint as 消化額合計,
+               round(sum(spend) filter (where destination_id is null))::bigint as 未紐付の消化額
+          from meta_insights_daily
+    """))
+
+    show("未紐付けキャンペーン（消化額の多い順・上位20）", run("""
+        select coalesce(account_name,'(不明)') as アカウント,
+               coalesce(campaign_name,'(名称なし)') as キャンペーン,
+               count(*) as 行数,
+               min(date)::text as 最古, max(date)::text as 最新,
+               round(sum(spend))::bigint as 消化額
+          from meta_insights_daily
+         where destination_id is null
+         group by 1,2 order by 6 desc nulls last limit 20
+    """))
+
+    # ③ 直近30日のカバレッジ（データが無い日）
+    show("直近30日で行が無い日（欠測日）", run("""
+        select d::date::text as 欠測日
+          from generate_series(current_date - interval '30 day', current_date - interval '1 day', interval '1 day') d
+         where not exists (select 1 from meta_insights_daily m where m.date = d::date)
+         order by 1
+    """))
+
+    # ④ アカウント別
+    show("アカウント別（消化額の多い順）", run("""
+        select coalesce(account_name,'(不明)') as アカウント,
+               count(distinct campaign_id) as キャンペーン数,
+               min(date)::text as 最古, max(date)::text as 最新,
+               round(sum(spend))::bigint as 消化額,
+               round(100.0 * count(*) filter (where destination_id is not null) / nullif(count(*),0), 1) as 紐付率pct
+          from meta_insights_daily
+         group by 1 order by 5 desc nulls last limit 20
+    """))
+
+    # 紐付いている店舗（名前は destinations から。無ければ id だけ）
+    show("紐付いている店舗（消化額の多い順・上位20）", run("""
+        select coalesce(d.name, m.destination_id::text) as 店舗,
+               count(distinct m.campaign_id) as キャンペーン数,
+               round(sum(m.spend))::bigint as 消化額
+          from meta_insights_daily m
+          left join destinations d on d.id = m.destination_id
+         where m.destination_id is not null
+         group by 1 order by 3 desc nulls last limit 20
+    """))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
