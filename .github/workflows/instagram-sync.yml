@@ -1,0 +1,75 @@
+# ============================================================
+#  Instagram 日次取り込み
+#
+#  各店のInstagramアカウントから、フォロワー数・日次インサイト・
+#  （週1で）フォロワー属性を取り込んで Supabase に貯める。
+#
+#  ★毎日走らせる必要がある理由：
+#    フォロワー「数」はAPIで過去に遡れない。その日に取らないと二度と手に入らない。
+#
+#  必要な Secrets:
+#    IG_ACCESS_TOKEN  … Metaアプリの長期アクセストークン
+#                       （instagram_basic / instagram_manage_insights /
+#                         pages_show_list / pages_read_engagement）
+#    SUPABASE_URL / SUPABASE_SERVICE_KEY … 既に登録済みのものを使う
+#  未登録なら何もせず正常終了するので、設定前に動いても壊れない。
+# ============================================================
+name: Instagram 日次取り込み
+
+on:
+  schedule:
+    # 前日ぶんを取り込む。5:30 JST（メイン）と 17:30 JST（予備）。
+    # 取り直しても同じ日は上書きになるので、二重に動いても安全。
+    - cron: "30 20 * * *"    # 05:30 JST
+    - cron: "30 8 * * *"     # 17:30 JST
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "対象日 (YYYY-MM-DD)。空なら前日"
+        required: false
+        default: ""
+      demographics:
+        description: "フォロワー属性も取る"
+        required: false
+        default: false
+        type: boolean
+      dry_run:
+        description: "取得だけしてDBに書かない（確認用）"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: instagram-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Instagramを取り込む
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TZ: Asia/Tokyo
+      IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+      IG_API_VERSION: ${{ vars.IG_API_VERSION }}
+      IG_DAY_METRICS: ${{ vars.IG_DAY_METRICS }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: 取り込みを実行
+        run: |
+          ARGS=""
+          if [ -n "${{ inputs.date }}" ]; then ARGS="$ARGS --date ${{ inputs.date }}"; fi
+          # 属性は毎日は要らないので、手動指定か月曜だけ取る
+          if [ "${{ inputs.demographics }}" = "true" ] || [ "$(date +%u)" = "1" ]; then
+            ARGS="$ARGS --demographics"
+          fi
+          if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          echo "実行: python -m etl.instagram_fetch $ARGS"
+          python -m etl.instagram_fetch $ARGS
