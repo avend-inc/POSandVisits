@@ -200,6 +200,7 @@
   <a href="pl.html"><span class="ic">📋</span>予実</a>
   <a href="trends.html"><span class="ic">📈</span>推移</a>
   <a href="promo.html"><span class="ic">🏷️</span>販促</a>
+  <a href="stock.html"><span class="ic">📦</span>棚卸</a>
   <a href="ask.html"><span class="ic">🔍</span>分析AI</a>
   <a href="keiei.html" id="tab-keiei" style="display:none"><span class="ic">🧮</span>経営</a>
   <a href="admin.html" id="tab-admin" style="display:none"><span class="ic">⚙️</span>管理</a>
@@ -348,11 +349,14 @@ async function authBoot(url,anon){
   try{const {data:u}=await SB.from("app_users").select("role").eq("email",ME.email).maybeSingle();role=u&&u.role||null;}catch(e){}
   ME.role=role;
   if(!ME.role){showDenied(ME.email);return;}
-  // 加盟店（FC）判定：app_user_stores に割り当てがあれば「加盟店モード」＝自店バンドルだけ読む。
+  // 加盟店（FC）判定：viewer かつ app_user_stores に割り当てがある人だけ「加盟店モード」＝自店バンドルだけ。
+  // admin/editor は割り当てがあっても常に本部（全店 data.json）＝サーバの is_hq() と一致させる。
   // 割り当てが無い＝本部（従来どおり全店 data.json）。RLS(sql/019)で data.json は本部しか読めない。
   let frStores=[];
-  try{ const {data:us}=await SB.from("app_user_stores").select("store_id");
-       frStores=[...new Set((us||[]).map(r=>+r.store_id))]; }catch(e){}
+  if(ME.role==="viewer"){
+    try{ const {data:us}=await SB.from("app_user_stores").select("store_id");
+         frStores=[...new Set((us||[]).map(r=>+r.store_id))]; }catch(e){}
+  }
   if(frStores.length){ await franchiseeBoot(frStores); return; }
   screen('<div class="sub" style="padding:40px 0">データを読み込み中…</div>');
   const {data,error}=await SB.storage.from("dashboard-data").download("data.json");
