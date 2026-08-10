@@ -1076,7 +1076,7 @@ function renderAds(){
     <div class="panel">
       <h2>月次KPI <span class="sub" style="font-weight:500">（今月を含む3か月）</span></h2>
       <div class="tblwrap"><table class="kmat" id="admtbl"></table></div>
-      <p class="note">今月は途中までの実績です。集計期間の選択には連動しません（非表示にした店は除きます）。</p>
+      <p class="note" id="admnote"></p>
     </div>
     <div class="panel">
       <h2>広告費と来店数 <span class="sub" style="font-weight:500">（店舗ごと・選んだ期間の合計）</span></h2>
@@ -1302,15 +1302,24 @@ function drawAds(){
         `<tr class="adweek"><td style="text-align:left">${labelOf(b)}</td>${cells(e.bk.get(b))}</tr>`).join("");
     const sortEnt=a=>a.sort((x,y)=>y[1].tot.sp-x[1].tot.sp);
     const all=[...g.entries()];
+    const excluded=[];       // 合計から外した店（オープン前・閉店）
     let body="";
     if(!all.length){ body=`<tr><td colspan="${TCOLS.length+1}" class="sub">データがありません</td></tr>`; }
     else if(byStore){
       body=[["直営","直営店"],["FC","FC店"],[null,"区分なし"]].map(([own,label])=>{
         const part=sortEnt(all.filter(([,e])=>(e.own||null)===own));
         if(!part.length)return "";
+        // 売上が無い店（オープン前・閉店）は段の合計から外す。広告費だけが
+        // 足されると売上比率が実態より高く出て、判断を誤らせるため。
+        // 店の行そのものは下に残す（広告費は実際に使っているので隠さない）。
+        const live=part.filter(([,e])=>e.tot.ex>0);
+        for(const [nm,e] of part)if(e.tot.ex<=0)excluded.push({n:shortName(nm),sp:e.tot.sp});
         // 店舗どうしは重ならないので、売上・来店もそのまま足してよい
-        const sum=part.reduce((a,[,e])=>{["sp","im","rc","ck","fl","pv","ex","vis"].forEach(k=>a[k]+=e.tot[k]);return a;},zero());
-        return `<tr class="adsec"><td style="text-align:left">${label}<span class="sub" style="font-weight:500">（${part.length}店）</span></td>${cells(sum)}</tr>`+
+        const sum=live.reduce((a,[,e])=>{["sp","im","rc","ck","fl","pv","ex","vis"].forEach(k=>a[k]+=e.tot[k]);return a;},zero());
+        const off=part.length-live.length;
+        return `<tr class="adsec"><td style="text-align:left">${label}`+
+               `<span class="sub" style="font-weight:500">（${live.length}店`+
+               (off?`／売上が無い${off}店を除く`:"")+`）</span></td>${cells(sum)}</tr>`+
                part.map(([nm,e])=>rowsOf(nm,e)).join("");
       }).join("");
     }else body=sortEnt(all).map(([nm,e])=>rowsOf(nm,e)).join("");
@@ -1318,16 +1327,23 @@ function drawAds(){
       TCOLS.map(k=>`<th>${AD_METRICS.find(x=>x.k===k).name}</th>`).join("")+`</tr></thead><tbody>${body}</tbody>`;
     el.querySelectorAll(".eye").forEach(b2=>b2.onclick=()=>{
       AD_HIDE.add(b2.dataset.hide); adSaveHide(); drawAds(); });
+    return excluded;
   }
+  // 合計から外した店を、名前と広告費つきで知らせる文（黙って外さない）
+  const exNote=ex=>!ex.length?"":
+    `<br><b style="color:#b8860b">段の合計から ${ex.length}店を除いています：`+
+    ex.map(x=>`${esc(x.n)}（${YEN(x.sp)}円）`).join("・")+`</b>`+
+    `。売上がまだ無い店（オープン前）や、もう無い店（閉店）です。`+
+    `広告費だけを足すと売上比率が実態より高く出るため外しました（店の行は下に残しています）。`;
   // 週次：選んでいる期間を月曜〜日曜で刻む。期間の端に掛かる週は集計した範囲だけを出す。
   const weekRange=mon=>{
     const sun=addDays(mon,6);
     return [mon<state.from?state.from:mon, sun>state.to?state.to:sun];
   };
-  adBuildTable(document.getElementById("adtbl"), adRowsAll(), mondayOf, mon=>{
+  const wEx=adBuildTable(document.getElementById("adtbl"), adRowsAll(), mondayOf, mon=>{
     const [a,b]=weekRange(mon);
     return a===b?md(a):`${md(a)}〜${md(b)}`;
-  }, weekRange);
+  }, weekRange)||[];
   // 月次：期間に関係なく、今月を含む直近3か月。
   {
     const last=(DATA.meta||[]).reduce((a,r)=>r.d>a?r.d:a,"")||state.to;
@@ -1337,14 +1353,16 @@ function drawAds(){
     // 月の範囲はその月まるごと。ただし今月は、売上が入っている最終日まで
     // （先の日まで含めても売上は0で、比率が実態より高く出るだけなので）。
     const salesMax=DATA._salesMax||DATA._max||last;
-    adBuildTable(document.getElementById("admtbl"), mrows, d=>d.slice(0,7),
+    const mEx=adBuildTable(document.getElementById("admtbl"), mrows, d=>d.slice(0,7),
       ym=>`${+ym.slice(5,7)}月${ym===yms[2]?"（今月）":""}`,
       ym=>{
         const [y,m]=ym.split("-").map(Number);
         const end=new Date(Date.UTC(y,m,0)).toISOString().slice(0,10);
         return [ym+"-01", end>salesMax?salesMax:end];
       },
-      {storeTotals:false});   // 3か月ぶんの合計は出さない（月の行だけ読む）
+      {storeTotals:false})||[];   // 3か月ぶんの合計は出さない（月の行だけ読む）
+    const mn=document.getElementById("admnote");
+    if(mn)mn.innerHTML=`今月は途中までの実績です。集計期間の選択には連動しません（非表示にした店は除きます）。`+exNote(mEx);
   }
   // 非表示にしている店舗の案内
   const hb=document.getElementById("adhidden");
@@ -1372,6 +1390,7 @@ function drawAds(){
     `<b>売上</b>は、広告を出している店のその期間の税抜売上です`+
     `（広告を止めていた日も含むので、店舗ページ・予実タブの売上と一致します）。`+
     `期間をまたぐときも実額どうしで割り直しています（比率の平均はしていません）。`+
+    exNote(wEx)+
     (nomap.sp>0?`<br><b style="color:#b8860b">店舗に紐付いていない広告費が ${YEN(nomap.sp)}円あります。</b>店舗別の数字はそのぶん少なく出ます。`:"");
 }
 
