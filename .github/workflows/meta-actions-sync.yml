@@ -1,0 +1,78 @@
+# ============================================================
+#  Meta広告 アクション系の取り込み
+#
+#  meta_insights_daily の follows / profile_visits（フォロー数・プロフ
+#  アクセス数）を埋める。広告費や表示回数を入れているのは別の取り込み
+#  (avend-meta-ads)で、こちらは「既にある行の、空いている列だけ」を埋める。
+#  行は作らないので、両方が動いてもぶつからない。
+#
+#  必要な Secrets:
+#    META_ACCESS_TOKEN … ads_read 権限つきのアクセストークン
+#    SUPABASE_URL / SUPABASE_SERVICE_KEY … 既に登録済みのものを使う
+#  未登録なら何もせず正常終了するので、設定前に動いても壊れない。
+#
+#  過去分をまとめて埋めるときは、since / until を指定して手動実行する。
+# ============================================================
+name: Meta広告 アクション系の取り込み
+
+on:
+  schedule:
+    # 前日ぶん。先方の取り込みが終わったあとに動かしたいので、少し遅らせる。
+    - cron: "0 12 * * *"     # 21:00 JST
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "対象日 (YYYY-MM-DD)。空なら前日"
+        required: false
+        default: ""
+      since:
+        description: "過去分の開始日 (YYYY-MM-DD)。入れると期間で取り込む"
+        required: false
+        default: ""
+      until:
+        description: "過去分の終了日 (YYYY-MM-DD)。空なら前日"
+        required: false
+        default: ""
+      dry_run:
+        description: "取得だけしてDBに書かない（確認用）"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: meta-actions-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: アクション系を取り込む
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      TZ: Asia/Tokyo
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      META_API_VERSION: ${{ vars.META_API_VERSION }}
+      META_AD_ACCOUNTS: ${{ vars.META_AD_ACCOUNTS }}
+      META_FOLLOW_ACTIONS: ${{ vars.META_FOLLOW_ACTIONS }}
+      META_PROFILE_ACTIONS: ${{ vars.META_PROFILE_ACTIONS }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: 取り込みを実行
+        run: |
+          ARGS=""
+          if [ -n "${{ inputs.since }}" ]; then
+            ARGS="$ARGS --since ${{ inputs.since }}"
+            if [ -n "${{ inputs.until }}" ]; then ARGS="$ARGS --until ${{ inputs.until }}"; fi
+          elif [ -n "${{ inputs.date }}" ]; then
+            ARGS="$ARGS --date ${{ inputs.date }}"
+          fi
+          if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          echo "実行: python -m etl.meta_actions_fetch $ARGS"
+          python -m etl.meta_actions_fetch $ARGS
