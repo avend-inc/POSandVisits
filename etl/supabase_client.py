@@ -208,6 +208,25 @@ class Supabase:
     # --------------------------------------------------------
     # stores（店舗マスタ）
     # --------------------------------------------------------
+    def update(self, table: str, params: dict[str, str], patch: dict) -> int:
+        """条件に合う行の、一部の列だけを書き換える。
+
+        「行を作らずに、既にある行だけ直す」ときに使う。他の取り込みが
+        持ち主になっている表に、こちらが列だけ足すような場合に要る。
+        戻り値は書き換えた行数。
+        """
+        resp = self._send(
+            "PATCH", self._endpoint(table), params=params,
+            headers={"Prefer": "return=representation"},
+            data=json.dumps(patch, ensure_ascii=False).encode("utf-8"),
+        )
+        if resp.status_code >= 400:
+            self._raise(resp, f"更新（{table}）")
+        try:
+            return len(resp.json() or [])
+        except Exception:                        # noqa: BLE001
+            return 0
+
     def store_map(self) -> dict[str, int]:
         """店舗名 → id の対応表。"""
         rows = self.select("stores", {"select": "id,name"})
