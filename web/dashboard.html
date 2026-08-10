@@ -220,6 +220,7 @@
   <a href="promo.html"><span class="ic">🏷️</span>販促</a>
   <a href="stock.html"><span class="ic">📦</span>棚卸</a>
   <a href="ask.html"><span class="ic">🔍</span>分析AI</a>
+  <a href="index.html?view=ads" id="tab-ads" style="display:none"><span class="ic">📣</span>広告</a>
   <a href="keiei.html" id="tab-keiei" style="display:none"><span class="ic">🧮</span>経営</a>
   <a href="admin.html" id="tab-admin" style="display:none"><span class="ic">⚙️</span>管理</a>
 </div></nav>
@@ -252,7 +253,7 @@ function deltaLabel(n){ if(n<=1)return"前日比"; if(n<=7)return"前週比"; if
 //   直営ページ … 直営店だけ。FCページ … FC店だけ。既定（無指定）は直営。
 // ?store=<id> があれば「店舗専用ページ」を表示（一覧の店名タップで遷移＝ブラウザ戻るで一覧へ）
 // ログイン後にURLを復元して読み直せるよう、let にして関数から入れ直せるようにしてある。
-let GROUP="own", GROUP_LABEL="直営店", DETAIL_ID=null;
+let GROUP="own", GROUP_LABEL="直営店", DETAIL_ID=null, VIEW="";
 function readRoute(){
   const q=new URLSearchParams(location.search);
   GROUP=(q.get("g")||"").toLowerCase();
@@ -260,6 +261,7 @@ function readRoute(){
   GROUP_LABEL=(GROUP==="fc")?"FC店":"直営店";
   const v=q.get("store");
   DETAIL_ID=(v&&/^\d+$/.test(v))?+v:null;
+  VIEW=(q.get("view")||"").toLowerCase();
 }
 readRoute();
 // 共有URL（?g=own&store=4 など）は Googleログインの往復で消えてしまい、
@@ -603,6 +605,12 @@ function aggScopeList(){
   return [{id:"own",name:SCOPE_LABEL.own}];
 }
 // 管理タブは管理者のときだけ出す（認証モードでロール確定後に呼ぶ）
+function syncAdsTab(){
+  // 広告は加盟店(社外)には見せない。data.jsonごと配っていないので画面も出さない。
+  const t=document.getElementById("tab-ads"); if(!t)return;
+  t.style.display=window.FRANCHISEE?"none":"";
+  t.classList.toggle("on",VIEW==="ads");
+}
 function syncAdminTab(){const ad=!!(ME&&ME.role==="admin");const t=document.getElementById("tab-admin");if(t)t.style.display=ad?"":"none";const k=document.getElementById("tab-keiei");if(k)k.style.display=ad?"":"none";}
 // いま見ているグループ（直営／FC）のタブを点灯する
 function syncGroupTab(){
@@ -738,7 +746,159 @@ function loadSel(){
   return new Set(allIds);
 }
 
-function render(){ if(state.detail)renderDetail(); else renderMain(); }
+function render(){ if(VIEW==="ads")renderAds(); else if(state.detail)renderDetail(); else renderMain(); }
+
+// ============================================================
+//  広告タブ（Meta広告）
+//  data.json の meta（日×キャンペーン）を集計して出す。
+//  実額だけを持ち、CTR/CPC/CPM/フリークエンシーは毎回 実額÷実額 で出す
+//  （期間をまたいで比率を平均すると誤るため）。
+//  加盟店には配っていないデータなので、この画面はAVENDメンバー専用。
+// ============================================================
+// 表示できる指標。sum=実額の合計 / calc=合計から比率を出す。
+const AD_METRICS=[
+  {k:"sp",  name:"消化額",         fmt:v=>YEN(Math.round(v))+"円", sum:r=>r.sp},
+  {k:"im",  name:"表示回数",       fmt:v=>NUM(Math.round(v))+"回", sum:r=>r.im},
+  {k:"rc",  name:"リーチ",         fmt:v=>NUM(Math.round(v))+"人", sum:r=>r.rc, note:"日をまたぐと重複を含みます"},
+  {k:"ck",  name:"クリック",       fmt:v=>NUM(Math.round(v))+"回", sum:r=>r.ck},
+  {k:"ctr", name:"CTR",           fmt:v=>v==null?"—":F1(v)+"%",  calc:p=>p.im>0?p.ck/p.im*100:null},
+  {k:"cpc", name:"CPC",           fmt:v=>v==null?"—":YEN(Math.round(v))+"円", calc:p=>p.ck>0?p.sp/p.ck:null},
+  {k:"cpm", name:"CPM",           fmt:v=>v==null?"—":YEN(Math.round(v))+"円", calc:p=>p.im>0?p.sp/p.im*1000:null},
+  {k:"frq", name:"フリークエンシー",fmt:v=>v==null?"—":F2(v)+"回",  calc:p=>p.rc>0?p.im/p.rc:null},
+];
+const AD_DEFAULT=["sp","im","ck","ctr","cpc","cpm"];
+let AD_COLS=(function(){
+  try{const s=JSON.parse(localStorage.getItem("notime-adcols")||"null");
+    if(Array.isArray(s)&&s.length)return s.filter(k=>AD_METRICS.some(m=>m.k===k));}catch(e){}
+  return AD_DEFAULT.slice();
+})();
+let AD_GROUP=(function(){try{return localStorage.getItem("notime-adgroup")||"c";}catch(e){return "c";}})();
+const AD_GROUPS=[["c","キャンペーン別"],["st","店舗別"],["a","アカウント別"]];
+const UNMAPPED="（未紐付け）";
+
+function adRows(){                      // 対象期間の広告行
+  return (DATA.meta||[]).filter(r=>r.d>=state.from&&r.d<=state.to);
+}
+function adSum(rows){
+  const p={sp:0,im:0,rc:0,ck:0};
+  for(const r of rows){p.sp+=r.sp||0;p.im+=r.im||0;p.rc+=r.rc||0;p.ck+=r.ck||0;}
+  return p;
+}
+function adVal(k,p){
+  const m=AD_METRICS.find(x=>x.k===k);
+  return m.calc?m.calc(p):p[k];
+}
+function renderAds(){
+  const sync=DATA.metaSync||{};
+  const last=(DATA.meta||[]).reduce((a,r)=>r.d>a?r.d:a,"");
+  document.getElementById("app").innerHTML=`
+    <header>
+      <h1>Meta広告 <span class="gbadge">広告</span></h1>
+      <button class="themebtn" id="themebtn" style="margin-left:auto">◐</button>
+      ${SB?'<button class="themebtn" id="logoutbtn" style="margin-left:6px">ログアウト</button>':''}
+    </header>
+    <div class="sub" style="margin:2px 0 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+      最新 <b style="color:var(--ink)">${last?mdShort(last):"—"}</b>｜更新 ${genShort(DATA.generated_at)}
+      ${sync.status?`｜同期 ${esc(String(sync.status))}`:""}
+      ${sync.unmapped?`｜<b style="color:#b8860b">未紐付け ${NUM(sync.unmapped)}件</b>`:""}
+    </div>
+    <div class="panel">
+      <div class="sub" style="font-weight:700;margin:2px 0 4px">集計期間</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px">
+        <button class="chip pchip" data-preset="thismonth">今月</button>
+        <button class="chip pchip" data-preset="lastmonth">前月</button>
+        <button class="chip pchip" data-preset="thisweek">今週</button>
+        <button class="chip pchip" data-preset="lastweek">前週</button>
+        <button class="chip pchip" data-preset="prevday">前日</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+        <input type="date" id="from" min="${DATA._min}" max="${DATA._max}" value="${state.from}">
+        <span class="sub">〜</span>
+        <input type="date" id="to" min="${DATA._min}" max="${DATA._max}" value="${state.to}">
+        <span class="sub" id="periodlabel"></span>
+      </div>
+      <div class="sub" style="font-weight:700;margin:6px 0 4px">表示する項目</div>
+      <div id="adpick" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">
+        ${AD_METRICS.map(m=>`<button class="chip adcol${AD_COLS.includes(m.k)?" on":""}" data-k="${m.k}">${m.name}</button>`).join("")}
+      </div>
+      <div class="dtop four" id="adcards"></div>
+    </div>
+    <div class="panel">
+      <h2>日別の推移</h2>
+      <div id="adtrend"></div>
+    </div>
+    <div class="panel">
+      <h2>内訳
+        <span style="margin-left:auto;display:flex;gap:6px;flex-wrap:nowrap">
+          ${AD_GROUPS.map(([k,n])=>`<button class="chip adgrp${AD_GROUP===k?" on":""}" data-g="${k}">${n}</button>`).join("")}
+        </span></h2>
+      <div class="tblwrap"><table class="kmat" id="adtbl"></table></div>
+      <p class="note" id="adnote"></p>
+    </div>`;
+  wireCommon();
+  document.querySelectorAll(".adcol").forEach(b=>b.onclick=()=>{
+    const k=b.dataset.k, i=AD_COLS.indexOf(k);
+    if(i>=0){ if(AD_COLS.length<=1)return; AD_COLS.splice(i,1); } else AD_COLS.push(k);
+    // 並びは AD_METRICS の順にそろえる（選んだ順ではなく決まった順で見せる）
+    AD_COLS=AD_METRICS.map(m=>m.k).filter(k2=>AD_COLS.includes(k2));
+    try{localStorage.setItem("notime-adcols",JSON.stringify(AD_COLS));}catch(e){}
+    b.classList.toggle("on"); drawAds();
+  });
+  document.querySelectorAll(".adgrp").forEach(b=>b.onclick=()=>{
+    AD_GROUP=b.dataset.g;
+    try{localStorage.setItem("notime-adgroup",AD_GROUP);}catch(e){}
+    document.querySelectorAll(".adgrp").forEach(x=>x.classList.toggle("on",x.dataset.g===AD_GROUP));
+    drawAds();
+  });
+  drawPeriod(); drawAds();
+}
+function drawAds(){
+  const rows=adRows(), tot=adSum(rows);
+  // ---- カード（選んだ項目だけ）----
+  const cards=document.getElementById("adcards");
+  if(cards)cards.innerHTML=AD_COLS.map(k=>{
+    const m=AD_METRICS.find(x=>x.k===k), v=adVal(k,tot);
+    return `<div class="card"><div class="k">${m.name}</div><div class="val">${m.fmt(v)}</div>`+
+           `<div class="knote">${m.note||""}</div></div>`;
+  }).join("");
+  // ---- 日別の推移（1つ目の項目を棒で）----
+  const el=document.getElementById("adtrend");
+  if(el){
+    const key=AD_COLS[0], m=AD_METRICS.find(x=>x.k===key);
+    const byDay=new Map();
+    for(const r of rows){ const a=byDay.get(r.d)||{sp:0,im:0,rc:0,ck:0}; a.sp+=r.sp||0;a.im+=r.im||0;a.rc+=r.rc||0;a.ck+=r.ck||0; byDay.set(r.d,a); }
+    const days=[...byDay.keys()].sort();
+    const vals=days.map(d=>adVal(key,byDay.get(d))).map(v=>v==null?0:v);
+    const max=Math.max(1,...vals), W=Math.max(days.length*14,120), H=120;
+    el.innerHTML=days.length?
+      `<div class="sub" style="margin-bottom:4px">${m.name}（${days.length}日）</div>
+       <div style="overflow-x:auto"><svg width="${W}" height="${H}" style="display:block">
+       ${days.map((d,i)=>{const h=Math.round(vals[i]/max*(H-18));
+         return `<rect x="${i*14+2}" y="${H-h-14}" width="10" height="${h}" rx="2" fill="var(--accent)"><title>${d} ${m.fmt(vals[i])}</title></rect>`;}).join("")}
+       </svg></div>
+       <div class="sub" style="font-size:10px">${days[0]} 〜 ${days[days.length-1]}｜最大 ${m.fmt(max)}</div>`
+      : `<p class="note">この期間の広告データがありません。</p>`;
+  }
+  // ---- 内訳テーブル ----
+  const g=new Map();
+  for(const r of rows){
+    const key=(AD_GROUP==="st")?(r.st||UNMAPPED):(AD_GROUP==="a"?r.a:r.c);
+    const a=g.get(key)||{sp:0,im:0,rc:0,ck:0}; a.sp+=r.sp||0;a.im+=r.im||0;a.rc+=r.rc||0;a.ck+=r.ck||0; g.set(key,a);
+  }
+  const list=[...g.entries()].sort((x,y)=>y[1].sp-x[1].sp);
+  const t=document.getElementById("adtbl");
+  if(t)t.innerHTML=`<thead><tr><th>${AD_GROUPS.find(x=>x[0]===AD_GROUP)[1].replace("別","")}</th>`+
+    AD_COLS.map(k=>`<th>${AD_METRICS.find(x=>x.k===k).name}</th>`).join("")+`</tr></thead><tbody>`+
+    (list.length?list.map(([nm,p])=>`<tr><td style="text-align:left">${nm===UNMAPPED?`<b style="color:#b8860b">${nm}</b>`:esc(nm)}</td>`+
+      AD_COLS.map(k=>{const m=AD_METRICS.find(x=>x.k===k);return `<td>${m.fmt(adVal(k,p))}</td>`;}).join("")+`</tr>`).join("")
+      :`<tr><td colspan="${AD_COLS.length+1}" class="sub">データがありません</td></tr>`)+`</tbody>`;
+  const nomap=adSum(rows.filter(r=>!r.st));
+  const note=document.getElementById("adnote");
+  if(note)note.innerHTML=
+    `CTR＝クリック÷表示回数、CPC＝消化額÷クリック、CPM＝消化額÷表示回数×1000、フリークエンシー＝表示回数÷リーチ。`+
+    `期間をまたぐときも実額どうしで割り直しています（比率の平均はしていません）。`+
+    (nomap.sp>0?`<br><b style="color:#b8860b">店舗に紐付いていない広告費が ${YEN(nomap.sp)}円あります。</b>店舗別の数字はそのぶん少なく出ます。`:"");
+}
 function wireCommon(){
   const on=(id,ev,fn)=>{const el=document.getElementById(id);if(el)el[ev]=fn;};
   on("from","onchange",e=>{state.from=clampLo(e.target.value||DATA._min);if(state.from>state.to)state.to=state.from;state.kind="custom";syncDateInputs();savePeriod();draw();});
@@ -771,7 +931,7 @@ function wireCommon(){
   if(SB)on("logoutbtn","onclick",doLogout);
 }
 function renderMain(){
-  syncAdminTab();
+  syncAdminTab(); syncAdsTab();
   syncGroupTab();
   document.getElementById("app").classList.remove("detail");
   document.getElementById("app").innerHTML=`
@@ -863,7 +1023,7 @@ function renderMain(){
 
 // 店舗専用ページ（一覧の店名タップで ?store=<id> に遷移して表示。①店舗選択は出さない）
 function renderDetail(){
-  syncAdminTab(); syncGroupTab();
+  syncAdminTab(); syncAdsTab(); syncGroupTab();
   const FRAN=!!window.FRANCHISEE;
   if(FRAN){const tb=document.querySelector(".tabbar"); if(tb)tb.style.display="none";}   // 加盟店は他タブに行けない
   const s=storeMeta(state.detail); const nm=(s&&s.name)||("店舗"+state.detail);
@@ -2133,7 +2293,7 @@ function mdLabel(f,t){ const g=s=>`${+s.slice(5,7)}/${+s.slice(8,10)}`; return f
 function mdShort(s){ return s?`${+s.slice(5,7)}/${+s.slice(8,10)}`:"—"; }
 function genShort(g){ if(!g)return"—"; const s=g.replace("T"," "); return `${+s.slice(5,7)}/${+s.slice(8,10)} ${s.slice(11,16)}`; }
 
-function draw(){ drawSlicer(); drawPeriod(); refresh(); }
+function draw(){ if(VIEW==="ads"){ drawPeriod(); drawAds(); return; } drawSlicer(); drawPeriod(); refresh(); }
 // 選択・期間の変更でスライサー本体以外を描き直す（チェックのたびにリストを作り直さない）
 function refresh(){ if(state.detail){drawDetailExtras(); drawDayKpi();} drawKpi2(); drawStoreKpi(); drawTrend2();
   if(state.detail){ drawHeatX(); }                       // 店舗ページ＝1表（販売数/税抜売上を切替）

@@ -406,8 +406,56 @@ def build_data(sb: Supabase) -> dict:
     except Exception as _e:
         print("  （SIPOS内訳の出力に失敗: {}）".format(_e))
 
+    # --- Meta広告（日 × キャンペーン）---------------------------------------
+    #   destination_id（在庫アプリの納品先＝店舗）を店名に直して持たせる。
+    #   ここに入れた広告データは data.json（AVENDメンバーだけが読める）にだけ載る。
+    #   加盟店へ配る store-<id>.json は別に組み立てているので、広告費は渡らない。
+    #   ※ 比率（CTR/CPC/CPM/フリークエンシー）は入れない。期間をまたいで足すときに
+    #     「比率の平均」という誤りが起きるため、画面側で 実額÷実額 で毎回出す。
+    meta_rows: list[dict] = []
+    meta_sync: dict | None = None
+    try:
+        dest_name: dict = {}
+        try:
+            for d in _select_all(sb, "destinations", "id,name", order="id"):
+                dest_name[str(d["id"])] = d.get("name")
+        except Exception:
+            pass
+        for r in _select_all(sb, "meta_insights_daily",
+                             "date,account_name,campaign_name,destination_id,"
+                             "spend,impressions,reach,clicks", order="date"):
+            did = r.get("destination_id")
+            meta_rows.append({
+                "d": str(r["date"]),
+                "a": r.get("account_name") or "(不明)",
+                "c": r.get("campaign_name") or "(名称なし)",
+                # st=店舗名。紐付いていないものは null のまま（画面で「未紐付け」と出す）
+                "st": dest_name.get(str(did)) if did else None,
+                "sp": round(_num(r.get("spend"))),
+                "im": int(r.get("impressions") or 0),
+                "rc": int(r.get("reach") or 0),
+                "ck": int(r.get("clicks") or 0),
+            })
+        runs = sb.select("meta_sync_runs", {
+            "select": "started_at,status,unmapped_campaigns,rows_upserted,since,until",
+            "order": "started_at.desc", "limit": "1"})
+        if runs:
+            r0 = runs[0]
+            meta_sync = {"at": r0.get("started_at"), "status": r0.get("status"),
+                         "unmapped": r0.get("unmapped_campaigns"),
+                         "rows": r0.get("rows_upserted"),
+                         "since": r0.get("since"), "until": r0.get("until")}
+        if meta_rows:
+            nomap = sum(1 for r in meta_rows if not r["st"])
+            print(f"\n  Meta広告: {len(meta_rows)}行"
+                  f"（未紐付け {nomap}行 / 消化額 {sum(r['sp'] for r in meta_rows):,}円）")
+    except Exception as _e:
+        print(f"  （Meta広告の取得に失敗しました。広告タブは空になります: {_e}）")
+
     return {
         "generated_at": datetime.now(JST).isoformat(timespec="seconds"),
+        "meta": meta_rows,
+        "metaSync": meta_sync,
         "stores": [{"id": s["id"], "name": name_by_id.get(s["id"], str(s["id"])),
                     "own": own_by_id.get(s["id"], "直営"),
                     "kv": kv_by_id.get(s["id"], True),
