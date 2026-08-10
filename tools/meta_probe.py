@@ -149,6 +149,23 @@ def main() -> int:
          group by 1 order by 3 desc nulls last limit 20
     """))
 
+    # ④-2 納品先 → POS店舗 の結び付き
+    #   広告は destinations（納品先）に紐付くが、売上・来店は POS店舗にある。
+    #   その2つは pos_store_links でつながる。ここが欠けている納品先は
+    #   「広告費は出るのに売上比率が出ない」店になる。
+    show("納品先とPOS店舗の結び付き（消化額の多い順）", run("""
+        select coalesce(d.name, m.destination_id::text) as 納品先,
+               case when l.pos_store_id is null then '❌ つながっていない' else 'OK' end as 結び付き,
+               coalesce(s.name,'-') as POS店舗,
+               round(sum(m.spend))::bigint as 消化額
+          from meta_insights_daily m
+          left join destinations   d on d.id = m.destination_id
+          left join pos_store_links l on l.destination_id = m.destination_id
+          left join stores         s on s.id = l.pos_store_id
+         where m.destination_id is not null
+         group by 1,2,3 order by 4 desc nulls last limit 30
+    """))
+
     # ⑤ 広告(ad)単位のテーブルがあれば、そちらの状況も見る
     ad = run("""
         select count(*)::int as n from information_schema.tables

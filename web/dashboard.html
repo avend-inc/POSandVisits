@@ -1477,9 +1477,11 @@ function adDrawScatter(shortName){
 function adDrawCreatives(shortName){
   const el=document.getElementById("adcrtbl"); if(!el)return;
   const note=document.getElementById("adcrnote");
+  // 店舗の絞り込みには連動させない（常に全店）。週次/月次KPIと同じ扱いで、
+  // どのクリエイティブが全社で効いているかを見るための一覧のため。
+  // 非表示にした店だけは、明示的な操作なのでここからも外す。
   const src=(DATA.metaAds||[]).filter(r=>r.d>=state.from&&r.d<=state.to
-    &&!AD_HIDE.has(r.st||UNMAPPED)
-    &&(!AD_STORE||(r.st||UNMAPPED)===AD_STORE));
+    &&!AD_HIDE.has(r.st||UNMAPPED));
   const g=new Map();
   for(const r of src){
     let e=g.get(r.an); if(!e){e={sp:0,im:0,ck:0,rc:0,st:new Set()};g.set(r.an,e);}
@@ -1532,7 +1534,7 @@ function adDrawCreatives(shortName){
     `<b>クリック単価</b>は1クリックあたりの広告費で、`+
     `AVENDで言うCPC（＝1プロフアクセスあたりの広告費）とは別物です`+
     `（広告単位のデータには プロフアクセス数 がまだ入っていないため）。`+
-    (AD_STORE?`<br>店舗「${esc(shortName(AD_STORE))}」で絞り込み中です。`:"")+
+    `<br>上の店舗の絞り込みには連動しません（常に全店）。`+
     (DATA.metaAds&&DATA.metaAds.length?"":`<br>広告単位のデータが data.json に入っていません（データ更新後に出ます）。`);
 }
 
