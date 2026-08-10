@@ -418,9 +418,16 @@ async function authBoot(url,anon){
   // 加盟店（FC）判定：app_user_stores に割り当てがあれば「加盟店モード」＝自店バンドルだけ読む。
   // 割り当てが無い＝AVENDメンバー（従来どおり全店 data.json）。
   // RLS(sql/019)により data.json は AVENDメンバーしか読めない（加盟店は自店バンドルのみ）。
+  // ★ここは必ず「自分のメール」で絞る。
+  //   app_user_stores のRLSは『本人の行 または 管理者は全行』なので、絞らずに読むと
+  //   管理者だけ“全員ぶんの割り当て”が返ってしまい、他人の店舗で加盟店モードに入る。
+  //   加えて admin/editor は割り当てがあっても常にAVENDメンバー扱いにする
+  //   （sql/019 の is_hq() と同じ判定にそろえる）。
   let frStores=[];
-  try{ const {data:us}=await SB.from("app_user_stores").select("store_id");
-       frStores=[...new Set((us||[]).map(r=>+r.store_id))]; }catch(e){}
+  if(ME.role!=="admin"&&ME.role!=="editor"){
+    try{ const {data:us}=await SB.from("app_user_stores").select("store_id").eq("email",ME.email);
+         frStores=[...new Set((us||[]).map(r=>+r.store_id))]; }catch(e){}
+  }
   if(frStores.length){ await franchiseeBoot(frStores); return; }
   screen('<div class="sub" style="padding:40px 0">データを読み込み中…</div>');
   const {data,error}=await SB.storage.from("dashboard-data").download("data.json");
