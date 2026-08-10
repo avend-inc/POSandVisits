@@ -166,6 +166,32 @@ def main() -> int:
          group by 1,2,3 order by 4 desc nulls last limit 30
     """))
 
+    # ④-3 広告を出している店に、POSの売上・来店が入っているか
+    #   結び付き(pos_store_links)があっても、POSの取り込みが動いていなければ
+    #   売上比率は出ない。新店で取り込み待ちなのか、設定漏れなのかを見分ける。
+    show("広告を出している店のPOS売上・来店（直近90日）", run("""
+        with adstores as (
+          select distinct l.pos_store_id as sid
+            from meta_insights_daily m
+            join pos_store_links l on l.destination_id = m.destination_id
+           where m.date >= current_date - interval '90 day'
+        )
+        select s.name as 店舗,
+               s.open_date::text as 開店日,
+               coalesce(sa.n,0) as 売上明細行, sa.first::text as 売上初日, sa.last::text as 売上最終日,
+               coalesce(v.n,0)  as 来店行,     v.last::text  as 来店最終日
+          from adstores a
+          join stores s on s.id = a.sid
+          left join (select store_id, count(*) n, min(business_date) first, max(business_date) last
+                       from sales where business_date >= current_date - interval '90 day'
+                      group by 1) sa on sa.store_id = s.id
+          left join (select store_id, count(*) n, max(business_date) last
+                       from visits where business_date >= current_date - interval '90 day'
+                      group by 1) v on v.store_id = s.id
+         order by coalesce(sa.n,0), s.name
+         limit 30
+    """))
+
     # ⑤ 広告(ad)単位のテーブルがあれば、そちらの状況も見る
     ad = run("""
         select count(*)::int as n from information_schema.tables
