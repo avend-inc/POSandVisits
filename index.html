@@ -245,11 +245,36 @@ const KPI_ORDER=["ex","v","tx","qty","pr","aov","upt","aup"];
 function deltaLabel(n){ if(n<=1)return"前日比"; if(n<=7)return"前週比"; if(n<=31)return"前月比"; return "前"+n+"日比"; }
 // 表示グループ（直営／FC）。URLの ?g=own / ?g=fc で切り替える。
 //   直営ページ … 直営店だけ。FCページ … FC店だけ。既定（無指定）は直営。
-let GROUP=(new URLSearchParams(location.search).get("g")||"").toLowerCase();
-if(GROUP!=="own"&&GROUP!=="fc")GROUP="own";
-const GROUP_LABEL=(GROUP==="fc")?"FC店":"直営店";
 // ?store=<id> があれば「店舗専用ページ」を表示（一覧の店名タップで遷移＝ブラウザ戻るで一覧へ）
-const DETAIL_ID=(function(){const v=new URLSearchParams(location.search).get("store");return v&&/^\d+$/.test(v)?+v:null;})();
+// ログイン後にURLを復元して読み直せるよう、let にして関数から入れ直せるようにしてある。
+let GROUP="own", GROUP_LABEL="直営店", DETAIL_ID=null;
+function readRoute(){
+  const q=new URLSearchParams(location.search);
+  GROUP=(q.get("g")||"").toLowerCase();
+  if(GROUP!=="own"&&GROUP!=="fc")GROUP="own";
+  GROUP_LABEL=(GROUP==="fc")?"FC店":"直営店";
+  const v=q.get("store");
+  DETAIL_ID=(v&&/^\d+$/.test(v))?+v:null;
+}
+readRoute();
+// 共有URL（?g=own&store=4 など）は Googleログインの往復で消えてしまい、
+// 受け取った人は店舗ページではなく一覧に着地する。ログインへ飛ぶ直前に控えておき、
+// 戻ってきたら書き戻す。※ 復元はセッション確立の後に行う（?code= を先に消さないため）。
+const RETURN_KEY="notime-return-search";
+function rememberSharedUrl(){
+  try{ if(location.search)sessionStorage.setItem(RETURN_KEY,location.search); }catch(e){}
+}
+function restoreSharedUrl(){
+  let saved=null;
+  try{ saved=sessionStorage.getItem(RETURN_KEY); sessionStorage.removeItem(RETURN_KEY); }catch(e){}
+  if(!saved)return;
+  const q=new URLSearchParams(location.search);
+  if(q.get("store")||q.get("g"))return;            // すでに付いている＝復元は不要
+  try{ history.replaceState(null,"",location.pathname+saved); }catch(e){ return; }
+  readRoute();
+  state.detail=DETAIL_ID;
+  if(DETAIL_ID){ state.sel=new Set([DETAIL_ID]); state.grain="day"; }
+}
 
 // sel=選択店舗ID(Set)。kind=③期間プリセット。grain=⑤推移の粒度。trendAnchor=⑤の＜＞位置。
 const state={store:"__sel__",sel:null,grain:DETAIL_ID?"day":"month",metric:"ex",from:null,to:null,kind:"thismonth",trendEnd:null,detail:DETAIL_ID,
@@ -376,6 +401,7 @@ async function authBoot(url,anon){
   });
   const {data:{session}}=await SB.auth.getSession();
   if(!session){showLogin();return;}
+  restoreSharedUrl();          // ログイン前に開いていた共有URL（店舗ページ等）へ戻す
   ME.email=(session.user&&session.user.email||"").toLowerCase();
   // 許可リスト判定：app_users に登録があればログイン可（ロールを取得）
   let role=null;
@@ -484,6 +510,7 @@ function showDenied(email){
   document.getElementById("grelogin").onclick=doLogout;
 }
 async function doLogin(){
+  rememberSharedUrl();                                  // 共有URLの ?g=/?store= を控える
   const redirectTo=location.origin+location.pathname;   // ?code等を残さないURLへ戻す
   const {error}=await SB.auth.signInWithOAuth({provider:"google",
     options:{redirectTo,queryParams:{prompt:"select_account"}}});
