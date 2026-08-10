@@ -302,11 +302,19 @@ def build_data(sb: Supabase) -> dict:
             mix_m.add(_sid)
     mixed_stores = mix_u & mix_m
 
-    def _mix(sid, v) -> dict:
-        """2レジ運用の店だけ、税抜売上の内訳（exU=無人／exM=有人）を付ける。"""
-        if sid not in mixed_stores or (v["ex"] <= 0 and v["ex_est"] > 0):
-            return {}
-        return {"exU": round(v["ex_u"]), "exM": round(v["ex_m"])}
+    def _extra(sid, v) -> dict:
+        """日別行に足す任意項目。該当しない店・日には付けない（data.jsonを太らせない）。
+
+          exU/exM … 税抜売上の内訳（無人営業／有人営業）。2レジ運用の店だけ。
+          vm      … 有人営業時間の来店数（手入力ぶん）。入力がある日だけ。
+        """
+        out: dict = {}
+        if sid in mixed_stores and not (v["ex"] <= 0 and v["ex_est"] > 0):
+            out["exU"] = round(v["ex_u"])
+            out["exM"] = round(v["ex_m"])
+        if v["v_staffed"] is not None:
+            out["vm"] = v["v_staffed"]
+        return out
 
     daily_rows = [
         {"d": d, "s": sid,
@@ -323,7 +331,9 @@ def build_data(sb: Supabase) -> dict:
          "v": v["v"],
          "bag": round(v["reji_in"]), "bagEx": round(v["reji_ex"]), "bagq": round(v["bag_q"]),
          # クーポン：利用数(点数)と割引額（値引はマイナス金額で入ることが多い）
-         "coup": round(v["coup_q"]), "coupAmt": round(v["coup_in"])}
+         "coup": round(v["coup_q"]), "coupAmt": round(v["coup_in"]),
+         # 無人／有人の売上内訳（exU/exM）と、有人来店の手入力（vm）。該当する店・日だけ付く。
+         **_extra(sid, v)}
         for (d, sid), v in sorted(daily.items())
     ]
     # バンドル(SALE)別・日次：利用数(n=伝票数) と 売上(a=親行合計)
