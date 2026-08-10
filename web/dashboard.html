@@ -209,6 +209,18 @@
   .adlegend i{width:9px;height:9px;border-radius:2px;flex:none;align-self:center}
   .adlegend b{font-size:12px;color:var(--ink);font-weight:800}
   .adlegend small{font-size:9.5px;color:var(--muted)}
+  .adlegend em{font-style:normal;font-size:9px;font-weight:700;color:var(--muted);border:1px solid var(--border);border-radius:5px;padding:0 3px}
+  /* グラフに触れたときの吹き出し */
+  .adwrap{position:relative;overflow-x:auto}
+  .adtip{position:absolute;top:6px;z-index:5;pointer-events:none;background:rgba(17,20,24,.94);color:#fff;
+    border-radius:9px;padding:7px 10px;font-size:11px;line-height:1.55;box-shadow:0 4px 14px rgba(0,0,0,.3);white-space:nowrap}
+  .adtip .d{font-weight:800;font-size:11px;margin-bottom:3px;color:#cbd5e1}
+  .adtip .l{display:flex;align-items:center;gap:5px}
+  .adtip .l i{width:8px;height:8px;border-radius:2px;flex:none}
+  .adtip .l b{margin-left:auto;padding-left:10px;font-weight:800}
+  /* 元データがまだ無い指標のチップ */
+  .chip.adcol.nodata{opacity:.55}
+  .chip.adcol.nodata small{font-size:9px;opacity:.8}
   /* 内訳：親（店舗など）と、その下にぶら下がる週 */
   .kmat tr.adparent td{font-weight:800;border-top:1px solid var(--border)}
   .kmat tr.adweek td{color:var(--ink2);font-size:12px}
@@ -811,7 +823,9 @@ function adHas(need){
   const ks=Array.isArray(need)?need:[need];
   return ks.every(k=>(DATA.meta||[]).some(r=>r[k]!=null));
 }
-function adMetrics(){ return AD_METRICS.filter(m=>adHas(m.need)); }
+// 指標は常に全部並べる（元データがまだ無いものは値が「—」になるだけ）。
+// 隠してしまうと「選べない」のか「作っていない」のか区別が付かないため。
+function adMetrics(){ return AD_METRICS; }
 // 指標の色。グラフの線と「表示する項目」のチップで同じ色を使う。
 const AD_COLOR={sp:"#2f6fd0",im:"#8e5bd0",rc:"#0aa2c0",ck:"#1a8a5a",fl:"#d6336c",pv:"#e8590c",
   ctr:"#b8860b",cpc:"#c0392b",cpf:"#7048e8",frt:"#0ca678",cpv:"#e67700",cpm:"#495057",frq:"#845ef7"};
@@ -828,6 +842,17 @@ let AD_HIDE=(function(){
   catch(e){return new Set();}
 })();
 function adSaveHide(){ try{localStorage.setItem("notime-adhide",JSON.stringify([...AD_HIDE]));}catch(e){} }
+// 広告タブの既定期間＝直近4週（最新日を含む週の月曜から数えて4週ぶん）。
+// 店舗別一覧が月曜〜日曜の週で並ぶので、週がちょうど4本立つ範囲にそろえる。
+let AD_PERIOD_INIT=false;
+function adDefaultPeriod(){
+  const last=(DATA.meta||[]).reduce((a,r)=>r.d>a?r.d:a,"")||DATA._salesMax||DATA._max;
+  return [clampLo(addDays(mondayOf(last),-21)), clampHi(last)];
+}
+function adApply4w(){
+  const [f,t]=adDefaultPeriod();
+  state.from=f; state.to=t; state.kind="custom"; savePeriod();
+}
 let AD_STORE=(function(){try{return localStorage.getItem("notime-adstore")||"";}catch(e){return "";}})();
 // 期間内に広告費が動いた店舗（＋未紐付け）をプルダウンの選択肢にする
 function adStoreList(){
@@ -838,10 +863,14 @@ function adStoreList(){
 const AD_GROUPS=[["c","キャンペーン別"],["st","店舗別"],["a","アカウント別"]];
 const UNMAPPED="（未紐付け）";
 
-function adRows(){                      // 対象期間＋選んだ店舗の広告行
-  return (DATA.meta||[]).filter(r=>r.d>=state.from&&r.d<=state.to
-    &&(!AD_STORE||(r.st||UNMAPPED)===AD_STORE)
-    &&!AD_HIDE.has(r.st||UNMAPPED));
+// カード・グラフ用：対象期間 ＋ 選んだ店舗 ＋ 非表示を除く
+function adRows(){
+  return adRowsAll().filter(r=>!AD_STORE||(r.st||UNMAPPED)===AD_STORE);
+}
+// 店舗別一覧用：店舗の絞り込みは効かせない（一覧は常に全店を出す）。
+// 非表示にした店だけは、明示的な操作なので一覧からも外す。
+function adRowsAll(){
+  return (DATA.meta||[]).filter(r=>r.d>=state.from&&r.d<=state.to&&!AD_HIDE.has(r.st||UNMAPPED));
 }
 function adSum(rows){
   const p={sp:0,im:0,rc:0,ck:0,fl:0,pv:0};
@@ -853,6 +882,7 @@ function adVal(k,p){
   return m.calc?m.calc(p):p[k];
 }
 function renderAds(){
+  if(!AD_PERIOD_INIT){ adApply4w(); AD_PERIOD_INIT=true; }   // 初回は直近4週
   const sync=DATA.metaSync||{};
   const last=(DATA.meta||[]).reduce((a,r)=>r.d>a?r.d:a,"");
   document.getElementById("app").innerHTML=`
@@ -869,6 +899,7 @@ function renderAds(){
     <div class="panel">
       <div class="sub" style="font-weight:700;margin:2px 0 4px">集計期間</div>
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px">
+        <button class="chip" id="ad4w">直近4週</button>
         <button class="chip pchip" data-preset="thismonth">今月</button>
         <button class="chip pchip" data-preset="lastmonth">前月</button>
         <button class="chip pchip" data-preset="thisweek">今週</button>
@@ -891,9 +922,10 @@ function renderAds(){
       <div class="sub" style="font-weight:700;margin:6px 0 4px">表示する項目</div>
       <div id="adpick" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">
         ${adMetrics().map(m=>{const c=AD_COLOR[m.k]||"var(--accent)";
-          const on=AD_COLS.includes(m.k);
-          return `<button class="chip adcol${on?" on":""}" data-k="${m.k}"${m.note?` title="${esc(m.note)}"`:""}`+
-                 ` style="${on?`background:${c};border-color:${c};color:#fff`:`border-left:3px solid ${c}`}">${m.name}</button>`;}).join("")}
+          const on=AD_COLS.includes(m.k), ready=adHas(m.need);
+          const tip=(m.note?m.note:"")+(ready?"":(m.note?" / ":"")+"元データ（フォロー数・プロフアクセス数）がDBに入ると値が出ます");
+          return `<button class="chip adcol${on?" on":""}${ready?"":" nodata"}" data-k="${m.k}"${tip?` title="${esc(tip)}"`:""}`+
+                 ` style="${on?`background:${c};border-color:${c};color:#fff`:`border-left:3px solid ${c}`}">${m.name}${ready?"":" <small>—</small>"}</button>`;}).join("")}
       </div>
       <div class="dtop four" id="adcards"></div>
     </div>
@@ -902,7 +934,7 @@ function renderAds(){
       <div id="adtrend"></div>
     </div>
     <div class="panel">
-      <h2>内訳
+      <h2>店舗別一覧
         <span style="margin-left:auto;display:flex;gap:6px;flex-wrap:nowrap">
           ${AD_GROUPS.map(([k,n])=>`<button class="chip adgrp${AD_GROUP===k?" on":""}" data-g="${k}">${n}</button>`).join("")}
         </span></h2>
@@ -919,6 +951,8 @@ function renderAds(){
     try{localStorage.setItem("notime-adcols",JSON.stringify(AD_COLS));}catch(e){}
     renderAds(); return;                 // チップの色を含めて描き直す
   });
+  const b4=document.getElementById("ad4w");
+  if(b4)b4.onclick=()=>{ adApply4w(); renderAds(); };
   const stSel=document.getElementById("adstore");
   if(stSel)stSel.onchange=()=>{
     AD_STORE=stSel.value;
@@ -933,12 +967,15 @@ function renderAds(){
   });
   drawPeriod(); drawAds();
 }
-// 選んだ項目を1枚に重ねた折れ線。項目ごとに色を変え、縦は各項目の最小〜最大で
-// 正規化する（単位が違うものをそのまま重ねると1本以外が潰れて読めないため）。
-// 値が無い日は線を切る（欠測をまっすぐ結んで「あったこと」にしない）。
+// 選んだ項目を1枚に重ねた折れ線。
+//   ・1番目に選んだ項目は左の縦軸、2番目は右の縦軸に目盛りを出す。
+//   ・3番目以降は軸を持たない（軸が増えると読めなくなるため。値はカーソルで見る）。
+//   ・線は項目ごとに「その期間の最小〜最大」で正規化する。左右の軸はその最小〜最大を
+//     そのまま目盛りにしているので、1番目・2番目の線は軸の数字と一致する。
+//   ・グラフに触れると、その日の全項目をまとめて黒い吹き出しで出す。
 function adChart(days,byDay){
-  const W=760,H=210,L=8,R=8,T=10,B=22;
-  const x=i=>days.length<2?W/2:L+i*(W-L-R)/(days.length-1);
+  const W=760,H=230,L=54,R=54,T=12,B=26;
+  const x=i=>days.length<2?(L+(W-R))/2:L+i*(W-L-R)/(days.length-1);
   const series=AD_COLS.map(k=>{
     const m=AD_METRICS.find(z=>z.k===k), vals=days.map(d=>adVal(k,byDay.get(d)));
     const fin=vals.filter(v=>v!=null&&isFinite(v));
@@ -950,19 +987,73 @@ function adChart(days,byDay){
       d+=(pen?" L":" M")+x(i).toFixed(1)+" "+y(v).toFixed(1); pen=true; });
     return {k:k,m:m,vals:vals,min:min,max:max,y:y,d:d.trim(),c:AD_COLOR[k]||"var(--accent)"};
   }).filter(Boolean);
-  if(!series.length)return `<p class="note">表示する項目を選んでください。</p>`;
+  if(!series.length)return `<p class="note">表示する項目を選んでください。値が「—」の項目は、元データがDBに入ると出ます。</p>`;
   const dot=days.length>45?1.7:2.6;
-  const step=Math.max(1,Math.ceil(days.length/8));   // 目盛りは8個くらいに間引く
-  return `<div class="adlegend">`+series.map(s2=>
-      `<span><i style="background:${s2.c}"></i>${s2.m.name}<b>${s2.m.fmt(adVal(s2.k,adSum(adRows())))}</b>`+
+  const step=Math.max(1,Math.ceil(days.length/8));
+  // 左右の軸（3等分の目盛り）。short=軸に置くので短く丸める。
+  const axis=(s2,side)=>{
+    if(!s2)return "";
+    const at=side==="L"?L-6:W-R+6, an=side==="L"?"end":"start";
+    return [0,.5,1].map(f=>{
+      const v=s2.min+(s2.max-s2.min)*f, yy=s2.y(v);
+      return `<text x="${at}" y="${(yy+3).toFixed(1)}" font-size="9" fill="${s2.c}" text-anchor="${an}">${esc(adShort(s2.m,v))}</text>`;
+    }).join("")+`<text x="${at}" y="${T-2}" font-size="9" font-weight="700" fill="${s2.c}" text-anchor="${an}">${s2.m.name}</text>`;
+  };
+  const tot=adSum(adRows());
+  return `<div class="adlegend">`+series.map((s2,i)=>
+      `<span><i style="background:${s2.c}"></i>${s2.m.name}${i<2?`<em>${i?"右軸":"左軸"}</em>`:""}<b>${s2.m.fmt(adVal(s2.k,tot))}</b>`+
       `<small>${s2.m.fmt(s2.min)}〜${s2.m.fmt(s2.max)}</small></span>`).join("")+`</div>
-    <div style="overflow-x:auto"><svg viewBox="0 0 ${W} ${H}" style="width:100%;min-width:420px;height:210px;display:block">
-      ${days.map((d,i)=>i%step?"":`<text x="${x(i).toFixed(1)}" y="${H-6}" font-size="9" fill="var(--muted)" text-anchor="middle">${+d.slice(5,7)}/${+d.slice(8,10)}</text>`).join("")}
-      ${series.map(s2=>`<path d="${s2.d}" fill="none" stroke="${s2.c}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>`).join("")}
+    <div class="adwrap"><svg viewBox="0 0 ${W} ${H}" style="width:100%;min-width:520px;height:230px;display:block"
+        data-l="${L}" data-r="${R}" data-w="${W}" data-n="${days.length}">
+      ${axis(series[0],"L")}${axis(series[1],"R")}
+      ${days.map((d,i)=>i%step?"":`<text x="${x(i).toFixed(1)}" y="${H-8}" font-size="9" fill="var(--muted)" text-anchor="middle">${+d.slice(5,7)}/${+d.slice(8,10)}</text>`).join("")}
+      <line class="adcursor" x1="0" y1="${T}" x2="0" y2="${H-B}" stroke="var(--ink2)" stroke-width="1" stroke-dasharray="3 3" opacity="0"/>
+      ${series.map(s2=>`<path d="${s2.d}" fill="none" stroke="${s2.c}" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round"/>`).join("")}
       ${series.map(s2=>days.map((dd,i)=>{const v=s2.vals[i];
-        return (v==null||!isFinite(v))?"":`<circle cx="${x(i).toFixed(1)}" cy="${s2.y(v).toFixed(1)}" r="${dot}" fill="${s2.c}"><title>${dd}　${s2.m.name} ${s2.m.fmt(v)}</title></circle>`;}).join("")).join("")}
-    </svg></div>
-    <p class="note" style="margin:4px 0 0">縦軸は項目ごとに「その期間の最小〜最大」に合わせています（単位が違うため重ねても比べられるように）。実際の値は凡例の範囲と、点にカーソルを載せると出ます。</p>`;
+        return (v==null||!isFinite(v))?"":`<circle cx="${x(i).toFixed(1)}" cy="${s2.y(v).toFixed(1)}" r="${dot}" fill="${s2.c}"/>`;}).join("")).join("")}
+    </svg><div class="adtip" style="display:none"></div></div>
+    <p class="note" style="margin:4px 0 0">左の軸＝1番目に選んだ項目、右の軸＝2番目。3番目以降は軸を出していません（軸が増えると読めなくなるため）。グラフに触れるとその日の全項目が出ます。</p>`;
+}
+// 軸の目盛り用に短くする（円は千/万、%は小数1桁）
+function adShort(m,v){
+  if(v==null||!isFinite(v))return "—";
+  const u=m.fmt(0).replace(/[\d,.\-]/g,"");
+  if(u.indexOf("%")>=0)return F1(v)+"%";
+  const a=Math.abs(v);
+  if(a>=10000)return Math.round(v/1000)+"千"+(u||"");
+  if(a>=1000)return NUM(Math.round(v))+(u||"");
+  return (a<10?F1(v):String(Math.round(v)))+(u||"");
+}
+// グラフに触れたとき、その日の全項目を黒い吹き出しでまとめて出す
+function adWireTip(days,byDay){
+  const wrap=document.querySelector("#adtrend .adwrap"); if(!wrap)return;
+  const svg=wrap.querySelector("svg"), tip=wrap.querySelector(".adtip");
+  if(!svg||!tip||!days.length)return;
+  const L=+svg.dataset.l, R=+svg.dataset.r, W=+svg.dataset.w, cur=svg.querySelector(".adcursor");
+  const at=e=>{
+    const box=svg.getBoundingClientRect();
+    const px=((e.touches?e.touches[0].clientX:e.clientX)-box.left)/box.width*W;   // viewBox座標へ
+    const t=days.length<2?0:(px-L)/(W-L-R);
+    return Math.max(0,Math.min(days.length-1,Math.round(t*(days.length-1))));
+  };
+  const show=e=>{
+    const i=at(e), d=days[i], p=byDay.get(d);
+    if(cur){const gx=days.length<2?(L+(W-R))/2:L+i*(W-L-R)/(days.length-1);
+      cur.setAttribute("x1",gx);cur.setAttribute("x2",gx);cur.setAttribute("opacity","1");}
+    tip.innerHTML=`<div class="d">${d.slice(0,4)}/${+d.slice(5,7)}/${+d.slice(8,10)}（${WK[new Date(d+"T00:00:00Z").getUTCDay()]}）</div>`+
+      AD_COLS.map(k=>{const m=AD_METRICS.find(z=>z.k===k);
+        return `<div class="l"><i style="background:${AD_COLOR[k]||"#fff"}"></i>${m.name}<b>${m.fmt(adVal(k,p))}</b></div>`;}).join("");
+    tip.style.display="block";
+    const box=wrap.getBoundingClientRect();
+    const px=(e.touches?e.touches[0].clientX:e.clientX)-box.left;
+    tip.style.left=Math.max(4,Math.min(box.width-tip.offsetWidth-4,px+12))+"px";
+  };
+  const hide=()=>{tip.style.display="none"; if(cur)cur.setAttribute("opacity","0");};
+  svg.addEventListener("mousemove",show);
+  svg.addEventListener("mouseleave",hide);
+  svg.addEventListener("touchstart",show,{passive:true});
+  svg.addEventListener("touchmove",show,{passive:true});
+  svg.addEventListener("touchend",hide);
 }
 function drawAds(){
   const rows=adRows(), tot=adSum(rows);
@@ -984,6 +1075,7 @@ function drawAds(){
       a.sp+=r.sp||0;a.im+=r.im||0;a.rc+=r.rc||0;a.ck+=r.ck||0;a.fl+=r.fl||0;a.pv+=r.pv||0; byDay.set(r.d,a); }
     const days=[...byDay.keys()].sort();
     el.innerHTML=days.length?adChart(days,byDay):`<p class="note">この期間の広告データがありません。</p>`;
+    if(days.length)adWireTip(days,byDay);
   }
   // ---- 内訳：選んだ区分ごとに、週（月〜日）を下にぶら下げる ----
   //   店舗別のときは 直営／FC でセクションに分け、店舗ごとに非表示にできる。
@@ -991,7 +1083,7 @@ function drawAds(){
   //   （例: 8/1〜8/9 を選ぶと最初の週は「8/1〜8/2」）。無い日ぶんまで入っているように見せない。
   const byStore=(AD_GROUP==="st");
   const g=new Map();
-  for(const r of rows){
+  for(const r of adRowsAll()){        // ← 一覧は店舗の絞り込みに連動しない
     const key=byStore?(r.st||UNMAPPED):(AD_GROUP==="a"?r.a:r.c);
     let e=g.get(key); if(!e){e={own:r.ow||null,tot:{sp:0,im:0,rc:0,ck:0,fl:0,pv:0},wk:new Map()};g.set(key,e);}
     if(!e.own&&r.ow)e.own=r.ow;
@@ -1055,7 +1147,7 @@ function drawAds(){
     const sa=document.getElementById("adshowall");
     if(sa)sa.onclick=()=>{ AD_HIDE.clear(); adSaveHide(); drawAds(); };
   }
-  const nomap=adSum(rows.filter(r=>!r.st));
+  const nomap=adSum(adRowsAll().filter(r=>!r.st));
   const note=document.getElementById("adnote");
   if(note)note.innerHTML=
     `CTR＝クリック÷表示回数、CPC＝広告費÷クリック、CPM＝広告費÷表示回数×1000、FQ＝表示回数÷リーチ`+
