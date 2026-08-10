@@ -848,6 +848,11 @@ function adHas(need){
 // 指標は常に全部並べる（元データがまだ無いものは値が「—」になるだけ）。
 // 隠してしまうと「選べない」のか「作っていない」のか区別が付かないため。
 function adMetrics(){ return AD_METRICS; }
+// 店舗別一覧の列。カードやグラフの「表示する項目」には連動させない。
+//   ・端末ごとに選択が保存されるため、連動させるとPCとスマホで列が変わってしまう
+//   ・一覧は表なので、横に伸びても全部見えたほうが比べやすい（幅が足りなければ横スクロール）
+// 元データがまだ無い指標（フォロー系）は列に出さない（「—」だけの列が並ぶため）。
+function adTableCols(){ return AD_METRICS.filter(m=>adHas(m.need)).map(m=>m.k); }
 // 指標の色。グラフの線と「表示する項目」のチップで同じ色を使う。
 const AD_COLOR={sp:"#2f6fd0",im:"#8e5bd0",rc:"#0aa2c0",ck:"#1a8a5a",fl:"#d6336c",pv:"#e8590c",
   ctr:"#b8860b",cpc:"#c0392b",cpf:"#7048e8",frt:"#0ca678",cpv:"#e67700",cpm:"#495057",frq:"#845ef7"};
@@ -1138,7 +1143,8 @@ function drawAds(){
     const a=mon<state.from?state.from:mon, b=sun>state.to?state.to:sun;   // 期間の端で切る
     return a===b?md(a):`${md(a)}〜${md(b)}`;
   };
-  const cells=p2=>AD_COLS.map(k=>{const m=AD_METRICS.find(x=>x.k===k);return `<td>${m.fmt(adVal(k,p2))}</td>`;}).join("");
+  const TCOLS=adTableCols();
+  const cells=p2=>TCOLS.map(k=>{const m=AD_METRICS.find(x=>x.k===k);return `<td>${m.fmt(adVal(k,p2))}</td>`;}).join("");
   const rowsOf=(nm,e)=>
     `<tr class="adparent"><td style="text-align:left">`+
       (byStore?`<button class="eye" data-hide="${esc(nm)}" title="この店舗を非表示にする">👁</button>`:"")+
@@ -1166,7 +1172,7 @@ function drawAds(){
   }
   const t=document.getElementById("adtbl");
   if(t)t.innerHTML=`<thead><tr><th>${AD_GROUPS.find(x=>x[0]===AD_GROUP)[1].replace("別","")}</th>`+
-    AD_COLS.map(k=>`<th>${AD_METRICS.find(x=>x.k===k).name}</th>`).join("")+`</tr></thead><tbody>${body}</tbody>`;
+    TCOLS.map(k=>`<th>${AD_METRICS.find(x=>x.k===k).name}</th>`).join("")+`</tr></thead><tbody>${body}</tbody>`;
   // 非表示にしている店舗の案内（何を隠しているかが分かるように名前も出す）
   const hb=document.getElementById("adhidden");
   if(hb){
