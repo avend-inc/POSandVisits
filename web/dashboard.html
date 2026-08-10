@@ -1266,7 +1266,9 @@ function drawAds(){
   const shortName=n=>String(n||"").replace(/^\s*\d+\s*[.．]\s*/,"");
   const zero=adZero;
   // bucketOf: 日 → 期間キー / labelOf: 期間キー → 見出し / rangeOf: 期間キー → [開始,終了]
-  function adBuildTable(el,rows,bucketOf,labelOf,rangeOf){
+  //   opt.storeTotals=false で、店舗の行から数字を外して見出しだけにする
+  //   （月次は3か月ぶんの合計に意味が無く、月の行を読むのに邪魔なため）
+  function adBuildTable(el,rows,bucketOf,labelOf,rangeOf,opt){
     if(!el)return;
     const byStore=(AD_GROUP==="st"), g=new Map();
     for(const r of rows){
@@ -1289,10 +1291,13 @@ function drawAds(){
         e.tot.ex+=w.ex; e.tot.vis+=w.vis;
       }
     }
+    const showTot=!opt||opt.storeTotals!==false;
+    const blank="<td></td>".repeat(TCOLS.length);
     const rowsOf=(nm,e)=>
       `<tr class="adparent"><td style="text-align:left">`+
         (byStore?`<button class="eye" data-hide="${esc(nm)}" title="この店舗を非表示にする">👁</button>`:"")+
-        (nm===UNMAPPED?`<b style="color:#b8860b">${nm}</b>`:esc(shortName(nm)))+`</td>${cells(e.tot)}</tr>`+
+        (nm===UNMAPPED?`<b style="color:#b8860b">${nm}</b>`:esc(shortName(nm)))+`</td>`+
+        (showTot?cells(e.tot):blank)+`</tr>`+
       [...e.bk.keys()].sort().map(b=>
         `<tr class="adweek"><td style="text-align:left">${labelOf(b)}</td>${cells(e.bk.get(b))}</tr>`).join("");
     const sortEnt=a=>a.sort((x,y)=>y[1].tot.sp-x[1].tot.sp);
@@ -1338,7 +1343,8 @@ function drawAds(){
         const [y,m]=ym.split("-").map(Number);
         const end=new Date(Date.UTC(y,m,0)).toISOString().slice(0,10);
         return [ym+"-01", end>salesMax?salesMax:end];
-      });
+      },
+      {storeTotals:false});   // 3か月ぶんの合計は出さない（月の行だけ読む）
   }
   // 非表示にしている店舗の案内
   const hb=document.getElementById("adhidden");
