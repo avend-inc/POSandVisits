@@ -272,8 +272,10 @@ async function loadAssignments(){
   const rows=[...byEmail.entries()].map(([email,sids])=>{
     const chips=sids.map(id=>`<span class="stchip">${esc(nameOfStore(id))}<button title="解除" data-rm-email="${esc(email)}" data-rm-sid="${id}">×</button></span>`).join("")||'<span class="sub">なし</span>';
     const remaining=STORESCACHE.filter(s=>!sids.includes(s.id));
-    const addsel=`<select class="addsel" data-add-email="${esc(email)}"><option value="">＋店舗を追加…</option>${remaining.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join("")}</select>`;
-    return `<tr><td>${esc(email)}</td><td>${chips}</td><td>${addsel}</td></tr>`;
+    const boxes=remaining.map(s=>`<label><input type="checkbox" class="rowchk" data-add-email="${esc(email)}" value="${s.id}"><span>${esc(s.name)}</span></label>`).join("")
+      ||'<span class="sub">追加できる店舗はありません</span>';
+    const adder=remaining.length?`<details class="dd rowdd" data-email="${esc(email)}"><summary>＋店舗を追加 ▼</summary><div class="ddwrap"><div class="ddgrid">${boxes}</div><div style="margin-top:6px"><button class="btn rowadd" data-add-email="${esc(email)}" type="button" style="padding:5px 12px;font-size:12px">選んだ店を追加</button></div></div></details>`:'<span class="sub">全店割当済み</span>';
+    return `<tr><td>${esc(email)}</td><td>${chips}</td><td>${adder}</td></tr>`;
   }).join("")||`<tr><td colspan="3" class="sub">割り当てはまだありません（登録済みユーザーは全員 本部＝全店閲覧）</td></tr>`;
   tb.innerHTML=head+"<tbody>"+rows+"</tbody>";
   tb.querySelectorAll("[data-rm-email]").forEach(b=>b.onclick=async()=>{
@@ -283,10 +285,12 @@ async function loadAssignments(){
     msg("a_msg", error?("解除失敗："+error.message):`${email} から「${nameOfStore(sid)}」を解除しました`, !error);
     if(!error)loadAssignments();
   });
-  tb.querySelectorAll(".addsel").forEach(sel=>sel.onchange=async()=>{
-    const email=sel.dataset.addEmail, sid=+sel.value; if(!sid)return;
-    const {error}=await SB.from("app_user_stores").upsert({email,store_id:sid},{onConflict:"email,store_id",ignoreDuplicates:true});
-    msg("a_msg", error?("追加失敗："+error.message):`${email} に「${nameOfStore(sid)}」を追加しました`, !error);
+  tb.querySelectorAll(".rowadd").forEach(btn=>btn.onclick=async()=>{
+    const email=btn.dataset.addEmail;
+    const ids=[...tb.querySelectorAll(`.rowchk[data-add-email="${(window.CSS&&CSS.escape)?CSS.escape(email):email}"]:checked`)].map(c=>+c.value);
+    if(!ids.length){msg("a_msg","追加する店舗をチェックしてください",false);return;}
+    const {error}=await SB.from("app_user_stores").upsert(ids.map(store_id=>({email,store_id})),{onConflict:"email,store_id",ignoreDuplicates:true});
+    msg("a_msg", error?("追加失敗："+error.message):`${email} に ${ids.length}店 を追加しました`, !error);
     if(!error)loadAssignments();
   });
 }
