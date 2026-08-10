@@ -94,6 +94,31 @@ def main() -> int:
          group by 1,2 order by 6 desc nulls last limit 20
     """))
 
+    # ②-2 アクション系（follows / profile_visits）の入り具合
+    #   列があっても値が入っていなければ画面は「—」のまま。ここで見分ける。
+    show("アクション系の取込状況（follows / profile_visits）", run("""
+        select count(*) as 行数,
+               count(follows)        as follows入り,
+               count(profile_visits) as profile_visits入り,
+               min(date) filter (where follows is not null)::text        as follows最古,
+               max(date) filter (where follows is not null)::text        as follows最新,
+               min(date) filter (where profile_visits is not null)::text as pv最古,
+               max(date) filter (where profile_visits is not null)::text as pv最新,
+               sum(follows)        as follows合計,
+               sum(profile_visits) as pv合計
+          from meta_insights_daily
+    """))
+
+    show("アクション系が入っている日（直近14日ぶん）", run("""
+        select date::text as 日,
+               count(*) as 行数,
+               count(follows) as follows行, sum(follows) as follows,
+               count(profile_visits) as pv行, sum(profile_visits) as pv
+          from meta_insights_daily
+         where date >= current_date - interval '14 day'
+         group by 1 order by 1 desc
+    """))
+
     # ③ 直近30日のカバレッジ（データが無い日）
     show("直近30日で行が無い日（欠測日）", run("""
         select d::date::text as 欠測日
@@ -123,6 +148,28 @@ def main() -> int:
          where m.destination_id is not null
          group by 1 order by 3 desc nulls last limit 20
     """))
+
+    # ⑤ 広告(ad)単位のテーブルがあれば、そちらの状況も見る
+    ad = run("""
+        select count(*)::int as n from information_schema.tables
+         where table_schema='public' and table_name='meta_insights_daily_ad'
+    """)
+    if ad and (ad[0].get("n") or 0) > 0:
+        cols = {r["column_name"] for r in run("""
+            select column_name from information_schema.columns
+             where table_schema='public' and table_name='meta_insights_daily_ad'
+        """)}
+        extra = "".join(
+            f", count({c}) as {c}入り, sum({c}) as {c}合計"
+            for c in ("follows", "profile_visits") if c in cols)
+        show("広告(ad)単位テーブルの状況", run(f"""
+            select count(*) as 行数, min(date)::text as 最古, max(date)::text as 最新,
+                   count(*) filter (where destination_id is null) as 未紐付行数,
+                   round(sum(spend))::bigint as 消化額合計{extra}
+              from meta_insights_daily_ad
+        """))
+        if not extra:
+            print("  ※ follows / profile_visits の列がまだありません（ad単位）。")
     return 0
 
 
