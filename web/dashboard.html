@@ -173,6 +173,11 @@
   .kmat tr.we td{color:var(--accent)}
   /* 店舗詳細ページ：上部サマリーカード（横幅で数字を縮めてはみ出さない）・見出しアクセント */
   .dtop{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:10px 0 4px}
+  /* 直営店は「売上予算」を足して4枚。スマホ幅では3枚を横に並べると潰れるので2×2にする */
+  .dtop.four{grid-template-columns:repeat(4,minmax(0,1fr))}
+  @media(max-width:620px){ .dtop.four{grid-template-columns:repeat(2,minmax(0,1fr))} }
+  .dtop .card.bud{border-top-color:#2e9e5b}
+  .dtop .card .rate{margin-top:4px;font-size:10px;font-weight:800;white-space:nowrap}
   .dtop .card{padding:11px 12px;border-radius:12px;border-top:3px solid var(--accent)}
   .dtop .card .k{font-size:11px;margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .dtop .card .val{font-size:clamp(14px,4.4vw,22px);white-space:nowrap;letter-spacing:-.02em}
@@ -876,10 +881,11 @@ function renderDetail(){
       最新 売上<b style="color:var(--ink)">${mdShort(DATA._salesMax)}</b>・来店<b style="color:var(--ink)">${mdShort(DATA._visitMax)}</b>｜更新 ${genShort(DATA.generated_at)}
     </div>
     ${navrow}
-    <div class="dtop">
+    <div class="dtop${budgetShown(state.detail)?" four":""}">
+      <div class="card"><div class="k">前日の売上</div><div class="val" id="dtop-prev">—</div><div class="knote">税抜 <span id="dtop-prev-note"></span></div><div class="ksplit" id="dtop-prev-split"></div></div>
       <div class="card"><div class="k">今月の売上</div><div class="val" id="dtop-cur">—</div><div class="knote">税抜 <span id="dtop-cur-note"></span></div><div class="ksplit" id="dtop-cur-split"></div></div>
       <div class="card land"><div class="k">着地見込み</div><div class="val" id="dtop-land">—</div><div class="knote">当月の月末予測</div><div class="ksplit" id="dtop-land-split"></div></div>
-      <div class="card"><div class="k">前日の売上</div><div class="val" id="dtop-prev">—</div><div class="knote">税抜 <span id="dtop-prev-note"></span></div><div class="ksplit" id="dtop-prev-split"></div></div>
+      ${budgetShown(state.detail)?`<div class="card bud"><div class="k">売上予算</div><div class="val" id="dtop-bud">—</div><div class="knote">税抜 <span id="dtop-bud-note">当月</span></div><div class="ksplit" id="dtop-bud-split"></div></div>`:""}
     </div>
     <div class="panel">
       <h2>日別推移 <span class="sub" style="font-weight:500">（下スクロールで過去）</span>
@@ -978,6 +984,9 @@ function renderDetail(){
   draw();
   // 有人来店（手入力）は data.json より新しいことがあるので、開いたら読み直して反映する。
   if(posMixed(state.detail))loadStaffedVisits(state.detail).then(ok=>{ if(ok)refresh(); });
+  // 売上予算（事業計画）も開いたときに読む。読めたらカードを描き直す。
+  if(budgetShown(state.detail))
+    loadBudget(state.detail,(DATA._salesMax||DATA._max).slice(0,7)).then(()=>refresh());
   if(!FRAN)aiWeeklyInsight();   // AIのまとめは本部モードのみ（加盟店は集計値ベースで表示、AIは今後）
 }
 
@@ -2451,7 +2460,61 @@ function drawDetailExtras(){
   fillSplit("dtop-cur-split",cs,1);
   fillSplit("dtop-land-split",(cs&&tot>0&&lv!=null)?cs:null,(cs&&tot>0&&lv!=null)?lv/tot:1);
   fillSplit("dtop-prev-split",sumSplit(sd,sd,id),1);
+  drawBudgetCard(ym,lv);
   drawStaffedBadge();
+}
+// ============================================================
+//  売上予算（当月）— 経営の事業計画から自動で拾う
+//  原本は targets.json（月次予実の「予算」。経営タブ・予実タブが読んでいるのと同じもの）。
+//  予実タブ(pl.html)でその月の税抜売上予算を手直しして保存していれば、そちらを優先する。
+//  カードを出すのは直営店だけ（FCには出さない）。
+// ============================================================
+let TARGETS=null;               // targets.json（未読込は null、読めなければ {}）
+let BUDGET={ym:null,ex:null};   // いま表示している店・月の税抜売上予算
+function budgetShown(id){ return id!=null && !window.FRANCHISEE && ownOf(id)==="直営"; }
+async function loadTargets(){
+  if(TARGETS!==null)return;
+  try{ TARGETS=await (await fetch("targets.json",{cache:"no-store"})).json(); }
+  catch(e){ TARGETS={}; }
+}
+// 事業計画から、その店・その月の税抜売上予算を引く。
+// 店名に含まれるトークンで照合する（「NOTIME山形店」→「山形」）。予実タブと同じ引き方。
+function planEx(id,ym){
+  const T=(TARGETS&&TARGETS.targets)||{}, nm=(storeMeta(id)||{}).name||"";
+  for(const tok in T){
+    const t=T[tok]&&T[tok][ym];
+    if(nm.indexOf(tok)>=0&&t&&Number.isFinite(t.ex))return t.ex;
+  }
+  return null;
+}
+async function loadBudget(id,ym){
+  BUDGET={ym:ym,ex:null};
+  if(!budgetShown(id))return;
+  await loadTargets();
+  let ex=null;
+  if(SB){
+    try{
+      const {data}=await SB.from("plan_data").select("data")
+        .eq("page","pl").eq("scope",String(id)).eq("ym",ym).maybeSingle();
+      const v=data&&data.data&&data.data.b_ex;
+      if(Number.isFinite(v))ex=v;      // 予実タブで保存された値を優先
+    }catch(e){}
+  }
+  if(ex==null)ex=planEx(id,ym);        // 無ければ事業計画の数字をそのまま使う
+  BUDGET={ym:ym,ex:ex};
+}
+// 予算カードの中身（金額＋達成見込み＝着地÷予算）を描く。
+function drawBudgetCard(ym,landing){
+  const el=document.getElementById("dtop-bud"); if(!el)return;
+  const ex=(BUDGET.ym===ym)?BUDGET.ex:null;
+  el.innerHTML=(ex==null)?"—":YEN(Math.round(ex))+"<small>円</small>";
+  const note=document.getElementById("dtop-bud-note");
+  if(note)note.textContent=`${+ym.slice(5,7)}月`;
+  const sp=document.getElementById("dtop-bud-split"); if(!sp)return;
+  if(ex==null||ex<=0||landing==null){ sp.style.display="none"; sp.innerHTML=""; return; }
+  const rate=landing/ex*100, up=rate>=100;
+  sp.style.display="block";
+  sp.innerHTML=`<div class="rate" style="color:${up?"#2e9e5b":"#c0392b"}">達成見込 ${F1(rate)}%</div>`;
 }
 // この店は「無人営業＋有人営業」の2レジ運用か（＝内訳と有人来店入力を出す店か）。
 function posMixed(id){ return id!=null && (DATA._posMix||new Set()).has(id); }
