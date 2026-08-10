@@ -875,6 +875,7 @@ function render(){ if(VIEW==="ads")renderAds(); else if(state.detail)renderDetai
 // （取り込みの拡張前は フォロー数・プロフアクセス数 がまだ無いため）。
 const AD_METRICS=[
   {k:"sp",  name:"広告費",         fmt:v=>YEN(Math.round(v))+"円", sum:r=>r.sp},
+  {k:"ex",  name:"売上",           fmt:v=>v>0?YEN(Math.round(v))+"円":"—", note:"広告を出している店の税抜売上。広告を止めていた日も含む"},
   {k:"sr",  name:"売上比率",       fmt:v=>v==null?"—":F1(v)+"%",  calc:p=>p.ex>0?p.sp/p.ex*100:null, note:"広告費÷税抜売上。売上の何％を広告に使ったか"},
   {k:"pv",  name:"プロフアクセス数",fmt:v=>NUM(Math.round(v))+"回", sum:r=>r.pv, need:"pv", src:"profile_visits", note:"広告費÷プロフアクセス数。CPCはクリック基準なので別物"},
   {k:"ctr", name:"CTR",           fmt:v=>v==null?"—":F1(v)+"%",  calc:p=>p.im>0?p.ck/p.im*100:null},
@@ -961,37 +962,49 @@ function adRows(){
 function adRowsAll(){
   return (DATA.meta||[]).filter(r=>r.d>=state.from&&r.d<=state.to&&!AD_HIDE.has(r.st||UNMAPPED));
 }
-// 店舗×日 → 税抜売上・来店数。広告費と突き合わせるために一度だけ作って使い回す。
+// 店舗ID → その店の日別行。広告費と売上を突き合わせるために一度だけ作る。
 // 結び目は店名ではなく店舗ID（si）。店名は表記ゆれがあって当てにできない。
-let AD_SALES=null;
-function adSalesIdx(){
-  if(AD_SALES)return AD_SALES;
-  AD_SALES=new Map();
+let AD_BYSTORE=null;
+function adStoreIdx(){
+  if(AD_BYSTORE)return AD_BYSTORE;
+  AD_BYSTORE=new Map();
   // 行そのものを持つ（値をコピーしない）。有人来店の合算などで後から
   // r.v が書き換わっても、こちらが古いままにならないようにするため。
-  for(const r of (DATA.daily||[]))AD_SALES.set(r.s+"|"+r.d,r);
-  return AD_SALES;
+  for(const r of (DATA.daily||[])){
+    let a=AD_BYSTORE.get(r.s); if(!a){a=[];AD_BYSTORE.set(r.s,a);}
+    a.push(r);
+  }
+  return AD_BYSTORE;
 }
-function adZero(){ return {sp:0,im:0,rc:0,ck:0,fl:0,pv:0,ex:0,vis:0,seen:null}; }
-// 広告の1行を集計に足す。
-//   売上・来店は「店舗×日」に1つしかない値なので、同じ店の同じ日に複数の
-//   キャンペーンがあっても二重に足さないよう、足した組み合わせを覚えておく。
-//   （ここを素直に足すと、キャンペーン数だけ売上が膨らんで比率が壊れる）
+function adZero(){ return {sp:0,im:0,rc:0,ck:0,fl:0,pv:0,ex:0,vis:0,sids:null}; }
+// 広告の1行を集計に足す。ここで足すのは広告の実額だけ。
+// 売上・来店は「店舗×日」に1つしかない値なので、ここで足すとキャンペーンの
+// 本数ぶん膨らむ。どの店が対象かだけ覚えておき、あとで期間ごとに1回だけ足す。
 function adAdd(a,r){
   a.sp+=r.sp||0;a.im+=r.im||0;a.rc+=r.rc||0;a.ck+=r.ck||0;a.fl+=r.fl||0;a.pv+=r.pv||0;
   if(r.si==null)return;
-  const k=r.si+"|"+r.d;
-  if(!a.seen)a.seen=new Set();
-  if(a.seen.has(k))return;
-  a.seen.add(k);
-  const s=adSalesIdx().get(k); if(!s)return;
-  if(s.ex!=null)a.ex+=s.ex;
-  if(s.v!=null)a.vis+=s.v;
+  if(!a.sids)a.sids=new Set();
+  a.sids.add(r.si);
 }
-function adSum(rows){
+// 対象の店の、その期間の売上・来店を足す。
+//   広告を止めていた日も含めて「その週・その月の全売上」を分母にする。
+//   店舗ページや予実タブの売上と数字がそろうのがこちら。
+function adSales(a,from,to){
+  a.ex=0; a.vis=0;
+  if(!a.sids)return a;
+  const idx=adStoreIdx();
+  for(const sid of a.sids)for(const r of (idx.get(sid)||[])){
+    if(r.d<from||r.d>to)continue;
+    if(r.ex!=null)a.ex+=r.ex;
+    if(r.v!=null)a.vis+=r.v;
+  }
+  return a;
+}
+// 期間ぶんの合計。from/to を省いたら選んでいる集計期間を使う。
+function adSum(rows,from,to){
   const p=adZero();
   for(const r of rows)adAdd(p,r);
-  return p;
+  return adSales(p,from||state.from,to||state.to);
 }
 function adVal(k,p){
   const m=AD_METRICS.find(x=>x.k===k);
@@ -1231,8 +1244,11 @@ function drawAds(){
   //   実際の値は凡例と、点にカーソルを載せたときに出す。
   const el=document.getElementById("adtrend");
   if(el){
+    // 日別も同じ考え方。その日の売上は「期間中に広告を出している店」の合計にする
+    // （日ごとに対象店が入れ替わると、線がガタついて比べられなくなるため）。
     const byDay=new Map();
     for(const r of rows){ let a=byDay.get(r.d); if(!a){a=adZero();byDay.set(r.d,a);} adAdd(a,r); }
+    for(const [d,a] of byDay){ a.sids=tot.sids; adSales(a,d,d); }
     const days=[...byDay.keys()].sort();
     el.innerHTML=days.length?adChart(days,byDay):`<p class="note">この期間の広告データがありません。</p>`;
     if(days.length)adWireTip(days,byDay);
@@ -1241,12 +1257,16 @@ function drawAds(){
   //   どちらも同じ作り：区分（店舗/キャンペーン/アカウント）を親にして、その下に期間を並べる。
   //   違いは期間の刻みだけ（週＝月曜〜日曜／月）。店舗の絞り込みには連動しない。
   const TCOLS=adTableCols();
-  const cells=p2=>TCOLS.map(k=>{const m=AD_METRICS.find(x=>x.k===k);return `<td>${m.fmt(adVal(k,p2))}</td>`;}).join("");
+  // 元データがまだDBに無い項目は「—」にする。0として出すと「本当に0回だった」と
+  // 読めてしまい、取り込み待ちなのか実績なのかが区別できなくなるため。
+  const cells=p2=>TCOLS.map(k=>{const m=AD_METRICS.find(x=>x.k===k);
+    return `<td>${adHas(m.need)?m.fmt(adVal(k,p2)):"—"}</td>`;}).join("");
   const md=d=>`${+d.slice(5,7)}/${+d.slice(8,10)}`;
   // 店名の先頭にある管理番号（「48.」など）は画面では邪魔なので落とす
   const shortName=n=>String(n||"").replace(/^\s*\d+\s*[.．]\s*/,"");
   const zero=adZero;
-  function adBuildTable(el,rows,bucketOf,labelOf){
+  // bucketOf: 日 → 期間キー / labelOf: 期間キー → 見出し / rangeOf: 期間キー → [開始,終了]
+  function adBuildTable(el,rows,bucketOf,labelOf,rangeOf){
     if(!el)return;
     const byStore=(AD_GROUP==="st"), g=new Map();
     for(const r of rows){
@@ -1257,6 +1277,17 @@ function drawAds(){
       const b=bucketOf(r.d);
       let w=e.bk.get(b); if(!w){w=zero();e.bk.set(b,w);}
       adAdd(w,r);
+    }
+    // 売上・来店は期間ごとに1回だけ足す。行の合計は、各期間ぶんを足し上げる
+    // （期間どうしは重ならないので、そのまま足してよい）。
+    for(const [,e] of g){
+      e.tot.ex=0; e.tot.vis=0;
+      for(const [b,w] of e.bk){
+        const [f,t]=rangeOf(b);
+        w.sids=e.tot.sids;
+        adSales(w,f,t);
+        e.tot.ex+=w.ex; e.tot.vis+=w.vis;
+      }
     }
     const rowsOf=(nm,e)=>
       `<tr class="adparent"><td style="text-align:left">`+
@@ -1284,18 +1315,30 @@ function drawAds(){
       AD_HIDE.add(b2.dataset.hide); adSaveHide(); drawAds(); });
   }
   // 週次：選んでいる期間を月曜〜日曜で刻む。期間の端に掛かる週は集計した範囲だけを出す。
+  const weekRange=mon=>{
+    const sun=addDays(mon,6);
+    return [mon<state.from?state.from:mon, sun>state.to?state.to:sun];
+  };
   adBuildTable(document.getElementById("adtbl"), adRowsAll(), mondayOf, mon=>{
-    const sun=addDays(mon,6), a=mon<state.from?state.from:mon, b=sun>state.to?state.to:sun;
+    const [a,b]=weekRange(mon);
     return a===b?md(a):`${md(a)}〜${md(b)}`;
-  });
+  }, weekRange);
   // 月次：期間に関係なく、今月を含む直近3か月。
   {
     const last=(DATA.meta||[]).reduce((a,r)=>r.d>a?r.d:a,"")||state.to;
     const yms=[2,1,0].map(i=>{let[y,m]=last.slice(0,7).split("-").map(Number);m-=i;while(m<1){m+=12;y--;}
       return y+"-"+String(m).padStart(2,"0");});
     const mrows=(DATA.meta||[]).filter(r=>yms.includes(r.d.slice(0,7))&&!AD_HIDE.has(r.st||UNMAPPED));
+    // 月の範囲はその月まるごと。ただし今月は、売上が入っている最終日まで
+    // （先の日まで含めても売上は0で、比率が実態より高く出るだけなので）。
+    const salesMax=DATA._salesMax||DATA._max||last;
     adBuildTable(document.getElementById("admtbl"), mrows, d=>d.slice(0,7),
-      ym=>`${+ym.slice(5,7)}月${ym===yms[2]?"（今月）":""}`);
+      ym=>`${+ym.slice(5,7)}月${ym===yms[2]?"（今月）":""}`,
+      ym=>{
+        const [y,m]=ym.split("-").map(Number);
+        const end=new Date(Date.UTC(y,m,0)).toISOString().slice(0,10);
+        return [ym+"-01", end>salesMax?salesMax:end];
+      });
   }
   // 非表示にしている店舗の案内
   const hb=document.getElementById("adhidden");
@@ -1320,6 +1363,8 @@ function drawAds(){
     `CTR＝クリック÷表示回数、CPC＝広告費÷クリック、FQ＝表示回数÷リーチ、売上比率＝広告費÷税抜売上`+
     (adHas("fl")?`、CPF＝広告費÷フォロー数`:"")+(adHas(["fl","pv"])?`、フォロー率＝フォロー数÷プロフアクセス数`:"")+
     `。`+
+    `<b>売上</b>は、広告を出している店のその期間の税抜売上です`+
+    `（広告を止めていた日も含むので、店舗ページ・予実タブの売上と一致します）。`+
     `期間をまたぐときも実額どうしで割り直しています（比率の平均はしていません）。`+
     (nomap.sp>0?`<br><b style="color:#b8860b">店舗に紐付いていない広告費が ${YEN(nomap.sp)}円あります。</b>店舗別の数字はそのぶん少なく出ます。`:"");
 }
@@ -1357,6 +1402,7 @@ function adDrawScatter(shortName){
     let e=g.get(r.si); if(!e){e={name:r.st,own:r.ow,acc:adZero()};g.set(r.si,e);}
     adAdd(e.acc,r);
   }
+  for(const [,e] of g)adSales(e.acc,state.from,state.to);
   const pts=[],skip=[];
   for(const [sid,e] of g){
     if(e.acc.sp<=0)continue;
