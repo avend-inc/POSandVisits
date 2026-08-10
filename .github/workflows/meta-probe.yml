@@ -1,0 +1,35 @@
+# ============================================================
+#  Meta広告データの点検（読み取りのみ）
+#
+#  Actions →「Meta広告データの点検」→ Run workflow
+#
+#  meta_insights_daily / meta_sync_runs を見て、
+#   ・同期がいつ・どの時間帯に走っているか（自動か手動かの判断材料）
+#   ・destination_id（店舗）が付いていない行がどれだけあるか
+#   ・直近30日で抜けている日が無いか
+#   ・アカウント別／店舗別の消化額
+#  を出す。中身の生データは出さず、書き込みも一切しない。
+# ============================================================
+name: Meta広告データの点検
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    name: Meta広告データを調べる
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TZ: Asia/Tokyo
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install requests
+      - name: 点検を実行
+        run: python -m tools.meta_probe
