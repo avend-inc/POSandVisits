@@ -843,14 +843,12 @@ function render(){ if(VIEW==="ads")renderAds(); else if(state.detail)renderDetai
 const AD_METRICS=[
   {k:"sp",  name:"広告費",         fmt:v=>YEN(Math.round(v))+"円", sum:r=>r.sp},
   {k:"im",  name:"表示回数",       fmt:v=>NUM(Math.round(v))+"回", sum:r=>r.im},
-  {k:"rc",  name:"リーチ",         fmt:v=>NUM(Math.round(v))+"人", sum:r=>r.rc, note:"日をまたぐと重複を含みます"},
   {k:"fl",  name:"フォロー数",     fmt:v=>NUM(Math.round(v))+"人", sum:r=>r.fl, need:"fl", src:"follows"},
   {k:"pv",  name:"プロフアクセス数",fmt:v=>NUM(Math.round(v))+"回", sum:r=>r.pv, need:"pv", src:"profile_visits", note:"広告費÷プロフアクセス数。CPCはクリック基準なので別物"},
   {k:"ctr", name:"CTR",           fmt:v=>v==null?"—":F1(v)+"%",  calc:p=>p.im>0?p.ck/p.im*100:null},
   {k:"cpc", name:"CPC",           fmt:v=>v==null?"—":YEN(Math.round(v))+"円", calc:p=>p.ck>0?p.sp/p.ck:null},
   {k:"frt", name:"フォロー率",     fmt:v=>v==null?"—":F1(v)+"%", calc:p=>p.pv>0?p.fl/p.pv*100:null, need:["fl","pv"], src:"follows / profile_visits", note:"フォロー数÷プロフアクセス数"},
   {k:"cpf", name:"CPF",           fmt:v=>v==null?"—":YEN(Math.round(v))+"円", calc:p=>p.fl>0?p.sp/p.fl:null, need:"fl", src:"follows", note:"フォロー獲得単価＝広告費÷フォロー数"},
-  {k:"cpv", name:"プロフ単価",   fmt:v=>v==null?"—":YEN(Math.round(v))+"円", calc:p=>p.pv>0?p.sp/p.pv:null, need:"pv", src:"profile_visits"},
   {k:"frq", name:"FQ",            fmt:v=>v==null?"—":F2(v)+"回",  calc:p=>p.rc>0?p.im/p.rc:null, note:"フリークエンシー＝表示回数÷リーチ"},
 ];
 // その指標の元データが1行でも入っているか（入っていない指標は出さない）
@@ -868,8 +866,8 @@ function adMetrics(){ return AD_METRICS; }
 // 元データがまだ無い指標（フォロー系）は列に出さない（「—」だけの列が並ぶため）。
 function adTableCols(){ return AD_METRICS.filter(m=>adHas(m.need)).map(m=>m.k); }
 // 指標の色。グラフの線と「表示する項目」のチップで同じ色を使う。
-// ck（クリック）は項目としては出さないが、CTR/CPCの計算には使うので集計は続ける
-const AD_COLOR={sp:"#2f6fd0",im:"#8e5bd0",rc:"#0aa2c0",fl:"#d6336c",pv:"#e8590c",
+// ck（クリック）と rc（リーチ）は項目として出さないが、CTR/CPC/FQ の計算に使うので集計は続ける
+const AD_COLOR={sp:"#2f6fd0",im:"#8e5bd0",fl:"#d6336c",pv:"#e8590c",
   ctr:"#b8860b",cpc:"#c0392b",cpf:"#7048e8",frt:"#0ca678",cpv:"#e67700",cpm:"#495057",frq:"#845ef7"};
 const AD_DEFAULT=["sp","im","ctr","cpc"];
 let AD_COLS=(function(){
@@ -1226,7 +1224,7 @@ function drawAds(){
   if(note)note.innerHTML=
     `CTR＝クリック÷表示回数、CPC＝広告費÷クリック、FQ＝表示回数÷リーチ`+
     (adHas("fl")?`、CPF＝広告費÷フォロー数`:"")+(adHas(["fl","pv"])?`、フォロー率＝フォロー数÷プロフアクセス数`:"")+
-    (adHas("pv")?`、プロフアクセス単価＝広告費÷プロフアクセス数`:"")+`。`+
+    `。`+
     `期間をまたぐときも実額どうしで割り直しています（比率の平均はしていません）。`+
     (nomap.sp>0?`<br><b style="color:#b8860b">店舗に紐付いていない広告費が ${YEN(nomap.sp)}円あります。</b>店舗別の数字はそのぶん少なく出ます。`:"");
 }
