@@ -421,6 +421,16 @@ def build_data(sb: Supabase) -> dict:
                 dest_name[str(d["id"])] = d.get("name")
         except Exception:
             pass
+        # 直営／FCの区分。納品先(destinations)の名前で当てにいくと表記ゆれで外すので、
+        # pos_store_links（納品先 ↔ POS店舗の対応表）を通して stores.ownership を引く。
+        dest_own: dict = {}
+        try:
+            for lk in _select_all(sb, "pos_store_links", "pos_store_id,destination_id", order="pos_store_id"):
+                did, sid = lk.get("destination_id"), lk.get("pos_store_id")
+                if did is not None and sid in own_by_id:
+                    dest_own[str(did)] = own_by_id[sid]
+        except Exception:
+            pass
         # follows / profile_visits は取り込みの拡張後に増える列。まだ無い環境でも動くよう、
         # 付きで取りに行って失敗したら基本の列だけで取り直す（列が増えたら自動で拾う）。
         BASE = ("date,account_name,campaign_name,destination_id,"
@@ -438,6 +448,8 @@ def build_data(sb: Supabase) -> dict:
                 "c": r.get("campaign_name") or "(名称なし)",
                 # st=店舗名。紐付いていないものは null のまま（画面で「未紐付け」と出す）
                 "st": dest_name.get(str(did)) if did else None,
+                # ow=直営/FC。分からなければ null（画面では「区分なし」にまとめる）
+                "ow": dest_own.get(str(did)) if did else None,
                 "sp": round(_num(r.get("spend"))),
                 "im": int(r.get("impressions") or 0),
                 "rc": int(r.get("reach") or 0),
