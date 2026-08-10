@@ -106,6 +106,9 @@ jobs:
       # 任意：これを登録するとダッシュボードが「Googleログイン制(社内のみ)」になる。
       #       未登録なら従来どおり公開URL（知っていれば誰でも閲覧可）。
       SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      # 任意：Slack の Incoming Webhook URL。登録すると、best-effort で握りつぶしている
+      #       取り込みの失敗・売上0・レジ単位の欠測をSlackに流す（未登録なら何もしない）。
+      SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
 
     steps:
       - name: リポジトリを取得

@@ -189,6 +189,10 @@
   .dtop .card .ksplit b{font-weight:800;color:var(--ink)}
   .dtop .card.land .ksplit{border-top-color:#3a4d75;color:#8fa3c8}
   .dtop .card.land .ksplit b{color:#fff}
+  /* 有人来店の入力もれ：ボタンの件数バッジと、日別推移の来店セルにつける印 */
+  .bdg{margin-left:5px;padding:1px 6px;border-radius:9px;background:#b8860b;color:#fff;font-size:9.5px;font-weight:800;white-space:nowrap}
+  .kmat td .mk{margin-left:3px;font-size:9px;font-weight:800;color:#b8860b}
+  .svtbl tr.miss td{background:rgba(184,134,11,.10)}
   /* 有人来店の入力モーダル */
   .svtbl input{width:74px;padding:5px 7px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--ink);font-family:inherit;font-size:13px;text-align:right}
   .svtbl .ok{color:#2e9e5b;font-weight:800}
@@ -852,7 +856,7 @@ function renderDetail(){
     </div>
     <div class="panel">
       <h2>日別推移 <span class="sub" style="font-weight:500">（下スクロールで過去）</span>
-        ${posMixed(state.detail)?'<button class="chip" id="stf-btn" style="margin-left:auto;flex:none;white-space:nowrap">👥 有人来店を入力</button>':''}</h2>
+        ${posMixed(state.detail)?'<button class="chip" id="stf-btn" style="margin-left:auto;flex:none;white-space:nowrap">👥 有人来店を入力<span id="stf-badge"></span></button>':''}</h2>
       <div class="tblwrap daywrap"><table class="kmat daykpi" id="daykpi"></table></div>
       <p class="note" style="margin:7px 0 0"><b>青字＝土日祝</b>／気温は最高・最低</p>
     </div>
@@ -2420,9 +2424,30 @@ function drawDetailExtras(){
   fillSplit("dtop-cur-split",cs,1);
   fillSplit("dtop-land-split",(cs&&tot>0&&lv!=null)?cs:null,(cs&&tot>0&&lv!=null)?lv/tot:1);
   fillSplit("dtop-prev-split",sumSplit(sd,sd,id),1);
+  drawStaffedBadge();
 }
 // この店は「無人営業＋有人営業」の2レジ運用か（＝内訳と有人来店入力を出す店か）。
 function posMixed(id){ return id!=null && (DATA._posMix||new Set()).has(id); }
+// 有人来店の入力もれ：売上がある日なのに有人来店が未入力なら true（入力を促す印に使う）。
+function staffedMissingDay(r){ return posMixed(r.s) && (r.tx||0)>0 && r.vm==null; }
+// 直近14日の入力もれ日数。0なら印もバッジも出さない。
+function staffedMissingCount(id){
+  if(!posMixed(id))return 0;
+  const last=DATA._salesMax||DATA._max, from=addDays(last,-13);
+  let n=0;
+  for(const r of DATA.daily){
+    if(r.s!==id||r.d<from||r.d>last)continue;
+    if(staffedMissingDay(r))n++;
+  }
+  return n;
+}
+// 「👥 有人来店を入力」ボタンに未入力件数のバッジを出す（0件なら消す）。
+function drawStaffedBadge(){
+  const el=document.getElementById("stf-badge"); if(!el)return;
+  const n=staffedMissingCount(state.detail);
+  el.className=n?"bdg":"";
+  el.textContent=n?`未入力${n}日`:"";
+}
 // 税抜売上の内訳合計（u=無人営業時間／m=有人営業時間）。対象外の店は null。
 function sumSplit(from,to,id){
   if(!posMixed(id))return null;
@@ -2490,8 +2515,8 @@ function openStaffedModal(){
   const dates=[]; for(let d=last; d>=from; d=addDays(d,-1))dates.push(d);
   const cells=dates.map(d=>{
     const r=byDate.get(d)||{}, wk=WK[new Date(d+"T00:00:00Z").getUTCDay()];
-    const we=isWeekendOrHoliday(d);
-    return `<tr${we?' class="we"':''} data-d="${d}">
+    const we=isWeekendOrHoliday(d), miss=staffedMissingDay(r);
+    return `<tr class="${we?"we ":""}${miss?"miss":""}" data-d="${d}">
       <td style="text-align:left;white-space:nowrap">${+d.slice(5,7)}/${+d.slice(8,10)}(${wk})</td>
       <td>${r.v0==null?"—":NUM(r.v0)+"人"}</td>
       <td><input type="number" min="0" step="1" inputmode="numeric" data-d="${d}" value="${r.vm==null?"":r.vm}"></td>
@@ -2500,7 +2525,8 @@ function openStaffedModal(){
   }).join("");
   showModal(`有人来店の入力｜${nm}`,
     `<p class="note" style="margin:0 0 8px">無人営業時間（SIPOS）の来店は自動で入ります。<b>有人営業時間（Airレジ）の来店数</b>をここに入れてください。
-      入力すると、この店舗ページの<b>来店数・購入率</b>がすべて「無人＋有人」の合算に切り替わります（全店・直営合計の集計には影響しません）。</p>
+      入力すると、この店舗ページの<b>来店数・購入率</b>がすべて「無人＋有人」の合算に切り替わります（全店・直営合計の集計には影響しません）。
+      ${staffedMissingCount(id)?`<br><b style="color:#b8860b">直近14日で${staffedMissingCount(id)}日ぶんが未入力です</b>（色つきの行）。`:""}</p>
      <div class="tblwrap svtbl" style="max-height:50vh"><table class="kmat">
        <thead><tr><th>日付</th><th>無人</th><th>有人</th><th>合計</th><th></th></tr></thead>
        <tbody>${cells}</tbody></table></div>
@@ -2537,6 +2563,7 @@ async function saveStaffedDay(inp){
   document.getElementById("mdl-root").querySelectorAll("tr[data-d]").forEach(row=>{
     const rr=byDate.get(row.dataset.d), td=row.querySelector(".sv-t");
     if(td)td.textContent=(!rr||rr.v==null)?"—":NUM(rr.v)+"人";
+    row.classList.toggle("miss",!!(rr&&staffedMissingDay(rr)));   // 入力もれの色分けも更新
   });
   show("✓ 保存済み",true);
 }
@@ -2568,8 +2595,12 @@ function drawDayKpi(){
   if(!dates.length){ el.innerHTML=h+`<tr><td colspan="${DAY_COLS.length+1}" class="sub">データがありません</td></tr></tbody>`; return; }
   for(const d of dates){ const p=sumRows(byDate.get(d)); const we=isWeekendOrHoliday(d);
     const wk=WK[new Date(d+"T00:00:00Z").getUTCDay()];
+    // 有人来店が未入力の日は、来店客数のセルに「未」を出して入力を促す（2レジ運用の店だけ）。
+    const miss=(byDate.get(d)||[]).some(staffedMissingDay);
     h+=`<tr${we?' class="we"':''}><td>${+d.slice(5,7)}/${+d.slice(8,10)}(${wk})<span class="wx" data-d="${d}"></span></td>`+
-       DAY_COLS.map(k=>{const v=M(k).calc(p);return `<td>${M(k).fmt(v==null?0:v)}</td>`;}).join("")+`</tr>`; }
+       DAY_COLS.map(k=>{const v=M(k).calc(p);
+         const mk=(k==="v"&&miss)?'<span class="mk" title="有人時間の来店数が未入力です">未</span>':"";
+         return `<td>${M(k).fmt(v==null?0:v)}${mk}</td>`;}).join("")+`</tr>`; }
   el.innerHTML=h+`</tbody>`;
   // thead が3行になったので、スクロールしても重ならないよう sticky の top を実測で積み上げる
   let top=0;
