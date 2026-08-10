@@ -385,11 +385,12 @@ async function franchiseeBoot(ids){
   DATA={generated_at:gen,stores,daily,cat,catp,bundles,bundleNames,catSeason,gradeBands};
   prep();
   // URLで店指定（共有リンク）→ その店へ直行。それ以外は必ず「自分の店舗」選択画面をはさむ（1店でも）。
-  if(DETAIL_ID&&window.FR_STORES.includes(DETAIL_ID)) openFranchiseeStore(DETAIL_ID);
+  if(DETAIL_ID&&window.FR_STORES.includes(DETAIL_ID)) openFranchiseeStore(DETAIL_ID,false);
   else renderFranchiseeHome();
 }
 // 加盟店：許可された店舗の一覧（ログイン直後に表示）。名前をタップでその店へ。
-function renderFranchiseeHome(){
+function renderFranchiseeHome(push){
+  if(push===true){try{history.pushState({frHome:1},"",frBaseURL());}catch(e){}}
   const tb=document.querySelector(".tabbar"); if(tb)tb.style.display="none";
   const app=document.getElementById("app"); app.classList.remove("detail");
   const ids=window.FR_STORES||[];
@@ -425,12 +426,24 @@ async function drawFrMembers(){
   });
 }
 // 加盟店：指定店の店舗ページを開く（期間は今月の焼込みレンジで初期化）
-function openFranchiseeStore(id){
+// 加盟店の店舗ページURL（?store=<id> を付与。ブラウザの戻る/共有リンクに対応）
+function frBaseURL(){return location.pathname+(GROUP?("?g="+encodeURIComponent(GROUP)):"");}
+function frStoreURL(id){return location.pathname+"?"+(GROUP?("g="+encodeURIComponent(GROUP)+"&"):"")+"store="+id;}
+function openFranchiseeStore(id,push){
   state.detail=id; state.sel=new Set([id]);
   const tm=(window.FR_BENCH[id]||{}).thismonth;
   if(tm){state.from=tm.from;state.to=tm.to;state.kind="thismonth";}
+  if(push!==false){try{history.pushState({frStore:id},"",frStoreURL(id));}catch(e){}}
   renderDetail();
 }
+// 加盟店：URLの ?store= を見て一覧/店舗を描き分ける（戻る・進む時に使用）
+function frRoute(){
+  const v=new URLSearchParams(location.search).get("store");
+  const id=v&&/^\d+$/.test(v)?+v:null;
+  if(id!=null&&(window.FR_STORES||[]).includes(id)) openFranchiseeStore(id,false);
+  else renderFranchiseeHome(false);
+}
+window.addEventListener("popstate",()=>{ if(window.FRANCHISEE) frRoute(); });
 function showLogin(){
   screen(`<div class="gate">
     <div class="logo">売上KPI管理</div>
@@ -810,7 +823,7 @@ function renderDetail(){
   const s=storeMeta(state.detail); const nm=(s&&s.name)||("店舗"+state.detail);
   document.getElementById("app").classList.add("detail");
   const navrow=FRAN
-    ? ((window.FR_STORES||[]).length>1 ? `<div style="margin:2px 0 8px"><button class="chip" id="fr-home">◀ 店舗一覧</button></div>` : "")
+    ? `<div style="margin:2px 0 8px"><button class="chip" id="fr-home">◀ 店舗一覧</button></div>`
     : `<div style="margin:2px 0 8px"><a href="index.html?g=${GROUP}" class="chip" style="text-decoration:none">◀ 一覧に戻る</a></div>`;
   document.getElementById("app").innerHTML=`
     <header>
@@ -908,7 +921,7 @@ function renderDetail(){
     <div class="foot">差分の色＝上位3店平均との差（上:緑／下:赤）。来店客数・購入率はデジテール導入店のみ。${FRAN?'比較は各店の生データではなく集計値のみを表示します。':''}</div>`;
   wireCommon();
   if(FRAN){
-    const hb=document.getElementById("fr-home"); if(hb)hb.onclick=renderFranchiseeHome;
+    const hb=document.getElementById("fr-home"); if(hb)hb.onclick=()=>renderFranchiseeHome(true);
     const addb=document.getElementById("frmem-add");
     if(addb)addb.onclick=async()=>{
       const inp=document.getElementById("frmem-email"), mm=document.getElementById("frmem-msg");
