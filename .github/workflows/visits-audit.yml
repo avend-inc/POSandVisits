@@ -1,0 +1,39 @@
+# ============================================================
+#  来店客数（デジテール）の取りこぼし点検
+#
+#  Actions →「来店客数の点検」→ Run workflow
+#    month : 対象月 YYYY-MM（例: 2026-08）
+#
+#  「売上はあるのに来店が1件も入っていない店」を洗い出し、あわせて
+#  各店の digitel_slug の有無・kpi_visitors の設定を並べて出す。
+#  来店の数字が合わないときの切り分けはまずこれを見る。
+#  （読み取りだけ。データは一切書き換えない）
+# ============================================================
+name: 来店客数の点検
+
+on:
+  workflow_dispatch:
+    inputs:
+      month:
+        description: "対象月 YYYY-MM（例: 2026-08）"
+        required: true
+        default: "2026-08"
+
+jobs:
+  audit:
+    name: 来店の取りこぼしを調べる
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TZ: Asia/Tokyo
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: 点検を実行
+        run: python -m tools.visits_coverage "${{ inputs.month }}"
