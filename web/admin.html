@@ -162,8 +162,9 @@ async function render(){
     </div>
     <div class="panel">
       <h2>加盟店の店舗割り当て</h2>
-      <p class="note">メールに店舗を割り当てると、その人は<b>その店だけ</b>見える加盟店になります（割り当てが無い人＝本部＝全店）。
-        <b>admin/編集は割り当てても全店のまま</b>です。ここでの追加は viewer（閲覧）として登録します。1メールに複数店も可（1行ずつ追加）。</p>
+      <p class="note"><b>「ユーザー管理」に登録した人だけがログインできます</b>（未登録の人はログインできず、何も見えません）。登録済みの人のうち、
+        <b>店舗の割り当てが有る人＝その店だけ</b>／<b>割り当てが無い人＝本部（全店）</b>。<b>admin/編集は割り当てても全店のまま</b>です。
+        ここでメールを追加すると、そのメールを viewer（閲覧）として登録し、その店に割り当てます。1メールに複数店も可（1行ずつ追加）。</p>
       <div class="tblwrap"><table id="atbl"><tbody><tr><td class="sub">読み込み中…</td></tr></tbody></table></div>
       <div class="addrow">
         <input id="a_email" class="wide" type="email" placeholder="メール（Googleアカウント）">
@@ -242,7 +243,7 @@ async function loadAssignments(){
   const head=`<thead><tr><th>メール</th><th>店舗</th><th></th></tr></thead>`;
   const rows=(data||[]).map(a=>`<tr><td>${esc(a.email)}</td><td>${esc(nameOf(a.store_id))} <span class="sub">#${a.store_id}</span></td>
     <td><button class="btn danger" data-email="${esc(a.email)}" data-sid="${a.store_id}">解除</button></td></tr>`).join("")
-    ||`<tr><td colspan="3" class="sub">割り当てはまだありません（全員が本部＝全店閲覧）</td></tr>`;
+    ||`<tr><td colspan="3" class="sub">割り当てはまだありません（登録済みユーザーは全員 本部＝全店閲覧）</td></tr>`;
   tb.innerHTML=head+"<tbody>"+rows+"</tbody>";
   tb.querySelectorAll("[data-email]").forEach(b=>b.onclick=async()=>{
     if(!confirm(`${b.dataset.email} の「${nameOf(b.dataset.sid)}」割り当てを解除しますか？`))return;
