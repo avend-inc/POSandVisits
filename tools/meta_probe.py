@@ -204,6 +204,31 @@ def main() -> int:
          limit 30
     """)
 
+    # ④-4 来店が取れていない店は「未導入（仕様）」か「設定漏れ・停止」か
+    #   digitel_slug が空 … 取りにいく先が無い＝未導入
+    #   kpi_visitors=false … 来店をKPIに使わない設定
+    #   どちらでもないのに来店が無い／少ない＝取り込みが止まっている疑い
+    ask("来店の取れ具合と設定（広告を出している店）", """
+        with adstores as (
+          select distinct l.pos_store_id as sid
+            from meta_insights_daily m
+            join pos_store_links l on l.destination_id = m.destination_id
+           where m.date >= current_date - interval '90 day'
+        )
+        select s.name as 店舗,
+               case when coalesce(btrim(s.digitel_slug),'')='' then '空（未導入）'
+                    else s.digitel_slug end as slug,
+               s.kpi_visitors as KPIに使う,
+               coalesce(v.n,0) as 来店行90日, v.last::text as 来店最終日
+          from adstores a
+          join stores s on s.id = a.sid
+          left join (select store_id, count(*) n, max(business_date) last
+                       from visits where business_date >= current_date - interval '90 day'
+                      group by 1) v on v.store_id = s.id
+         order by coalesce(v.n,0), s.name
+         limit 30
+    """)
+
     # ⑤ 広告(ad)単位のテーブルがあれば、そちらの状況も見る
     ad = run("""
         select count(*)::int as n from information_schema.tables
