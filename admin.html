@@ -174,7 +174,7 @@ async function render(){
     <div class="panel">
       <h2>加盟店の店舗割り当て</h2>
       <p class="note"><b>「ユーザー管理」に登録した人だけがログインできます</b>（未登録の人はログインできず、何も見えません）。登録済みの人のうち、
-        <b>店舗の割り当てが有る人＝その店だけ</b>／<b>割り当てが無い人＝本部（全店）</b>。<b>admin/編集は割り当てても全店のまま</b>です。
+        <b>店舗の割り当てが有る人＝加盟店（社外）＝その店だけ</b>／<b>割り当てが無い人＝AVENDメンバー（全店）</b>。<b>admin/編集は割り当てても全店のまま</b>です。
         メールを入れて<b>見せる店舗をチェック（複数可）</b>し「割り当てを追加」を押すと、そのメールを viewer（閲覧）として登録し、選んだ店に一括で割り当てます。</p>
       <div class="tblwrap"><table id="atbl"><tbody><tr><td class="sub">読み込み中…</td></tr></tbody></table></div>
       <div class="addrow" style="align-items:flex-start">
@@ -276,7 +276,7 @@ async function loadAssignments(){
       ||'<span class="sub">追加できる店舗はありません</span>';
     const adder=remaining.length?`<details class="dd rowdd" data-email="${esc(email)}"><summary>＋店舗を追加 ▼</summary><div class="ddwrap"><div class="ddgrid">${boxes}</div><div style="margin-top:6px"><button class="btn rowadd" data-add-email="${esc(email)}" type="button" style="padding:5px 12px;font-size:12px">選んだ店を追加</button></div></div></details>`:'<span class="sub">全店割当済み</span>';
     return `<tr><td>${esc(email)}</td><td>${chips}</td><td>${adder}</td></tr>`;
-  }).join("")||`<tr><td colspan="3" class="sub">割り当てはまだありません（登録済みユーザーは全員 本部＝全店閲覧）</td></tr>`;
+  }).join("")||`<tr><td colspan="3" class="sub">割り当てはまだありません（登録済みユーザーは全員 AVENDメンバー＝全店閲覧）</td></tr>`;
   tb.innerHTML=head+"<tbody>"+rows+"</tbody>";
   tb.querySelectorAll("[data-rm-email]").forEach(b=>b.onclick=async()=>{
     const email=b.dataset.rmEmail, sid=b.dataset.rmSid;
