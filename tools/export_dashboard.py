@@ -30,7 +30,7 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -47,6 +47,9 @@ from etl.supabase_client import Supabase  # noqa: E402
 BUCKET_PUBLIC = "dashboard"        # data.json（＋互換のため index.html も置く）
 BUCKET_PRIVATE = "dashboard-data"  # 認証モードの data.json（RLSで保護）
 PAGE = 1000
+# クリエイティブ別（広告単位）を何日ぶん載せるか。全期間だと data.json が太るわりに、
+# 入れ替わりの早いクリエイティブを古いぶんまで比べても打ち手にならない。
+META_AD_DAYS = int(os.environ.get("META_AD_DAYS") or 180)
 
 
 def _select_all(sb: Supabase, table: str, select: str,
@@ -423,17 +426,32 @@ def build_data(sb: Supabase) -> dict:
             pass
         # 直営／FCの区分。納品先(destinations)の名前で当てにいくと表記ゆれで外すので、
         # pos_store_links（納品先 ↔ POS店舗の対応表）を通して stores.ownership を引く。
+        # 同じ対応表から「納品先 → POS店舗ID」も作る。広告費と売上・来店を突き合わせる
+        # ときは、店名ではなくこのIDで結ぶ（店名は表記ゆれがあり、当てにできない）。
         dest_own: dict = {}
+        dest_sid: dict = {}
         try:
             for lk in _select_all(sb, "pos_store_links", "pos_store_id,destination_id", order="pos_store_id"):
                 did, sid = lk.get("destination_id"), lk.get("pos_store_id")
                 if did is not None and sid in own_by_id:
                     dest_own[str(did)] = own_by_id[sid]
+                    dest_sid[str(did)] = sid
         except Exception:
             pass
+        # 画面から直した「キャンペーン → 店舗」の割り当て（sql/025）。
+        # 取り込みが書いた destination_id の上からかぶせる。取り直しても消えない。
+        camp_override: dict = {}
+        try:
+            for o in _select_all(sb, "meta_campaign_stores",
+                                 "campaign_id,destination_id", order="campaign_id"):
+                cid = o.get("campaign_id")
+                if cid:
+                    camp_override[str(cid)] = o.get("destination_id")
+        except Exception:
+            pass    # まだテーブルが無い環境でも動く
         # follows / profile_visits は取り込みの拡張後に増える列。まだ無い環境でも動くよう、
         # 付きで取りに行って失敗したら基本の列だけで取り直す（列が増えたら自動で拾う）。
-        BASE = ("date,account_name,campaign_name,destination_id,"
+        BASE = ("date,account_name,campaign_id,campaign_name,destination_id,"
                 "spend,impressions,reach,clicks")
         try:
             meta_src = _select_all(sb, "meta_insights_daily",
@@ -441,13 +459,21 @@ def build_data(sb: Supabase) -> dict:
         except Exception:
             meta_src = _select_all(sb, "meta_insights_daily", BASE, order="date")
         for r in meta_src:
+            cid = r.get("campaign_id")
             did = r.get("destination_id")
+            # 画面で割り当て直したキャンペーンは、そちらを優先する
+            if cid is not None and str(cid) in camp_override:
+                did = camp_override[str(cid)]
             meta_rows.append({
                 "d": str(r["date"]),
                 "a": r.get("account_name") or "(不明)",
+                # ci=キャンペーンID。割り当て画面の書き込み先を決めるのに使う
+                "ci": str(cid) if cid is not None else None,
                 "c": r.get("campaign_name") or "(名称なし)",
                 # st=店舗名。紐付いていないものは null のまま（画面で「未紐付け」と出す）
                 "st": dest_name.get(str(did)) if did else None,
+                # si=POS店舗ID。売上・来店と突き合わせるときの結び目
+                "si": dest_sid.get(str(did)) if did else None,
                 # ow=直営/FC。分からなければ null（画面では「区分なし」にまとめる）
                 "ow": dest_own.get(str(did)) if did else None,
                 "sp": round(_num(r.get("spend"))),
@@ -476,9 +502,57 @@ def build_data(sb: Supabase) -> dict:
     except Exception as _e:
         print(f"  （Meta広告の取得に失敗しました。広告タブは空になります: {_e}）")
 
+    # --- Meta広告（日 × 広告＝クリエイティブ）-------------------------------
+    #   どのクリエイティブが効いているかを見るための一覧。日次のまま全期間を載せると
+    #   data.json が太るので、直近 META_AD_DAYS 日ぶんだけにする（クリエイティブは
+    #   入れ替わりが早く、古いものを比べても打ち手にならないため）。
+    #   ここも実額だけを持つ。CTR などの比率は画面側で 実額÷実額 で出す。
+    meta_ads: list[dict] = []
+    try:
+        since = (datetime.now(JST).date() - timedelta(days=META_AD_DAYS)).isoformat()
+        src = _select_all(sb, "meta_insights_daily_ad",
+                          "date,ad_name,campaign_name,destination_id,"
+                          "spend,impressions,reach,clicks",
+                          order="date", extra={"date": f"gte.{since}"})
+        for r in src:
+            did = r.get("destination_id")
+            meta_ads.append({
+                "d": str(r["date"]),
+                "an": r.get("ad_name") or "(名称なし)",
+                "c": r.get("campaign_name") or "(名称なし)",
+                "st": dest_name.get(str(did)) if did else None,
+                "si": dest_sid.get(str(did)) if did else None,
+                "sp": round(_num(r.get("spend"))),
+                "im": int(r.get("impressions") or 0),
+                "rc": int(r.get("reach") or 0),
+                "ck": int(r.get("clicks") or 0),
+            })
+        if meta_ads:
+            names = len({r["an"] for r in meta_ads})
+            print(f"  Meta広告(クリエイティブ): {len(meta_ads)}行 / {names}種"
+                  f"（{since} 以降）")
+    except Exception as _e:
+        print(f"  （クリエイティブ別は取れませんでした。その欄は空になります: {_e}）")
+
+    # --- 割り当て先に選べる店舗（納品先）------------------------------------
+    #   未紐付けキャンペーンを画面から割り当てるときのプルダウン用。
+    #   POS店舗と結び付いている納品先だけを出す（結び付いていない先を選んでも
+    #   売上と突き合わせられず、選べてしまうと事故のもとになるため）。
+    dests: list[dict] = []
+    try:
+        for d in _select_all(sb, "destinations", "id,name", order="name"):
+            did = str(d["id"])
+            if did in dest_sid:
+                dests.append({"id": did, "name": d.get("name") or did,
+                              "s": dest_sid[did], "ow": dest_own.get(did)})
+    except Exception:
+        pass
+
     return {
         "generated_at": datetime.now(JST).isoformat(timespec="seconds"),
         "meta": meta_rows,
+        "metaAds": meta_ads,
+        "metaDests": dests,
         "metaSync": meta_sync,
         "stores": [{"id": s["id"], "name": name_by_id.get(s["id"], str(s["id"])),
                     "own": own_by_id.get(s["id"], "直営"),
