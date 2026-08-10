@@ -2487,20 +2487,35 @@ function planEx(id,ym){
   }
   return null;
 }
+// 経営の事業計画（bizplan_monthly の「売上」）から、その店・その月の税抜売上計画を引く。
+// 計画側は POS実績（data.json の daily.ex＝税抜純売上）を取り込む前提なので税抜どうし。
+// 照合は計画台帳の pos_store_name（例「下北沢店」）が店名に含まれるかで見る。
+async function bizplanEx(id,ym){
+  if(!SB)return null;
+  try{
+    const {data,error}=await SB.rpc("bizplan_store_sales",{p_ym:ym});
+    if(error)return null;
+    const nm=(storeMeta(id)||{}).name||"";
+    for(const r of (data||[])){
+      const key=((r&&r.pos_store_name)||"").trim(), v=Number(r&&r.amount);
+      if(key&&nm.indexOf(key)>=0&&Number.isFinite(v))return v;
+    }
+  }catch(e){}
+  return null;
+}
 async function loadBudget(id,ym){
   BUDGET={ym:ym,ex:null};
   if(!budgetShown(id))return;
-  await loadTargets();
-  let ex=null;
-  if(SB){
+  let ex=await bizplanEx(id,ym);        // ① 経営の事業計画（正）
+  if(ex==null&&SB){                     // ② 予実タブで保存した税抜売上予算
     try{
       const {data}=await SB.from("plan_data").select("data")
         .eq("page","pl").eq("scope",String(id)).eq("ym",ym).maybeSingle();
       const v=data&&data.data&&data.data.b_ex;
-      if(Number.isFinite(v))ex=v;      // 予実タブで保存された値を優先
+      if(Number.isFinite(v))ex=v;
     }catch(e){}
   }
-  if(ex==null)ex=planEx(id,ym);        // 無ければ事業計画の数字をそのまま使う
+  if(ex==null){ await loadTargets(); ex=planEx(id,ym); }   // ③ 月次予実の予算
   BUDGET={ym:ym,ex:ex};
 }
 // 予算カードの中身（金額＋達成見込み＝着地÷予算）を描く。
