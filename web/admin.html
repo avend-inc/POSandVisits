@@ -126,9 +126,11 @@ async function boot(){
     const {data:{session}}=await SB.auth.getSession();
     if(!session){showLogin();return;}
     ME.email=(session.user&&session.user.email||"").toLowerCase();
-    const {data,error}=await SB.from("app_users").select("role,name").eq("email",ME.email).maybeSingle();
+    // 名簿は在庫アプリと共通の users テーブル1枚。ロールの語彙が違うので読み替える。
+    const {data,error}=await SB.from("users").select("role,is_active,segments").ilike("email",ME.email).maybeSingle();
     if(error)throw error;
-    ME.role=data&&data.role||null;
+    ME.role=(data&&data.is_active&&(data.segments||[]).includes("sales"))
+      ? (data.role==="admin"?"admin":(data.role==="manager"?"editor":"viewer")) : null;
     if(ME.role!=="admin"){ showDenied(ME.role?`この画面は管理者専用です（あなたの権限：${roleJp(ME.role)}）`:"アクセス権がありません。管理者にユーザー追加を依頼してください。"); return; }
     render();
   }catch(e){ screen('<div class="err">エラー：'+esc(e.message||e)+'</div>'); }
@@ -241,13 +243,11 @@ async function render(){
     </div>`);
   document.getElementById("themebtn").onclick=()=>{const r=document.documentElement;const c=r.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");r.setAttribute("data-theme",c==="dark"?"light":"dark");};
   document.getElementById("logout").onclick=async()=>{try{await SB.auth.signOut();}catch(e){}location.reload();};
-  document.getElementById("u_add").onclick=addUser;
   document.getElementById("a_add").onclick=addAssignment;
   document.getElementById("a_all").onclick=()=>{document.querySelectorAll("#a_stores .achk").forEach(c=>c.checked=true);updateAcnt();};
   document.getElementById("a_none").onclick=()=>{document.querySelectorAll("#a_stores .achk").forEach(c=>c.checked=false);updateAcnt();};
   document.getElementById("s_add").onclick=addStore;
   document.getElementById("p_add").onclick=addPos;
-  document.getElementById("u_update").onclick=updateUsers;
   document.getElementById("s_update").onclick=updateStores;
   document.getElementById("p_update").onclick=updatePos;
   await loadUsers(); await loadStores(); await loadAssignments(); await loadPos(); await loadBundles();
@@ -298,8 +298,12 @@ async function addAssignment(){
   const ids=[...document.querySelectorAll("#a_stores .achk:checked")].map(c=>+c.value);
   if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){msg("a_msg","正しいメールアドレスを入れてください",false);return;}
   if(!ids.length){msg("a_msg","見せる店舗を1つ以上チェックしてください",false);return;}
-  // 新規メールは viewer で登録（既存ユーザーのロールは変えない）
-  const {error:e1}=await SB.from("app_users").upsert({email,role:"viewer"},{onConflict:"email",ignoreDuplicates:true});
+  // 新規メールは staff(=viewer) で登録（既存ユーザーのロールは変えない）。
+  // 名簿は users に一本化したので、ここに入れないとログインできない。
+  // display_name は必須なので、無ければメールの@より前を使う。
+  const {error:e1}=await SB.from("users").upsert(
+    {email, display_name:email.split("@")[0], role:"staff", is_active:true, segments:["sales"]},
+    {onConflict:"email",ignoreDuplicates:true});
   if(e1){msg("a_msg","ユーザー登録失敗："+e1.message,false);return;}
   const {error:e2}=await SB.from("app_user_stores").upsert(ids.map(store_id=>({email,store_id})),{onConflict:"email,store_id",ignoreDuplicates:true});
   msg("a_msg", e2?("割り当て失敗："+e2.message):`${email} に ${ids.length}店 を割り当てました`, !e2);
@@ -346,49 +350,39 @@ function bindDirty(section){
   refreshDirty(section);
 }
 
+// 名簿は在庫アプリと共通の users テーブル1枚にまとめた。
+// ここは「読むだけ」にしてある。理由は2つ。
+//   ・users は在庫アプリと共有なので、ここで消すと在庫の権限まで巻き添えになる
+//   ・追加・削除の入口が2か所あると、どちらが本当か分からなくなる
+// 追加・削除・ロール変更は、在庫アプリの「マスタ」画面でまとめて行う。
+const IMS_MASTER_URL="https://avend-inventory.vercel.app/master";
 async function loadUsers(){
   dirtyUsers.clear();
-  const {data,error}=await SB.from("app_users").select("*").order("role").order("email");
+  const {data,error}=await SB.from("users")
+    .select("email,display_name,role,is_active,segments").order("role").order("email");
   const tb=document.querySelector("#utbl");
   if(error){tb.innerHTML=`<tbody><tr><td class="err">読み込み失敗：${esc(error.message)}</td></tr></tbody>`;return;}
-  const head=`<thead><tr><th>メール</th><th>名前</th><th>ロール</th><th></th></tr></thead>`;
-  const rows=data.map(u=>`<tr data-row="${esc(u.email)}">
+  const jp=r=>r==="admin"?"管理者":r==="manager"?"編集":"閲覧";
+  const sales=data.filter(u=>(u.segments||[]).includes("sales"));
+  const head=`<thead><tr><th>メール</th><th>名前</th><th>ロール</th><th>状態</th></tr></thead>`;
+  const rows=sales.map(u=>`<tr>
     <td>${esc(u.email)}${u.email===ME.email?' <span class="sub">(自分)</span>':''}</td>
-    <td>${esc(u.name)}</td>
-    <td><select data-email="${esc(u.email)}" class="urole">${ROLES.map(([v,t])=>`<option value="${v}" ${u.role===v?"selected":""}>${t}</option>`).join("")}</select></td>
-    <td>${u.email===ME.email?'':`<button class="btn danger" data-del="${esc(u.email)}">削除</button>`}</td></tr>`).join("");
+    <td>${esc(u.display_name||"")}</td>
+    <td>${jp(u.role)}</td>
+    <td>${u.is_active?'<span class="sub">有効</span>':'<span class="err">停止中</span>'}</td></tr>`).join("");
   tb.innerHTML=head+"<tbody>"+rows+"</tbody>";
-  tb.querySelectorAll("[data-del]").forEach(b=>b.onclick=async()=>{
-    const email=b.dataset.del; if(!confirm(`${email} を削除しますか？`))return;
-    const {error}=await SB.from("app_users").delete().eq("email",email);
-    msg("u_msg", error?("削除失敗："+error.message):`${email} を削除しました`, !error);
-    if(!error)loadUsers();
+  const m=document.getElementById("u_msg");
+  if(m){
+    m.className="sub";
+    m.innerHTML=`この一覧は読み取り専用です（${sales.length}人）。`+
+      `追加・削除・ロール変更は在庫アプリの`+
+      `<a href="${IMS_MASTER_URL}" target="_blank" rel="noopener">マスタ画面</a>で行ってください。`+
+      `名簿は在庫アプリと共通なので、ここで消すと在庫の権限まで消えてしまいます。`;
+  }
+  // 追加フォームと更新ボタンは、入口を1か所にするため隠す
+  ["u_email","u_name","u_role","u_add","u_update"].forEach(id=>{
+    const el=document.getElementById(id); if(el)el.style.display="none";
   });
-  bindDirty("users");
-}
-// ロールを変えた行だけ、まとめて保存する。
-async function updateUsers(){
-  const tb=document.querySelector("#utbl"); const ids=[...dirtyUsers];
-  if(!ids.length){msg("u_msg","変更はありません",true);return;}
-  const btn=document.getElementById("u_update"); btn.disabled=true; btn.textContent="更新中…";
-  const results=await Promise.all(ids.map(async email=>{
-    const sel=tb.querySelector(`.urole[data-email="${email}"]`);
-    if(!sel)return {ok:true};
-    const {error}=await SB.from("app_users").update({role:sel.value}).eq("email",email);
-    return {ok:!error, err:error&&error.message};
-  }));
-  const fail=results.filter(r=>!r.ok), ok=results.length-fail.length;
-  msg("u_msg", fail.length?`更新：成功${ok}件・失敗${fail.length}件（${esc(fail[0].err||"")}）`:`${ok}件を更新しました`, !fail.length);
-  await loadUsers();
-}
-async function addUser(){
-  const email=(document.getElementById("u_email").value||"").trim().toLowerCase();
-  const name=(document.getElementById("u_name").value||"").trim();
-  const role=document.getElementById("u_role").value;
-  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){msg("u_msg","正しいメールアドレスを入れてください",false);return;}
-  const {error}=await SB.from("app_users").upsert({email,name,role},{onConflict:"email"});
-  msg("u_msg", error?("追加失敗："+error.message):`${email} を「${roleJp(role)}」で追加しました`, !error);
-  if(!error){document.getElementById("u_email").value="";document.getElementById("u_name").value="";loadUsers();}
 }
 
 async function loadStores(){

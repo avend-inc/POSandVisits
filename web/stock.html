@@ -153,7 +153,7 @@ async function boot(){
     const {data:{session}}=await SB.auth.getSession();
     if(!session){showLogin();return;}
     ME.email=(session.user&&session.user.email||"").toLowerCase();
-    let role=null; try{const {data:u}=await SB.from("app_users").select("role").eq("email",ME.email).maybeSingle();role=u&&u.role||null;}catch(e){}
+    let role=null; try{const {data:u}=await SB.from("users").select("role,is_active,segments").ilike("email",ME.email).maybeSingle(); if(u&&u.is_active&&(u.segments||[]).includes("sales")) role=u.role==="admin"?"admin":(u.role==="manager"?"editor":"viewer");}catch(e){}
     ME.role=role; if(!ME.role){showDenied(ME.email);return;}
     screen('<div class="sub" style="padding:40px 0">データを読み込み中…</div>');
     const {data,error}=await SB.storage.from("dashboard-data").download("data.json");
