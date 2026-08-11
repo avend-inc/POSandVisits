@@ -1,0 +1,80 @@
+# 地域サイトレジストリ（§5.2）。
+# MVP（§11）で実際に巡回するのは fudosanlist.cbiz.ne.jp（連合隊）のみ。
+# それ以外は付録A（§12）の発見エンジン出力サンプルで、第2〜3段階で有効化する。
+#
+# status: verified | pending | broken
+#   - verified: 人が初回パース結果を目視確認済み（§5.2「人のレビュー（必須）」）
+#   - pending : 発見エンジンが出したがレビュー未
+#   - broken  : パーサ破損を検知。自動修復はしない（§13）
+#
+# area_unit_hint: §9.1.1 単位取り違え防止。抽出した単位と食い違ったら broken を立てる。
+
+sources:
+  - domain: fudosanlist.cbiz.ne.jp
+    parser: rengotai
+    tier: 1
+    nationwide: true
+    detail_domain: fudosan.cbiz.ne.jp   # 個別物件URLは別ドメイン（§5.1.1）
+    cities: [福島市, 秋田市, 富士市, 大分市, 宮崎市, 長崎市]
+    # 連合隊カードのセレクタは実HTMLで確定させる（§5.2「人のレビュー」）。
+    # 下記は暫定。src/sources/rengotai.py はセレクタが外れても本文正規表現で拾える
+    # 二段構えにしてあるが、verified にする前に必ず実ページで確認すること。
+    selectors:
+      item: ".property-list .property"     # PROVISIONAL
+      name: ".property-title"              # PROVISIONAL
+      area: ".spec-area"                   # PROVISIONAL
+      area_unit_hint: "坪"                 # 連合隊は坪単価/坪数が構造化（§5.1）。要確認
+      rent: ".spec-rent"                   # PROVISIONAL
+      parking: ".spec-parking"             # PROVISIONAL
+      floor: ".spec-floor"                 # PROVISIONAL
+      detail_link: "a.detail-link"         # PROVISIONAL
+    status: pending          # ← 実HTMLでパース確認後に verified へ
+    last_ok: null
+
+# --- 以下は §12 付録A（発見エンジン出力サンプル）。MVPでは巡回しない ---
+discovered_sample:
+  - domain: n-takken.or.jp
+    cities: [長崎市]
+    discovered_via: L1_takken
+    note: たっけんくんネットながさき。県内約900社加盟
+    status: pending
+  - domain: ajrc.co.jp
+    cities: [秋田市]
+    discovered_via: L2_L3_local
+    note: 秋田住宅流通センター
+    status: pending
+  - domain: excel-akita.com
+    cities: [秋田市]
+    discovered_via: L2_L3_local
+    note: エクセルホーム。店舗テナント専門
+    status: pending
+  - domain: kurasapo.net
+    cities: [秋田市]
+    discovered_via: L2_L3_local
+    note: くらサポ
+    status: pending
+  - domain: kando-abc.com
+    cities: [長崎市]
+    discovered_via: L2_L3_local
+    note: ABC不動産。長崎市テナント69件
+    status: pending
+  - domain: rfudosan.co.jp
+    cities: [長崎市]
+    discovered_via: L2_L3_local
+    note: アール不動産
+    status: pending
+  - domain: tenantooita.com
+    cities: [大分市]
+    discovered_via: L2_L3_local
+    note: テナント大分。事業用専門
+    status: pending
+  - domain: hayashi-kousan.co.jp
+    cities: [大分市]
+    discovered_via: L2_L3_local
+    note: 林興産不動産センター。355件
+    status: pending
+  - domain: rec-miyazaki.com
+    cities: [宮崎市]
+    discovered_via: L2_L3_local
+    note: 不動産ネットワークREC
+    status: pending
