@@ -238,7 +238,7 @@ async function renderKeiei(){
   const storeEx={}, storeIt={};
   dstores.forEach(s=>{const idset=new Set([s.id]);
     const pAgg=sumIds(idset,pf,pt); const pEx=pAgg.ex||0, pIt=pAgg.it||0;
-    const cLand=(elapsed>0&&fcMap[s.id])?fcMap[s.id].ex:pEx, g=grow(sumIds(idset,lcf,lct).ex||0,sumIds(idset,lnf,lnt).ex||0);
+    const cLand=Math.round(landingExForIds(idset,cur)), g=grow(sumIds(idset,lcf,lct).ex||0,sumIds(idset,lnf,lnt).ex||0);   // 当月税抜着地＝ダッシュボードと同一（landingForIds）
     const cIt=(elapsed>0&&fcMap[s.id])?fcMap[s.id].it:pIt;
     // 翌月（来月）＝予算があれば予算を着地見込みに、無ければ前年同月比推定。
     const nb=tgtEx(s.id,next), nq=tgtQty(s.id,next);
@@ -272,21 +272,20 @@ async function renderKeiei(){
   const WH=[["NOTIME","NOTIME"],["SELFURUGI","SELFURUGI"],["GARAGE","SELFURUGI GARAGE"],["NEW","新店"]];
   let h='';
   h+=`<header><h1>🧮 経営レポート</h1><span class="sub">対象 <b>${cur}</b>（前月 ${ml(prev)}／当月 ${ml(cur)}／来月 ${ml(next)}）${elapsed?`　当月は ${elapsed}/${daysIn}日で日割り換算`:'　当月データなし'}</span><a class="navlink" href="index.html" style="margin-left:auto">← ダッシュボード</a></header>`;
-  h+=`<div class="note">前月＝実績確定／当月＝予実タブと同じ着地見込み／翌月以降＝<b>予算（月次予実「予算」）</b>を着地見込みに（予算が無い店のみ前年同月比で推定）。自動入力ですが編集できます（「保存する」で全員に共有）。</div>`;
+  h+=`<div class="note">前月＝実績確定／当月＝<b>ダッシュボードと同じ着地見込み（①②③）</b>／翌月以降＝<b>予算（月次予実「予算」）</b>を着地見込みに（予算が無い店のみ前年同月比で推定）。自動入力ですが編集できます（「保存する」で全員に共有）。</div>`;
   // ■ 予算達成の見込み（目標 vs 着地）※月次予実Excelから取込んだ目標を店舗に紐付け
   const trows=Object.keys(T).map(tok=>{ const cand=usableStores().filter(s=>(s.name||"").indexOf(tok)>=0); return {tok,st:cand.find(s=>ownOf(s.id)==="直営")||cand[0]}; }).filter(x=>x.st&&T[x.tok][cur]);
   if(trows.length){
     const rate=(a,b)=>b?Math.round(a/b*100)+"%":"—";
     h+=`<div class="panel"><h2>■ 予算達成の見込み（${ml(cur)}・目標 vs 着地）</h2><div class="tblwrap"><table><thead><tr><th>店舗</th><th>税抜売上 目標</th><th>着地見込</th><th>達成率</th><th>来店 目標</th><th>着地見込</th><th>達成率</th></tr></thead><tbody>`;
     trows.forEach(({tok,st})=>{ const idset=new Set([st.id]);
-      const isOwn=ownOf(st.id)==="直営";
-      // 税抜売上の着地見込＝直営なら上の「各店の税抜売上着地(当月)」の編集値と連動。それ以外は実績の日割り。
-      const exLand=isOwn&&M.storeEx[st.id]?M.storeEx[st.id].cur:Math.round(proj(curEnd?sumIds(idset,cf,curEnd).ex||0:0));
+      // 税抜売上の着地見込＝ダッシュボードと同一の着地見込み定義（landingExForIds＝①②③）。直営は上の表の編集値と連動。
+      const exLand=M.storeEx[st.id]?M.storeEx[st.id].cur:Math.round(landingExForIds(idset,cur));
       const so=curEnd?sumIds(idset,cf,curEnd):{v:0,hasV:false}; const vLand=so.hasV?Math.round(proj(so.v||0)):null;
       const tg=T[tok][cur]||{}; const exT=tg.ex?Math.round(tg.ex):null, vT=tg.visitors?Math.round(tg.visitors):null;
       h+=`<tr><td>${esc(st.name)}</td><td>${exT?yf(exT):"—"}</td><td id="tex-${st.id}">${yf(exLand)}</td><td><b id="trate-${st.id}">${exT?rate(exLand,exT):"—"}</b></td><td>${vT?NUM(vT)+"人":"—"}</td><td>${vLand!=null?NUM(vLand)+"人":"—"}</td><td><b>${(vT&&vLand!=null)?rate(vLand,vT):"—"}</b></td></tr>`;
     });
-    h+=`</tbody></table></div><div class="note">目標＝月次予実「予算」（Excel取込）。税抜売上の着地見込＝<b>予実タブ「🎯着地見込み」と同じ計算</b>（そこで編集した値もそのまま反映）。来店＝当月実績の日割り。達成率＝着地÷目標。</div></div>`;
+    h+=`</tbody></table></div><div class="note">目標＝月次予実「予算」（Excel取込）。税抜売上の着地見込＝<b>ダッシュボード（店舗ページ）の着地見込みと同じ計算（①②③）</b>。来店＝当月実績の日割り。達成率＝着地÷目標。</div></div>`;
   }
   // 直営 各店：税抜売上・商品販売数・平均商品単価（月ごと）
   h+=`<div class="panel"><h2>■ 直営：各店の着地見込（税抜売上・商品販売数・平均商品単価）</h2><div class="tblwrap"><table><thead><tr><th>店舗 / 指標</th><th>${ml(prev)}</th><th>${ml(cur)}</th><th>${ml(next)}</th></tr></thead><tbody>`;
@@ -297,7 +296,7 @@ async function renderKeiei(){
     h+=`<tr><td>商品販売数</td>`+["prev","cur","next"].map(c=>`<td id="it-${s.id}-${c}">${NUM(it[c])}点</td>`).join("")+`</tr>`;
     h+=`<tr><td>平均商品単価</td>`+["prev","cur","next"].map(c=>`<td id="aup-${s.id}-${c}">${yf(aup(c))}</td>`).join("")+`</tr>`;});
   h+=`<tr class="total"><td>直営 計（税抜売上）</td><td id="tot-prev"></td><td id="tot-cur"></td><td id="tot-next"></td></tr>`;
-  h+=`</tbody></table></div><div class="note">当月（${ml(cur)}）＝<b>予実タブ「🎯着地見込み」と同じ着地</b>（予実タブでの編集が反映。恒久調整は予実タブで）。翌月（${ml(next)}）＝<b>予算</b>（月次予実「予算」。税抜売上・商品販売数とも予算。無い店のみ前年同月比推定）。前月＝実績確定。平均商品単価＝税抜売上÷商品販売数（売上を直すと自動再計算）。</div>`;
+  h+=`</tbody></table></div><div class="note">当月（${ml(cur)}）＝<b>ダッシュボードと同じ着地見込み（①②③）</b>。翌月（${ml(next)}）＝<b>予算</b>（月次予実「予算」。税抜売上・商品販売数とも予算。無い店のみ前年同月比推定）。前月＝実績確定。平均商品単価＝税抜売上÷商品販売数（売上を直すと自動再計算）。</div>`;
   // 直営 KPI
   h+=`<div class="subhd">直営：主要KPI 着地見込（直営全体）</div><div class="tblwrap"><table><thead><tr><th>KPI</th><th>${ml(prev)}</th><th>${ml(cur)}</th><th>${ml(next)}</th></tr></thead><tbody>`;
   KPIS.forEach(m=>{h+=`<tr><td>${m.n}${m.u?`（${m.u}）`:''}</td>`+["prev","cur","next"].map(c=>`<td>${ni("kpi|"+c+"|"+m.k,M.kpi[c][m.k])}</td>`).join("")+`</tr>`;});
