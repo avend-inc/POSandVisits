@@ -293,6 +293,12 @@
   .kmat th.adsort{cursor:pointer;user-select:none;white-space:nowrap}
   .kmat th.adsort:hover{color:var(--accent)}
   .kmat th.adsort.on{color:var(--accent)}
+  /* クリエイティブ別の1列目（広告名）。長い広告名でも列が伸びないよう折り返して幅を抑える。
+     ここを抑えないと、並べ替えで長い名前が1位に来たとき数値列が画面の外に出てしまう。
+     名前は2行までにして、行の高さも一定に保つ（全文は title で見られる）。 */
+  #adcrtbl th:first-child,#adcrtbl td:first-child{white-space:normal;overflow-wrap:anywhere;
+    max-width:min(170px,42vw);min-width:120px}
+  #adcrtbl .adname{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
   /* 未紐付けキャンペーンの割り当て。スマホでは縦積みにして、はみ出させない */
   .admaprow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 0;border-top:1px solid var(--line)}
   .admaprow:first-child{border-top:none}
@@ -326,7 +332,6 @@
   <a href="pl.html"><span class="ic">📋</span>予実</a>
   <a href="trends.html"><span class="ic">📈</span>推移</a>
   <a href="promo.html"><span class="ic">🏷️</span>販促</a>
-  <a href="stock.html"><span class="ic">📦</span>棚卸</a>
   <a href="ask.html"><span class="ic">🔍</span>分析AI</a>
   <a href="index.html?view=ads" id="tab-ads" style="display:none"><span class="ic">📣</span>広告</a>
   <a href="keiei.html" id="tab-keiei" style="display:none"><span class="ic">🧮</span>経営</a>
@@ -1597,14 +1602,15 @@ function adDrawCreatives(shortName){
   const body=top.length?top.map(([nm,e],i)=>{
     const sts=[...e.st];
     const where=sts.length?(sts.length===1?esc(sts[0]):`${esc(sts[0])} 他${sts.length-1}店`):`<span style="color:#b8860b">未紐付け</span>`;
-    return `<tr><td style="text-align:left"><div><b>${i+1}.</b> ${esc(nm)}</div>`+
+    return `<tr><td style="text-align:left"><div class="adname" title="${esc(nm)}"><b>${i+1}.</b> ${esc(nm)}</div>`+
       `<div class="sub" style="font-weight:500">${where}／1日 ${YEN(Math.round(e.spd))}円</div></td>`+
       COLS.map(c=>`<td>${ready(c)?F(c.val(e),c.fmt):"—"}</td>`).join("")+`</tr>`;
   }).join(""):`<tr><td colspan="${COLS.length+1}" class="sub">この条件に合うクリエイティブがありません</td></tr>`;
   // ランキングの切り替えボタン。列見出しでも同じことができる。
   const RANK=COLS.filter(c=>c.best);
+  // 「◯位まで」は下の説明文に書いてあるのでボタン列には出さない
+  // （狭い画面で潰れて縦積みになり、ボタンの高さまで引き伸ばしてしまうため）
   const btns=`<div class="adperiod" style="margin-bottom:8px">`+
-    `<span class="sub" style="align-self:center;font-weight:700">${AD_CR_TOP}位まで／</span>`+
     RANK.map(c=>`<button class="chip adrank${c.k===sc.k?" on":""}${ready(c)?"":" nodata"}"`+
       ` data-k="${c.k}" title="${c.name}が${c.best}順に並べます">${c.name}が${c.best}順</button>`).join("")+
     `<button class="chip adrank${sc.k==="sp"?" on":""}" data-k="sp">広告費が多い順</button></div>`;
@@ -1841,7 +1847,7 @@ function renderMain(){
     <div id="mdl-root"></div>
 
     <div class="foot">
-      すべて税抜。来店客数・購入率はデジテール（入店計測）導入店のみ。<b>着地見込み</b>＝①今月の経過実績＋②平日の直近10日平均×残平日＋③土日祝の直近10日平均×残土日祝（土日祝＝土日＋祝日）。
+      すべて税抜。来店客数・購入率はデジテール（入店計測）導入店のみ。<b>着地見込み</b>＝当月実績÷当月の経過日数×当月の日数。
       店舗名を押すとその店だけに絞り込めます。表示は<b>${GROUP_LABEL}</b>（下タブで直営／FC切替）。
     </div>`;
 
@@ -3165,37 +3171,14 @@ function updateSelCount(){
   c.textContent = n===0?"未選択" : (n===tot?`全店（${tot}店）` : `${n}/${tot}店を選択中`);
 }
 
-// ===== 着地見込み（アプリ共通の唯一の定義。ページ・店舗で計算方法は変えない）=====
-//  着地見込み ＝ ① 今月の経過分の実績売上（税抜）
-//             ＋ ② 平日の直近10日間の平均売上 × 残りの平日数
-//             ＋ ③ 土日祝の直近10日間の平均売上 × 残りの土日祝数
-//  ・平日/土日祝の判定は isWeekendOrHoliday（土日＋日本の祝日 JP_HOLIDAYS）で統一
-//  ・「直近10日間」＝ 締日（取込済みの最新日）以前で、その区分の売上がある日を新しい順に最大10日
-//  ・過去の月（締日＝月末）は残日数0＝実績と一致する
-function landingForIds(ids,ym){
-  if(!ids||!ids.size)return null;
-  const mS=ym+"-01", mE=fMonthEnd(ym), today=todayStr();
-  const byDate={};
-  for(const r of DATA.daily){ if(!ids.has(r.s))continue;
-    byDate[r.d]=(byDate[r.d]||0)+(r.ex!=null?r.ex:(r.in||0)/1.1); }   // 税抜（無い店は税込÷1.1近似）
-  const allDates=Object.keys(byDate).sort();
-  if(!allDates.length)return null;
-  const monthDates=allDates.filter(d=>d>=mS&&d<=mE);
-  const cutoff=today<mE?today:mE;
-  const closing=monthDates.filter(d=>d<=cutoff).slice(-1)[0]||null;   // 締日
-  let actual=0; if(closing)for(const d of monthDates){ if(d<=closing)actual+=byDate[d]; }   // ① 経過実績
-  const ref=closing||cutoff, hist=allDates.filter(d=>d<=ref);
-  const avg10=cls=>{let s=0,n=0; for(let i=hist.length-1;i>=0&&n<10;i--){const d=hist[i]; if(dayClass(d)===cls){s+=byDate[d];n++;}} return n?s/n:0;};
-  const wkAvg=avg10("wd"), weAvg=avg10("we");                          // ②③ 直近10日の平日/土日祝平均
-  let remWk=0,remWe=0; const start=closing?addDays(closing,1):mS;      // 残りの平日/土日祝
-  for(let d=start; d<=mE; d=addDays(d,1)){ if(dayClass(d)==="we")remWe++; else remWk++; }
-  return actual + remWk*wkAvg + remWe*weAvg;
-}
-// 現在の選択（state.sel、無ければ表示可能な全店）の当月着地見込み
+// 着地見込み（当月）＝当月実績(税抜) ÷ 締日までの経過日数 × 当月の暦日数
 function landingMonth(){
   const sd=DATA._salesMax||DATA._max, ym=sd.slice(0,7);
-  const ids=(state.sel&&state.sel.size)?state.sel:new Set(usableStores().map(s=>s.id));
-  return landingForIds(ids,ym);
+  const ex=M("ex").calc(sumRows(rowsIn(ym+"-01",sd,"__sel__")));
+  if(ex==null)return null;
+  const dom=+sd.slice(8,10); if(!dom)return null;
+  const [y,m]=ym.split("-").map(Number), dim=new Date(Date.UTC(y,m,0)).getUTCDate();
+  return ex/dom*dim;
 }
 
 // 日本の祝日（土日祝の判定用）。直近2週の平日/土日祝を分けるのに使う。年度が進んだら追記。
@@ -3890,7 +3873,7 @@ function drawTrend2(){
   const sd=DATA._salesMax||DATA._max, sdym=sd.slice(0,7), dom=+sd.slice(8,10);
   const [sy,sm]=sdym.split("-").map(Number), dim=new Date(Date.UTC(sy,sm,0)).getUTCDate();
   const fkey=(g==="month"&&kset.has(sdym)&&dom<dim)?sdym:null;
-  const valOf=(id,k)=>{const a=(map[id]&&map[id][k])||0; return (k===fkey)?(landingForIds(new Set([id]),fkey)||0):a;};  // 進行中の月は共通の着地見込み定義（①②③）
+  const valOf=(id,k)=>{const a=(map[id]&&map[id][k])||0; return (k===fkey&&dom)?a/dom*dim:a;};
   let rows=[...state.sel].map(id=>({name:(storeMeta(id)||{}).name||id,vals:keys.map(k=>valOf(id,k))}));
   rows.sort((a,b)=>b.vals.reduce((s,v)=>s+v,0)-a.vals.reduce((s,v)=>s+v,0));
   const dk=keys.slice().reverse();                 // 最新を左に
@@ -3982,7 +3965,7 @@ function drawTrendDetail(){
         for(const d in ship){ if(d>=f&&d<=t)s+=ship[d]; } return s; }
       const p=sumRows(byKey.get(kk)||[]);
       let v=M(k).calc(p);
-      if(k==="ex"&&kk===fkey)v=landingForIds(new Set([id]),fkey);   // 進行中の月は共通の着地見込み定義（①②③）
+      if(k==="ex"&&kk===fkey&&v!=null&&dom)v=v/dom*dim;
       return v;
     });
     return {key:m.key,label:m.label,color:m.color,fmt:m.fmt,axf:m.axf,vals};
@@ -4191,7 +4174,24 @@ function fMonthEnd(ym){const[y,m]=ym.split("-").map(Number);const last=new Date(
 function computeAutoLandingIn(store,ym){
   return computeAutoLandingForIds(new Set(usableStores().filter(s=>storeMatch(s.id,store)).map(s=>s.id)),ym);
 }
-function computeAutoLandingForIds(ids,ym){ return landingForIds(ids,ym); }  // アプリ共通の着地見込み定義（①②③）に統一
+function computeAutoLandingForIds(ids,ym){
+  const mS=ym+"-01",mE=fMonthEnd(ym),today=todayStr(),winStart=addDays(mS,-56);
+  const byDate={};
+  for(const r of DATA.daily){ if(!ids.has(r.s))continue; if(r.d<winStart||r.d>mE)continue;
+    (byDate[r.d]=byDate[r.d]||{in:0}).in+=(r.ex!=null?r.ex:(r.in||0)/1.1); }  // 税抜（無い店は税込÷1.1近似）
+  const monthDates=Object.keys(byDate).filter(d=>d>=mS&&d<=mE).sort();
+  const closing=monthDates.filter(d=>d<=today).slice(-1)[0]||null;
+  let tdIn=0,wkIn=0,wkN=0,weIn=0,weN=0;
+  if(closing) for(const d of monthDates){ if(d>closing)continue; const v=byDate[d].in;
+    tdIn+=v; if(fIsWeekend(d)){weIn+=v;weN++;}else{wkIn+=v;wkN++;} }
+  let twkIn=0,twkN=0,tweIn=0,tweN=0; const trFrom=addDays(closing||today,-56),trTo=closing||addDays(today,-1);
+  for(const d of Object.keys(byDate)){ if(d<trFrom||d>trTo)continue; const v=byDate[d].in;
+    if(fIsWeekend(d)){tweIn+=v;tweN++;}else{twkIn+=v;twkN++;} }
+  const wkAvg=wkN?wkIn/wkN:(twkN?twkIn/twkN:0), weAvg=weN?weIn/weN:(tweN?tweIn/tweN:0);
+  let remWk=0,remWe=0; const start=closing?addDays(closing,1):mS;
+  for(let d=start; d<=mE; d=addDays(d,1)){ if(fIsWeekend(d))remWe++; else remWk++; }
+  return tdIn + remWk*wkAvg + remWe*weAvg;
+}
 function drawCompare(rows,showLand){
   const cols=KPI_CARDS.map(M);
   const landHead=showLand?`<th>着地見込み<br><span class="sub" style="font-weight:500">税抜</span></th>`:"";
