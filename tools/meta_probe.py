@@ -229,6 +229,31 @@ def main() -> int:
          limit 30
     """)
 
+    # ④-5 画面の「日別の推移」が短く出る件の確認
+    #   直近4週（2026-07-13〜08-09）で、福井の広告費が日ごとに入っているか。
+    #   DBに日が揃っているなら画面側の不具合、DBが飛び飛びならデータ側。
+    ask("福井の日別広告費（2026-07-13〜2026-08-09）", """
+        select m.date::text as 日,
+               round(sum(m.spend))::bigint as 広告費,
+               count(*) as 行数
+          from meta_insights_daily m
+          left join destinations d on d.id = m.destination_id
+         where d.name like '%福井%'
+           and m.date between date '2026-07-13' and date '2026-08-09'
+         group by 1 order by 1
+    """)
+
+    ask("福井の月別広告費と日数", """
+        select to_char(m.date,'YYYY-MM') as 月,
+               count(distinct m.date) as 日数,
+               round(sum(m.spend))::bigint as 広告費,
+               min(m.date)::text as 最古, max(m.date)::text as 最新
+          from meta_insights_daily m
+          left join destinations d on d.id = m.destination_id
+         where d.name like '%福井%'
+         group by 1 order by 1 desc limit 6
+    """)
+
     # ⑤ 広告(ad)単位のテーブルがあれば、そちらの状況も見る
     ad = run("""
         select count(*)::int as n from information_schema.tables
