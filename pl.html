@@ -124,6 +124,7 @@
   <a href="pl.html" class="on"><span class="ic">📋</span>予実</a>
   <a href="trends.html"><span class="ic">📈</span>推移</a>
   <a href="promo.html"><span class="ic">🏷️</span>販促</a>
+  <a href="stock.html"><span class="ic">📦</span>棚卸</a>
   <a href="ask.html"><span class="ic">🔍</span>分析AI</a>
   <a href="keiei.html" id="tab-keiei" style="display:none"><span class="ic">🧮</span>経営</a>
   <a href="admin.html" id="tab-admin" style="display:none"><span class="ic">⚙️</span>管理</a>
@@ -328,14 +329,26 @@ function budCell(m){ if(!m.budget) return "";
   const v=budKPI(m.k); return `<span class="auto">${v==null?"—":m.fmt(v)+m.u}</span>`; }
 
 // ======= 着地見込み（旧・別ページを予実タブに統合）=======
-function isWeekend(d){const g=new Date(d+"T00:00:00Z").getUTCDay();return g===0||g===6;}
+// アプリ共通の着地見込み定義：
+//   着地見込み ＝ ① 今月の経過実績 ＋ ② 平日の直近10日平均 × 残平日 ＋ ③ 土日祝の直近10日平均 × 残土日祝
+//   ・平日/土日祝の判定は isWeekendOrHoliday（土日＋日本の祝日 JP_HOLIDAYS）で統一（dashboard と同一）
+//   ・「直近10日」＝ 締日以前で、その区分の実績がある日を新しい順に最大10日
 function addDays(d,n){const t=new Date(d+"T00:00:00Z");t.setUTCDate(t.getUTCDate()+n);return t.toISOString().slice(0,10);}
 function monthEnd(ym){const[y,m]=ym.split("-").map(Number);const last=new Date(Date.UTC(y,m,0)).getUTCDate();return `${ym}-${String(last).padStart(2,"0")}`;}
 function todayStr(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;}
+// 日本の祝日（土日祝の判定用。年度が進んだら追記）。dashboard.html と同一。
+const JP_HOLIDAYS=new Set([
+  "2025-08-11","2025-09-15","2025-09-23","2025-10-13","2025-11-03","2025-11-23","2025-11-24",
+  "2026-01-01","2026-01-12","2026-02-11","2026-02-23","2026-03-20","2026-04-29",
+  "2026-05-03","2026-05-04","2026-05-05","2026-05-06","2026-07-20","2026-08-11",
+  "2026-09-21","2026-09-22","2026-09-23","2026-10-12","2026-11-03","2026-11-23",
+  "2027-01-01","2027-01-11","2027-02-11","2027-02-23","2027-03-21","2027-03-22",
+]);
+function isWeekendOrHoliday(d){const wd=new Date(d+"T00:00:00Z").getUTCDay();return wd===0||wd===6||JP_HOLIDAYS.has(d);}
 const METS=["in","ex","tx","txv","it","v"];   // txv=来店をKPIに使う店だけの取引（購入率の分子）
 function computeAuto(store, ym){
   const ids = idsForScope(store);
-  const mS=ym+"-01", mE=monthEnd(ym), today=todayStr(), winStart=addDays(mS,-56);
+  const mS=ym+"-01", mE=monthEnd(ym), today=todayStr(), winStart=addDays(mS,-70);
   const byDate={};
   for(const r of DATA.daily){ if(!ids.has(r.s))continue; if(r.d<winStart||r.d>mE)continue;
     const a=byDate[r.d]||(byDate[r.d]={in:0,ex:0,tx:0,txv:0,it:0,v:0,hasV:false});
@@ -343,19 +356,20 @@ function computeAuto(store, ym){
     if(kvOf(r.s)){ a.txv+=r.tx||0; if(r.v!=null){a.v+=r.v;a.hasV=true;} } }
   const monthDates=Object.keys(byDate).filter(d=>d>=mS&&d<=mE).sort();
   const closing = monthDates.filter(d=>d<=today).slice(-1)[0] || null;
-  const td={in:0,ex:0,tx:0,txv:0,it:0,v:0};
-  const wk={in:0,ex:0,tx:0,txv:0,it:0,v:0,n:0}, we={in:0,ex:0,tx:0,txv:0,it:0,v:0,n:0};
-  if(closing) for(const d of monthDates){ if(d>closing)continue; const a=byDate[d]; const b=isWeekend(d)?we:wk;
-    METS.forEach(k=>{b[k]+=a[k];td[k]+=a[k];}); b.n++; }
-  const trWk={in:0,ex:0,tx:0,txv:0,it:0,v:0,n:0}, trWe={in:0,ex:0,tx:0,txv:0,it:0,v:0,n:0};
-  const trFrom=addDays(closing||today,-56), trTo=closing||addDays(today,-1);
-  for(const d of Object.keys(byDate)){ if(d<trFrom||d>trTo)continue; const a=byDate[d]; const b=isWeekend(d)?trWe:trWk; METS.forEach(k=>b[k]+=a[k]); b.n++; }
-  const avgOf=(m,t,k)=> m.n? m[k]/m.n : (t.n? t[k]/t.n : 0);
-  const avg={}; METS.forEach(k=>avg[k]={wk:avgOf(wk,trWk,k), we:avgOf(we,trWe,k)});
+  // ① 経過実績（締日まで）＋ 平日/土日祝の経過日数
+  const td={in:0,ex:0,tx:0,txv:0,it:0,v:0}; let wkN=0,weN=0;
+  if(closing) for(const d of monthDates){ if(d>closing)continue; const a=byDate[d];
+    METS.forEach(k=>td[k]+=a[k]); if(isWeekendOrHoliday(d))weN++; else wkN++; }
+  // ②③ 直近10日平均（締日以前、平日/土日祝それぞれ最大10日）
+  const ref = closing || addDays(today,-1);
+  const hist = Object.keys(byDate).filter(d=>d<=ref).sort();
+  const avg10=(we,k)=>{let s=0,n=0; for(let i=hist.length-1;i>=0&&n<10;i--){const d=hist[i]; if(isWeekendOrHoliday(d)===we){s+=byDate[d][k];n++;}} return n?s/n:0;};
+  const avg={}; METS.forEach(k=>avg[k]={wk:avg10(false,k), we:avg10(true,k)});
+  // 残りの平日/土日祝（祝日も自動で土日祝に含める）
   let remWk=0,remWe=0; const start = closing? addDays(closing,1): mS;
-  for(let d=start; d<=mE; d=addDays(d,1)){ if(isWeekend(d))remWe++; else remWk++; }
+  for(let d=start; d<=mE; d=addDays(d,1)){ if(isWeekendOrHoliday(d))remWe++; else remWk++; }
   const exRatio = td.in? td.ex/td.in : 0.91;
-  return {closing, mS, mE, td, wkN:wk.n, weN:we.n, avg, remWk, remWe, exRatio};
+  return {closing, mS, mE, td, wkN, weN, avg, remWk, remWe, exRatio};
 }
 function fcKey(){return `notime-fc-${state.store}-${state.ym}`;}
 function fcNum(v,d){const n=Number(v);return Number.isFinite(n)?n:d;}
@@ -598,7 +612,7 @@ function fcBody(monthLabel,storeName){
         <div class="field"><label>見込み 商品単価（税抜／点）</label><input class="num" id="fcaup" type="number" min="0" step="10" value="${fc.aup||""}" placeholder="自動 ${AUTO.td.it>0?YEN(AUTO.td.ex/AUTO.td.it):"—"}"${CANEDIT?"":" disabled"}></div>
         ${CANEDIT?'<button class="chip" id="fcreset">自動見込みに戻す</button>':'<span class="note">閲覧のみ（編集は権限者）</span>'}
       </div>
-      <p class="note">土日祝の残日数は「土日」を自動で数えています。<b>祝日がある月は手で足して</b>ください。目標（税込予算）は<b>月次予実シートから自動表示</b>。違っていれば上書きできます（進捗率・計画比・差額が出ます）。<b>見込み商品単価</b>を入れると、税抜売上の着地を「販売点数 × 商品単価」で計算します（空欄なら税込×実績税率）。</p>
+      <p class="note">土日祝の残日数は<b>土日＋祝日</b>を自動で数えています。目標（税込予算）は<b>月次予実シートから自動表示</b>。違っていれば上書きできます（進捗率・計画比・差額が出ます）。<b>見込み商品単価</b>を入れると、税抜売上の着地を「販売点数 × 商品単価」で計算します（空欄なら税込×実績税率）。</p>
       <div class="tblwrap"><table id="driver"></table></div>
     </div>
     <div class="panel">
@@ -606,7 +620,7 @@ function fcBody(monthLabel,storeName){
       <div class="tblwrap"><table id="kpi"></table></div>
       <p class="note">税抜売上＝税込×実績税率(${(AUTO.exRatio).toFixed(3)})。購入率＝取引数÷来店客数／客単価（税込）＝税込÷取引数／平均購入数＝点数÷取引数／平均商品単価（税抜）＝税抜÷点数。レジ袋・クーポンは除外済み。</p>
     </div>
-    <div class="foot">「私の見込み」はデータから自動算出した初期値です（平日／土日祝それぞれの1日あたり平均。当月の実績、無ければ直近8週）。ズレていれば数値を上書きして「更新」（サーバ保存＝全端末に反映）。「自動見込みに戻す」で初期値に戻せます。締日＝取り込み済みの最新日。</div>`;
+    <div class="foot">「私の見込み」はデータから自動算出した初期値です（着地見込み＝①今月の経過実績＋②平日の直近10日平均×残平日＋③土日祝の直近10日平均×残土日祝。土日祝＝土日＋祝日）。ズレていれば数値を上書きして「更新」（サーバ保存＝全端末に反映）。「自動見込みに戻す」で初期値に戻せます。締日＝取り込み済みの最新日。</div>`;
 }
 
 function bindFc(){
