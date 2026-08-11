@@ -119,7 +119,13 @@ def store_key(name: str) -> str:
       "山形"           → "NOTIME山形"（①→②で NOTIME山形店 → ③で 店 を落とす）
     """
     n = _clean_name(name)
-    n = STORE_NAME_ALIAS.get(n, n)   # 略称→正式名（このキーも空白なしで持つ）
+    # 略称→正式名：そのままの形と、末尾「店」を外した形の両方で当てる。
+    #  例）POSが「天王台店」で来ても "天王台"→"NOTIME天王台店" の別名に寄せられるようにする
+    #  （これが無いと「天王台店」が別名にヒットせず、幽霊の新規店が作られてしまう）。
+    if n in STORE_NAME_ALIAS:
+        n = STORE_NAME_ALIAS[n]
+    elif n.endswith("店") and n[:-1] in STORE_NAME_ALIAS:
+        n = STORE_NAME_ALIAS[n[:-1]]
     n = _clean_name(n)
     if n.endswith("店"):
         n = n[:-1]
