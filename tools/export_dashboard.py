@@ -720,7 +720,29 @@ def write_dash_tables(sb: Supabase, data: dict) -> None:
     bundle = [{"date": r["d"], "store_id": r["s"], "code": r["code"],
                "n": r.get("n"), "amount": r.get("a")} for r in data.get("bundles", [])]
 
+    # 加盟店向け：画面が要る店舗情報と、事前計算した比較値（sql/028）。
+    # store-<id>.json に焼き込んでいるのと同じ中身を、RLSで守れる場所に置く。
+    dstore, dbench = [], []
+    try:
+        from tools.store_bundles import build_store_bundles, KCOLS
+        _b = build_store_bundles(data, datetime.now(JST).date().isoformat())
+        for sid, b in _b.items():
+            m = (b.get("store") or {})
+            dstore.append({"store_id": sid, "name": m.get("name") or str(sid),
+                           "ownership": m.get("own"), "brand_label": b.get("brandLabel"),
+                           "kpi_visitors": m.get("kv", True) is not False,
+                           "visible": m.get("visible", True) is not False})
+            for preset, v in (b.get("bench") or {}).items():
+                for k in KCOLS:
+                    dbench.append({"store_id": sid, "preset": preset, "metric": k,
+                                   "value": (v.get("top3") or {}).get(k),
+                                   "date_from": v.get("from"), "date_to": v.get("to")})
+    except Exception as e:                       # noqa: BLE001
+        print(f"    ⚠️ 店舗情報・比較値を作れませんでした: {str(e)[:200]}")
+
     jobs = [
+        ("dash_store", dstore, "store_id"),
+        ("dash_benchmark", dbench, "store_id,preset,metric"),
         ("dash_daily", daily, "date,store_id"),
         ("dash_category", cat, "date,store_id,category"),
         ("dash_category_price", catp, "date,store_id,category,price"),

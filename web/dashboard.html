@@ -595,8 +595,66 @@ async function loadDaily(){
   });
 }
 // 加盟店モード：割り当て店舗の store-<id>.json（自店の明細＋事前計算した比較値）だけ読む。
+// 加盟店：テーブルから読む。読めなければ false を返して、JSONの経路に任せる。
+//   ・自店の行だけ返るのは Postgres の RLS が保証する（画面の作りに関係ない）
+//   ・比較値（同ブランド上位平均など）は他店の行から作れないので、ETLが
+//     計算して dash_benchmark に置いたものを読む。中身はJSONに焼き込んでいた
+//     ものと同じで、その店に見せてよい数字だけ。
+async function franchiseeBootFromTables(ids){
+  try{
+    const [st,bm,dy]=await Promise.all([
+      SB.from("dash_store").select("store_id,name,ownership,brand_label,kpi_visitors,visible"),
+      SB.from("dash_benchmark").select("store_id,preset,metric,value,date_from,date_to"),
+      loadDaily(),
+    ]);
+    if(st.error||bm.error)return false;
+    const stores=(st.data||[]).map(r=>({id:r.store_id,name:r.name,own:r.ownership,
+      kv:r.kpi_visitors!==false, visible:r.visible!==false}));
+    if(!stores.length)return false;
+    // 比較値を、画面が使う形（bench[店舗id][期間] = {from,to,top3:{指標:値}}）に戻す
+    const bench={};
+    for(const r of (bm.data||[])){
+      const b=(bench[r.store_id]||(bench[r.store_id]={}));
+      const e=(b[r.preset]||(b[r.preset]={from:r.date_from,to:r.date_to,top3:{}}));
+      e.top3[r.metric]=r.value==null?null:+r.value;
+    }
+    const [ca,cp,bu,names,season,grades]=await Promise.all([
+      SB.from("dash_category").select("date,store_id,category,amount,qty"),
+      SB.from("dash_category_price").select("date,store_id,category,price,amount,qty"),
+      SB.from("dash_bundle").select("date,store_id,code,n,amount"),
+      SB.from("bundle_master").select("code,name"),
+      SB.from("category_season").select("category,season"),
+      SB.from("grade_bands").select("*").order("season").order("sort"),
+    ]);
+    const bundleNames={}; for(const r of (names.data||[]))if(r.code)bundleNames[String(r.code)]=r.name||String(r.code);
+    const catSeason={};  for(const r of (season.data||[]))if(r.category)catSeason[r.category]=r.season||"other";
+    const gradeBands=(grades.data||[]).map(r=>({season:r.season,grade:r.grade,lo:r.lo,hi:r.hi,
+      ntm:r.ntm_pct,sfg:r.sfg_pct,sort:r.sort||0}));
+    window.FRANCHISEE=true; window.FR_STORES=stores.map(s=>s.id); window.FR_BENCH=bench;
+    window.FR_BRAND=(st.data||[]).reduce((a,r)=>(a[r.store_id]=r.brand_label,a),{});
+    DATA={generated_at:"", stores, daily:dy,
+      cat:(ca.data||[]).map(r=>({d:r.date,s:r.store_id,c:r.category,a:+r.amount||0,q:+r.qty||0})),
+      catp:(cp.data||[]).map(r=>({d:r.date,s:r.store_id,c:r.category,p:+r.price,a:+r.amount||0,q:+r.qty||0})),
+      bundles:(bu.data||[]).map(r=>({d:r.date,s:r.store_id,code:r.code,n:r.n,a:+r.amount||0})),
+      bundleNames, catSeason, gradeBands};
+    // 比較値はテーブルから読んだぶんで足りている＝取り直さない
+    CATRANGE={from:"0000-01-01", to:"9999-12-31"};
+    prep();
+    const pick=(DETAIL_ID&&window.FR_STORES.includes(DETAIL_ID))?DETAIL_ID
+              :(window.FR_STORES.length===1?window.FR_STORES[0]:null);
+    if(pick!=null)openFranchiseeStore(pick); else renderFranchiseeHome();
+    return true;
+  }catch(e){
+    console.warn("加盟店データをテーブルから読めませんでした。JSONに切り替えます",e);
+    return false;
+  }
+}
 async function franchiseeBoot(ids){
   screen('<div class="sub" style="padding:40px 0">データを読み込み中…</div>');
+  // まずテーブルから読む。RLS(can_view_store)が効くので、返るのは自店の行だけ。
+  // 「ETLが自店ぶんを切り出して別ファイルに書く」という作り方に頼らずに済む。
+  // うまくいかないときは、これまでどおり store-<id>.json に落とす。
+  if(await franchiseeBootFromTables(ids))return;
   const bench={}, stores=[], daily=[], cat=[], catp=[], bundles=[]; let bundleNames={},catSeason={},gradeBands=[],gen="";
   for(const sid of ids){
     try{
