@@ -134,5 +134,29 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
   else console.log("  OK  外した店は名前と広告費つきで知らせる");
 }
 
+
+// --- クリエイティブ別ランキングの約束ごと ---------------------------
+{
+  const has = (re, label) => {
+    if (re.test(src)) { console.log(`  OK  ${label}`); }
+    else { console.log(`  NG  ${label}`); ng++; }
+  };
+  has(/const AD_CR_TOP=5;/, "上位5件まで出す");
+  has(/const AD_CR_MINSPEND=1000;/, "1日あたり1,000円未満は土俵に乗せない");
+  has(/e\.spd<AD_CR_MINSPEND/, "少額の広告をランキングから外している");
+  // クリック単価は「安いほうが良い」。降順で並べると最悪が1位になる。
+  has(/k:"cpc"[^}]*asc:true/, "クリック単価は安い順に並べる");
+  has(/k:"ctr"[^}]*best:"高い"/, "CTRは高い順に並べる");
+}
+
+// --- 日別の推移は、期間の全日を並べる -------------------------------
+//   データがある日だけだと、期間28日でも軸が数日ぶんしか出ず、
+//   期間表示と食い違って日付がおかしく見える。
+{
+  const line = src.split("\n").find((l) => l.includes("for(let d=state.from; d<=state.to;"));
+  if (line) console.log("  OK  日別の推移は期間の全日を並べる");
+  else { console.log("  NG  日別の推移が、データのある日だけになっています"); ng++; }
+}
+
 console.log(ng ? `\n❌ ${ng}件ずれています。` : "\n✅ すべて期待どおりです。");
 process.exit(ng ? 1 : 0);
