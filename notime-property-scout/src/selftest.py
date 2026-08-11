@@ -61,8 +61,29 @@ def _area_checks():
     print()
 
 
+def _linkcheck_checks():
+    from . import linkcheck
+    print("=== リンク生存判定（ソフト404の本文検出。ネット不要のデモ）===")
+    dead_body = '<html><body><h1>申し訳ありません。</h1><p>該当の物件が存在しません。</p>© 2026 RALSNET.</body></html>'
+    alive_body = '<html><body><h1>明野ロードサイド店舗</h1><p>賃料 34.8万円／69.9坪</p></body></html>'
+    print(f"  掲載終了ページ -> is_dead={linkcheck.is_dead_html(dead_body)}  （True＝除外）")
+    print(f"  通常の物件ページ -> is_dead={linkcheck.is_dead_html(alive_body)}  （False＝生存）")
+    print()
+
+
+class _FakeFetcher:
+    """ネット無しで verify_links を実演するための疑似fetcher。dead_urls だけ掲載終了を返す。"""
+    def __init__(self, dead_urls):
+        self.dead = set(dead_urls)
+    def status_and_body(self, url, timeout=20):
+        if url in self.dead:
+            return 200, "<html>申し訳ありません。該当の物件が存在しません。</html>"
+        return 200, "<html>物件詳細 賃料 家賃 駐車場</html>"
+
+
 def main():
     _area_checks()
+    _linkcheck_checks()
 
     today = date.today()
     cities = {
@@ -78,6 +99,15 @@ def main():
     props, notes = build_properties(SAMPLES_FUJI, cities["富士市"], today)
     all_props += props; all_notes += notes
     all_props = dedupe(all_props)
+
+    # リンク生存確認の実演: 生存物件のうち1件を「掲載終了」に見立てて除外させる。
+    from .run import verify_links
+    summary = RunSummary()
+    victim = next((p for p in all_props if p.rank != "除外"), None)
+    fake = _FakeFetcher(dead_urls=[victim.detail_url] if victim else [])
+    verify_links(fake, all_props, summary)
+    if victim:
+        print(f"※ リンク生存確認デモ: 「{victim.name}」を掲載終了とみなし除外（リンク切れ）\n")
 
     print("=== §2ゲート / §3スコア / §3.3立地 の結果 ===")
     hdr = f"{'物件名':<26}{'坪数':<20}{'家賃':<11}{'駐車':<6}{'階':<5}{'ゲート':<10}{'点':<5}{'ランク':<6}AI評価/フラグ"
@@ -99,7 +129,6 @@ def main():
     new = store.save_all(all_props, today)
     store.close()
 
-    summary = RunSummary()
     summary.collected = len(all_props)
     summary.gate_pass = sum(1 for p in all_props if p.gate_result == "pass")
     summary.new_count = len(new)
@@ -109,7 +138,8 @@ def main():
     h = HtmlReporter(out).emit(all_props, today, summary)
     t = TsvReporter(out).emit(all_props, today, summary)
 
-    print(f"\n収集 {summary.collected} / ゲート通過 {summary.gate_pass} / 新規 {summary.new_count}")
+    print(f"\n収集 {summary.collected} / ゲート通過 {summary.gate_pass} / 新規 {summary.new_count}"
+          f" / リンク切れ {summary.dead_links}")
     if all_notes:
         print("パース注意:")
         for n in all_notes:

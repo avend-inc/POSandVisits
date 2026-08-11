@@ -98,10 +98,38 @@ def dedupe(props: list[Property]) -> list[Property]:
     return list(best.values())
 
 
+def verify_links(fetcher, props: list[Property], summary: RunSummary) -> None:
+    """各物件の個別URLの生存を確認し、死んでいたら除外する（掲載終了対策）。
+
+    連合隊はソフト404（200のまま本文だけ不存在）なので本文判定する（linkcheck）。
+    - dead  : rank=除外・flags に「リンク切れ」
+    - error : flags に「リンク未確認」（判断保留＝そのまま残す）
+    レポートに載る候補（除外以外）だけを確認して無駄打ちを減らす（§5.4 間隔遵守）。
+    """
+    from . import linkcheck
+    summary.link_check_ran = True
+    for p in props:
+        if p.rank == "除外":
+            continue
+        verdict = linkcheck.check_url(fetcher, p.detail_url)
+        if verdict == linkcheck.DEAD:
+            p.rank = "除外"
+            if "リンク切れ" not in p.flags:
+                p.flags.append("リンク切れ")
+            if "リンク切れ" not in p.gate_failed_on:
+                p.gate_failed_on.append("リンク切れ")
+            summary.dead_links += 1
+        elif verdict == linkcheck.ERROR:
+            if "リンク未確認" not in p.flags:
+                p.flags.append("リンク未確認")
+            summary.unverified_links += 1
+
+
 def run(cities_filter: list[str] | None = None,
         db_path: Path | str = DEFAULT_DB,
         contact: str = "sho.nakano@avend.co.jp",
-        priority_only: int | None = None) -> dict:
+        priority_only: int | None = None,
+        check_links: bool = True) -> dict:
     """全市を巡回して日次レポートを出す。戻り値はサマリ辞書。
 
     §5.3: ソース単位で try/except。1市/1サイトの失敗で全体を止めない。
@@ -143,6 +171,11 @@ def run(cities_filter: list[str] | None = None,
             continue
 
     all_props = dedupe(all_props)
+
+    # リンク生存確認（掲載終了で消えた詳細ページを除外）。§5.4の間隔は fetcher が守る。
+    if check_links:
+        verify_links(fetcher, all_props, summary)
+
     new_props = store.save_all(all_props, today)
     store.close()
 
@@ -157,5 +190,7 @@ def run(cities_filter: list[str] | None = None,
         "collected": summary.collected,
         "gate_pass": summary.gate_pass,
         "new": summary.new_count,
+        "dead_links": summary.dead_links,
+        "unverified_links": summary.unverified_links,
         "broken": summary.broken_sources,
     }

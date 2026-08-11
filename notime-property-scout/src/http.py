@@ -87,8 +87,12 @@ class Fetcher:
                 time.sleep(wait)
         self._last_request_at[host] = time.time()
 
-    def get(self, url: str, timeout: int = 30) -> str:
-        """URLを取得して本文テキストを返す。HTMLは保存しない（noarchive・§5.1.1）。"""
+    def _request(self, url: str, timeout: int = 30):
+        """収集マナー（§5.4）を守って1回GETし、requestsのResponseを返す。
+
+        robots禁止・クールダウン中は例外。403/429はクールダウンを立てる（が例外化はしない）。
+        4xx/5xx でも raise せずResponseを返すので、ソフト404の本文判定（リンク生存確認）に使える。
+        """
         parts = urlsplit(url)
         host = parts.netloc
         if self._in_cooldown(host):
@@ -102,7 +106,16 @@ class Fetcher:
         resp = self.session.get(url, timeout=timeout)
         if resp.status_code in (403, 429):
             self._set_cooldown(host)
-            resp.raise_for_status()
-        resp.raise_for_status()
         resp.encoding = resp.apparent_encoding or resp.encoding
+        return resp
+
+    def get(self, url: str, timeout: int = 30) -> str:
+        """URLを取得して本文テキストを返す。HTMLは保存しない（noarchive・§5.1.1）。"""
+        resp = self._request(url, timeout=timeout)
+        resp.raise_for_status()
         return resp.text
+
+    def status_and_body(self, url: str, timeout: int = 20) -> tuple[int, str]:
+        """(HTTPステータス, 本文) を返す。4xx/5xxでも例外化しない（リンク生存確認用）。"""
+        resp = self._request(url, timeout=timeout)
+        return resp.status_code, resp.text

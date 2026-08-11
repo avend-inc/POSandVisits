@@ -5,7 +5,9 @@
                                                        手元で1回だけ一覧を取得して保存（§5.4遵守）
   python -m src.cli parse-file samples/oita.html --city 大分市
                                                        保存HTMLをパースし 坪数/家賃/駐車場/階数 を表示
-  python -m src.cli run        [--city X] [--priority 1]   日次バッチ（§11）
+  python -m src.cli run        [--city X] [--priority 1] [--no-verify]   日次バッチ（§11）
+                                                       既定でリンク生存確認あり（掲載終了を除外）
+  python -m src.cli linkcheck  <URL...> [--file urls.txt]   個別URLの生存確認（ソフト404検出）
   python -m src.cli selftest                            合成データでパイプライン全体を実証（ネット不要）
 
 実行は手元Mac / 小規模VPS（§10）。この環境（データセンター）からは取得できない。
@@ -81,8 +83,21 @@ def cmd_parse_file(args):
 
 def cmd_run(args):
     result = run(cities_filter=[args.city] if args.city else None,
-                 priority_only=args.priority, contact=args.contact)
+                 priority_only=args.priority, contact=args.contact,
+                 check_links=not args.no_verify)
     print(result)
+
+
+def cmd_linkcheck(args):
+    """個別物件URLの生存確認（掲載終了/ソフト404を検出）。"""
+    from .http import Fetcher
+    from . import linkcheck
+    fetcher = Fetcher(contact=args.contact)
+    urls = args.urls
+    if args.file:
+        urls = urls + [ln.strip() for ln in Path(args.file).read_text().splitlines() if ln.strip()]
+    for u in urls:
+        print(f"{linkcheck.check_url(fetcher, u):<6} {u}")
 
 
 def cmd_selftest(args):
@@ -101,7 +116,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("parse-file"); p.add_argument("html"); p.add_argument("--city", required=True)
     p.set_defaults(func=cmd_parse_file)
     p = sub.add_parser("run"); p.add_argument("--city"); p.add_argument("--priority", type=int)
+    p.add_argument("--no-verify", action="store_true", help="リンク生存確認をスキップ")
     p.set_defaults(func=cmd_run)
+    p = sub.add_parser("linkcheck"); p.add_argument("urls", nargs="*")
+    p.add_argument("--file", help="URLを1行ずつ書いたファイル")
+    p.set_defaults(func=cmd_linkcheck)
     p = sub.add_parser("selftest"); p.set_defaults(func=cmd_selftest)
     return ap
 

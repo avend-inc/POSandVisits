@@ -21,6 +21,11 @@ NOTIME / SELFURUGI 出店候補物件の日次自動収集と優先順位付け�
 - **AI評価（§3.3）** は接道・Placesが無いため **全件「判定不可」**。ロジックの器と
   立地パターン辞書（`src/location.py`）は実装済みで、第2段階でデータが埋まれば自動で判定が走る。
 - **面積の単位が特定できなければパースを失敗させる**（§9.1.1 / §13）。推測で埋めない。
+- **リンク生存確認**: 掲載終了で詳細ページが消えることは頻繁にある。連合隊(RALSNET)は
+  詳細が消えても **HTTP 200 のまま本文だけ「該当の物件が存在しません」を返すソフト404**
+  なので、`src/linkcheck.py` が本文マーカーで死活判定する。`run` は既定で各物件の個別URLを
+  確認し、死んでいれば `除外`＋`リンク切れ` フラグにして HTML/TSV から落とす（サマリに件数）。
+  取得を軽くしたいときは `run --no-verify`。
 
 ## 実行環境（§10・重要）
 
@@ -44,10 +49,15 @@ python -m src.cli fetch --city 大分市 --out samples/oita.html
 # 保存したHTMLをパースし、坪数/家賃/駐車場/階数/路面フラグ/判定を表示
 python -m src.cli parse-file samples/oita.html --city 大分市
 
-# 日次バッチ（全市 or 指定市）。SQLite保存→差分検知→out/ にHTML+TSV
-python -m src.cli run                 # 全6市
+# 日次バッチ（全市 or 指定市）。SQLite保存→リンク生存確認→差分検知→out/ にHTML+TSV
+python -m src.cli run                 # 全6市（既定でリンク生存確認あり）
 python -m src.cli run --priority 1    # priority:1 の4市のみ（§6.0 推奨の着手順）
 python -m src.cli run --city 大分市
+python -m src.cli run --no-verify     # リンク生存確認をスキップ（取得を軽くしたいとき）
+
+# 個別URLの生存確認だけ単体で（掲載終了/ソフト404を検出）
+python -m src.cli linkcheck https://fudosan.cbiz.ne.jp/detailPage/rent/900/12345/
+python -m src.cli linkcheck --file urls.txt
 
 # ネット不要の実証（面積パーサ/ゲート/スコア/立地/出力を合成データで確認）
 python -m src.cli selftest

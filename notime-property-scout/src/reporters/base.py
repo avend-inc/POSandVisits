@@ -20,6 +20,9 @@ class RunSummary:
         self.new_count = 0
         self.broken_sources: list[str] = []
         self.parse_notes: list[str] = []
+        self.dead_links = 0        # リンク生存確認で「掲載終了/不存在」だった件数
+        self.unverified_links = 0  # 生存確認できなかった件数（取得失敗等）
+        self.link_check_ran = False
 
 
 class Reporter(Protocol):

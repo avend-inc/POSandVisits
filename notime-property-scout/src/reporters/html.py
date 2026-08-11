@@ -155,6 +155,8 @@ class HtmlReporter:
     <span>収集 <b>{summary.collected}</b> 件</span>
     <span>ゲート通過 <b>{summary.gate_pass}</b> 件</span>
     <span>新規 <b>{summary.new_count}</b> 件</span>
+    {f'<span>リンク切れ <b>{summary.dead_links}</b> 件</span>' if summary.link_check_ran else '<span>リンク確認 <b>未実施</b></span>'}
+    {f'<span>リンク未確認 <b>{summary.unverified_links}</b> 件</span>' if summary.unverified_links else ''}
     <span>broken ソース: <b>{_e(broken)}</b></span>
   </div>
 </header>
