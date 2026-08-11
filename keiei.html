@@ -93,6 +93,15 @@ function prep(){const ds=DATA.daily.map(r=>r.d).sort();DATA._min=ds[0];DATA._max
 //  経営レポート独自の日割り(proj)だと平日/土日の偏りを無視して当月頭で暴れるため、
 //  予実タブと同じ「平日/土日祝の1日平均 × 残日数 ＋ 締日までの実績」で出す。
 function _isWeekend(d){const g=new Date(d+"T00:00:00Z").getUTCDay();return g===0||g===6;}
+// 日本の祝日（土日祝の判定用）。dashboard.html / pl.html と同一。年度が進んだら追記。
+const JP_HOLIDAYS=new Set([
+  "2025-08-11","2025-09-15","2025-09-23","2025-10-13","2025-11-03","2025-11-23","2025-11-24",
+  "2026-01-01","2026-01-12","2026-02-11","2026-02-23","2026-03-20","2026-04-29",
+  "2026-05-03","2026-05-04","2026-05-05","2026-05-06","2026-07-20","2026-08-11",
+  "2026-09-21","2026-09-22","2026-09-23","2026-10-12","2026-11-03","2026-11-23",
+  "2027-01-01","2027-01-11","2027-02-11","2027-02-23","2027-03-21","2027-03-22",
+]);
+function _isWkHol(d){const g=new Date(d+"T00:00:00Z").getUTCDay();return g===0||g===6||JP_HOLIDAYS.has(d);}  // 土日祝
 function _addDays(d,n){const t=new Date(d+"T00:00:00Z");t.setUTCDate(t.getUTCDate()+n);return t.toISOString().slice(0,10);}
 function _monthEnd(ym){const[y,m]=ym.split("-").map(Number);const last=new Date(Date.UTC(y,m,0)).getUTCDate();return `${ym}-${String(last).padStart(2,"0")}`;}
 // 予実タブが保存した着地見込みの上書き値（page="fc"）を、その月ぶん“1回のクエリ”で全店まとめて読む。
@@ -104,27 +113,47 @@ async function planLoadAllFc(ym){
   return m;
 }
 // pl.html computeAuto 相当（税込 in／税抜 ex のみ）。締日までの実績・平日/土日祝1日平均・残日数を出す。
+// アプリ共通の着地見込み定義（①経過実績＋②平日直近10日平均×残平日＋③土日祝直近10日平均×残土日祝）。
+// 平日/土日祝は _isWkHol（土日＋祝日）で判定。「直近10日」＝締日以前でその区分の実績がある日を新しい順に最大10日。
 function fcAuto(storeId,ym){
   const ids=new Set([storeId]);
-  const mS=ym+"-01", mE=_monthEnd(ym), today=todayStr(), winStart=_addDays(mS,-56);
+  const mS=ym+"-01", mE=_monthEnd(ym), today=todayStr(), winStart=_addDays(mS,-70);
   const byDate={};
   for(const r of DATA.daily){ if(!ids.has(r.s))continue; if(r.d<winStart||r.d>mE)continue;
     const a=byDate[r.d]||(byDate[r.d]={in:0,ex:0,it:0}); a.in+=r.in||0; a.ex+=(r.ex!=null?r.ex:0); a.it+=(r.it!=null?r.it:0); }
   const monthDates=Object.keys(byDate).filter(d=>d>=mS&&d<=mE).sort();
   const closing=monthDates.filter(d=>d<=today).slice(-1)[0]||null;
-  let tdIn=0,tdEx=0,tdIt=0; const wk={in:0,it:0,n:0}, we={in:0,it:0,n:0};
-  if(closing) for(const d of monthDates){ if(d>closing)continue; const a=byDate[d]; tdIn+=a.in; tdEx+=a.ex; tdIt+=a.it; const b=_isWeekend(d)?we:wk; b.in+=a.in; b.it+=a.it; b.n++; }
-  const trWk={in:0,it:0,n:0}, trWe={in:0,it:0,n:0};
-  const trFrom=_addDays(closing||today,-56), trTo=closing||_addDays(today,-1);
-  for(const d of Object.keys(byDate)){ if(d<trFrom||d>trTo)continue; const a=byDate[d]; const b=_isWeekend(d)?trWe:trWk; b.in+=a.in; b.it+=a.it; b.n++; }
-  const avgWk = wk.n? wk.in/wk.n : (trWk.n? trWk.in/trWk.n : 0);
-  const avgWe = we.n? we.in/we.n : (trWe.n? trWe.in/trWe.n : 0);
-  const avgItWk = wk.n? wk.it/wk.n : (trWk.n? trWk.it/trWk.n : 0);
-  const avgItWe = we.n? we.it/we.n : (trWe.n? trWe.it/trWe.n : 0);
+  let tdIn=0,tdEx=0,tdIt=0;   // ① 経過実績
+  if(closing) for(const d of monthDates){ if(d>closing)continue; const a=byDate[d]; tdIn+=a.in; tdEx+=a.ex; tdIt+=a.it; }
+  // ②③ 直近10日平均（平日/土日祝それぞれ最大10日）
+  const ref=closing||_addDays(today,-1);
+  const hist=Object.keys(byDate).filter(d=>d<=ref).sort();
+  const avg10=(we,k)=>{let s=0,n=0; for(let i=hist.length-1;i>=0&&n<10;i--){const d=hist[i]; if(_isWkHol(d)===we){s+=byDate[d][k];n++;}} return n?s/n:0;};
+  const avgWk=avg10(false,"in"), avgWe=avg10(true,"in");
+  const avgItWk=avg10(false,"it"), avgItWe=avg10(true,"it");
   let remWk=0,remWe=0; const start=closing?_addDays(closing,1):mS;
-  for(let d=start; d<=mE; d=_addDays(d,1)){ if(_isWeekend(d))remWe++; else remWk++; }
+  for(let d=start; d<=mE; d=_addDays(d,1)){ if(_isWkHol(d))remWe++; else remWk++; }
   const exRatio = tdIn? tdEx/tdIn : 0.91;
   return {tdIn,tdEx,tdIt,avgWk,avgWe,avgItWk,avgItWe,remWk,remWe,exRatio,closing};
+}
+// 着地見込み（税抜・複数店の合算）＝dashboard の landingForIds と同一。ロイヤリティ基礎に使う。
+function landingExForIds(ids,ym){
+  const mS=ym+"-01", mE=_monthEnd(ym), today=todayStr();
+  const byDate={};
+  for(const r of DATA.daily){ if(!ids.has(r.s))continue;
+    byDate[r.d]=(byDate[r.d]||0)+(r.ex!=null?r.ex:(r.in||0)/1.1); }
+  const allDates=Object.keys(byDate).sort();
+  if(!allDates.length)return 0;
+  const monthDates=allDates.filter(d=>d>=mS&&d<=mE);
+  const cutoff=today<mE?today:mE;
+  const closing=monthDates.filter(d=>d<=cutoff).slice(-1)[0]||null;
+  let actual=0; if(closing)for(const d of monthDates){ if(d<=closing)actual+=byDate[d]; }
+  const ref=closing||cutoff, hist=allDates.filter(d=>d<=ref);
+  const avg10=we=>{let s=0,n=0; for(let i=hist.length-1;i>=0&&n<10;i--){const d=hist[i]; if(_isWkHol(d)===we){s+=byDate[d];n++;}} return n?s/n:0;};
+  const wkAvg=avg10(false), weAvg=avg10(true);
+  let remWk=0,remWe=0; const start=closing?_addDays(closing,1):mS;
+  for(let d=start; d<=mE; d=_addDays(d,1)){ if(_isWkHol(d))remWe++; else remWk++; }
+  return actual + remWk*wkAvg + remWe*weAvg;
 }
 // 予実タブと同じ着地見込み（保存済み上書き o があれば反映）。o は planLoadAllFc の該当店ぶん。
 // 戻り: {ex:税抜売上着地, inLand:税込着地, it:商品販売数着地}
@@ -226,10 +255,10 @@ async function renderKeiei(){
   const kpi={prev:kOf(aggPrev),cur:kOf(aggCur),next:kOf(aggNext)};
   // 直営全体の翌月 税抜売上は、各店の翌月着地（予算優先）の合計と一致させる。
   kpi.next.ex=Math.round(dstores.reduce((t,s)=>t+(storeEx[s.id].next||0),0));
-  // FC 税込着地（ロイヤリティ基礎）
+  // FC 税抜着地（ロイヤリティ基礎）＝ダッシュボードの着地見込みと同一定義（①②③、税抜、FC全店の合算）
   const fcIds=new Set(usableStores().filter(s=>ownOf(s.id)!=="直営").map(s=>s.id));
-  const fcLandIn=Math.round(elapsed>0?proj(curEnd?sumIds(fcIds,cf,curEnd).in||0:0):0);
-  const auto={storeEx,kpi,roy:{base:fcLandIn,rate:6.8},wh:{NOTIME:{qty:0,unit:0},SELFURUGI:{qty:0,unit:0},GARAGE:{qty:0,unit:0},NEW:{qty:0,unit:0}},con:{qty:0,price:0,rate:0}};
+  const fcLandEx=Math.round(landingExForIds(fcIds,cur));
+  const auto={storeEx,kpi,roy:{base:fcLandEx,rate:6.8},wh:{NOTIME:{qty:0,unit:0},SELFURUGI:{qty:0,unit:0},GARAGE:{qty:0,unit:0},NEW:{qty:0,unit:0}},con:{qty:0,price:0,rate:0}};
   const loaded=await keieiLoad(cur), saved=loaded.p||{};
   const M=JSON.parse(JSON.stringify(auto));
   // 当月(cur)は予実タブの着地見込みが正（そちらで編集）。経営レポート保存の上書きは前月/来月のみ。
@@ -275,7 +304,8 @@ async function renderKeiei(){
   h+=`</tbody></table></div></div>`;
   // FC
   h+=`<div class="panel"><h2>■ FC売上（本部としての売上着地見込）</h2>`;
-  h+=`<div class="subhd">① ロイヤリティ</div><div class="krow">FC着地売上(税込) ${ni("roy|base",M.roy.base)} × 率 ${ni("roy|rate",M.roy.rate)}% ＝ <b id="roy-res" style="font-size:15px"></b></div>`;
+  h+=`<div class="subhd">① ロイヤリティ</div><div class="krow">FC着地売上(税抜) ${ni("roy|base",M.roy.base)} × 率 ${ni("roy|rate",M.roy.rate)}% ＝ <b id="roy-res" style="font-size:15px"></b></div>`;
+  h+=`<div class="note" style="margin:-2px 0 8px">FC着地売上＝ダッシュボードの着地見込みと同じ計算（①今月の経過実績＋②平日の直近10日平均×残平日＋③土日祝の直近10日平均×残土日祝）。<b>税抜</b>のFC全店合算です。</div>`;
   h+=`<div class="subhd">② 卸売上</div><div class="tblwrap"><table><thead><tr><th>区分</th><th>発送数</th><th>卸商品単価</th><th>小計</th></tr></thead><tbody>`;
   WH.forEach(([k,nm])=>{const w=M.wh[k];h+=`<tr><td>${nm}</td><td>${ni("wh|"+k+"|qty",w.qty)}</td><td>${ni("wh|"+k+"|unit",w.unit)}</td><td id="wsub-${k}"></td></tr>`;});
   h+=`<tr class="total"><td>卸売上 合計</td><td id="wqty-tot"></td><td id="wunit-avg"></td><td id="wtot"></td></tr></tbody></table></div><div class="note">卸売上合計の「発送数」＝各区分の発送数の合計、「卸商品単価」＝加重平均（合計金額÷合計発送数）。</div>`;
