@@ -3318,7 +3318,7 @@ function drawKpi2(){
   h+=`<tr class="land"><td>着地見込み <span class="sub" style="font-weight:500;font-size:9.5px">当月のみ</span></td>`+
      cols.map((c,i)=>`<td>${i===2?YEN(lv||0)+"円":"対象外"}</td>`).join("")+`</tr>`;
   for(const k of KPI2_COLS){const m=M(k);
-    h+=`<tr><td>${kpiLabel(k)}</td>`+cols.map(c=>{const v=cellVal(c,k);return `<td>${m.fmt(v==null?0:v)}</td>`;}).join("")+`</tr>`;}
+    h+=`<tr><td>${kpiLabel(k)}</td>`+cols.map(c=>{const v=cellVal(c,k);return `<td>${v==null?"—":m.fmt(v)}</td>`;}).join("")+`</tr>`;}
   el.innerHTML=h+`</tbody>`;
 }
 // ブランドの短い表記（KPIまとめの列名が長くならないように）：直営／SFG／SF／NT
@@ -3353,11 +3353,11 @@ function drawKpi2Detail(el,ctx){
     const diff=(cur!=null&&av!=null)?cur-av:null;
     const wd=cellVal(wdCol,k), we=cellVal(weCol,k);
     h+=`<tr><td>${kpiLabel(k)}</td>
-      <td>${m.fmt(cur==null?0:cur)}</td>
-      <td class="peer">${m.fmt(av==null?0:av)}</td>
+      <td>${cur==null?"—":m.fmt(cur)}</td>
+      <td class="peer">${av==null?"—":m.fmt(av)}</td>
       <td style="${diffColor(cur,av)}">${diff==null?"—":(diff>=0?"+":"−")+m.fmt(Math.abs(diff))}</td>
-      <td>${m.fmt(wd==null?0:wd)}</td>
-      <td>${m.fmt(we==null?0:we)}</td></tr>`;}
+      <td>${wd==null?"—":m.fmt(wd)}</td>
+      <td>${we==null?"—":m.fmt(we)}</td></tr>`;}
   el.innerHTML=h+`</tbody>`;
 }
 // ---- AIのまとめ（ページ最下部のカード）----
@@ -3784,7 +3784,7 @@ function drawDayKpi(){
     return v;
   };
   const avgRow=(label,day,cls)=>`<tr class="avgrow${cls||""}"><th>${label}<small style="display:block;font-weight:500;color:var(--ink2);font-size:9px">直近2週·日平均</small></th>`+
-    DAY_COLS.map(k=>{const v=avgVal(day,k);return `<th>${M(k).fmt(v==null?0:v)}</th>`;}).join("")+`</tr>`;
+    DAY_COLS.map(k=>{const v=avgVal(day,k);return `<th>${kpiCell(k,v)}</th>`;}).join("")+`</tr>`;
   let h=`<thead><tr><th>日付</th>${DAY_COLS.map(k=>`<th>${M(k).name}</th>`).join("")}</tr>`+
         avgRow("平日平均","wd")+avgRow("休祝日平均","we"," we")+`</thead><tbody>`;
   if(!dates.length){ el.innerHTML=h+`<tr><td colspan="${DAY_COLS.length+1}" class="sub">データがありません</td></tr></tbody>`; return; }
@@ -3795,7 +3795,7 @@ function drawDayKpi(){
     h+=`<tr${we?' class="we"':''}><td>${+d.slice(5,7)}/${+d.slice(8,10)}(${wk})<span class="wx" data-d="${d}"></span></td>`+
        DAY_COLS.map(k=>{const v=M(k).calc(p);
          const mk=(k==="v"&&miss)?'<span class="mk" title="有人時間の来店数が未入力です">未</span>':"";
-         return `<td>${M(k).fmt(v==null?0:v)}${mk}</td>`;}).join("")+`</tr>`; }
+         return `<td>${kpiCell(k,v)}${mk}</td>`;}).join("")+`</tr>`; }
   el.innerHTML=h+`</tbody>`;
   // thead が3行になったので、スクロールしても重ならないよう sticky の top を実測で積み上げる
   let top=0;
@@ -3899,21 +3899,25 @@ function drawStoreKpiDetail(el){
   let h=`<thead><tr><th></th>${KPI2_COLS.map(k=>`<th>${kpiLabel(k)}</th>`).join("")}</tr></thead><tbody>`;
   // 自店（実績）
   h+=`<tr class="prow"><td>${esc((s&&s.name)||String(id))}</td>`+
-     KPI2_COLS.map(k=>{const v=M(k).calc(p);return `<td>${M(k).fmt(v==null?0:v)}</td>`;}).join("")+`</tr>`;
+     KPI2_COLS.map(k=>{const v=M(k).calc(p);return `<td>${kpiCell(k,v)}</td>`;}).join("")+`</tr>`;
   // ベンチマーク各行
   for(const b of benches){
     h+=`<tr><td class="peer">${esc(b.label)}</td>`+
-       KPI2_COLS.map(k=>{const av=peerAvg(k,from,to,b.ids);return `<td class="peer">${M(k).fmt(av==null?0:av)}</td>`;}).join("")+`</tr>`;
+       KPI2_COLS.map(k=>{const av=peerAvg(k,from,to,b.ids);return `<td class="peer">${kpiCell(k,av)}</td>`;}).join("")+`</tr>`;
   }
   // 差分（自店 − 同ブランド上位5平均）：上回り緑・下回り赤、差が大きいほど濃色
   h+=`<tr><td>差分（対 ${esc(brandLabel)}上位5）</td>`+KPI2_COLS.map(k=>{
       const cur=M(k).calc(p), av=peerAvg(k,from,to,brTop5);
       const diff=(cur!=null&&av!=null)?cur-av:null;
-      const dt=diff==null?M(k).fmt(0):(diff>=0?"+":"−")+M(k).fmt(Math.abs(diff));
+      const dt=diff==null?"—":(diff>=0?"+":"−")+M(k).fmt(Math.abs(diff));
       return `<td style="${diffColor(cur,av)}">${dt}</td>`;}).join("")+`</tr>`;
   el.innerHTML=h+`</tbody>`;
 }
 // ③ 店舗別KPI（選択店舗を売上降順・合計/平均つき・店名ボタンで単店へ）
+// KPIの1マス。値が無い（null）ときは 0 ではなく「—」で出す。
+//   0 と出すと「本当に0だった」と読めてしまう。来店を計測していない店の
+//   購入率が 0.0% と並ぶと、売上があるのに買われていないように見える。
+function kpiCell(k,v){ return v==null?"—":M(k).fmt(v); }
 function drawStoreKpi(){
   const el=document.getElementById("storekpi"); if(!el)return;
   if(state.detail){ drawStoreKpiDetail(el); return; }
@@ -3924,16 +3928,16 @@ function drawStoreKpi(){
   let h=`<thead><tr><th>店舗</th>${KPI2_COLS.map(k=>`<th>${kpiLabel(k)}</th>`).join("")}</tr></thead><tbody>`;
   for(const p of rows){
     h+=`<tr><td><button class="stbtn" data-sid="${p._id}">${esc(p._name)}</button></td>`+
-       KPI2_COLS.map(k=>{const v=M(k).calc(p);return `<td>${M(k).fmt(v==null?0:v)}</td>`;}).join("")+`</tr>`;
+       KPI2_COLS.map(k=>{const v=M(k).calc(p);return `<td>${kpiCell(k,v)}</td>`;}).join("")+`</tr>`;
   }
   // 店舗詳細（単店）では合計/平均は実績と同じになるので出さない
   if(rows.length&&!state.detail){
     const tot=sumRows(rowsIn(state.from,state.to,"__sel__"));
-    h+=`<tr class="prow"><td>合計</td>`+KPI2_COLS.map(k=>{const v=M(k).calc(tot);return `<td>${M(k).fmt(v==null?0:v)}</td>`;}).join("")+`</tr>`;
+    h+=`<tr class="prow"><td>合計</td>`+KPI2_COLS.map(k=>{const v=M(k).calc(tot);return `<td>${kpiCell(k,v)}</td>`;}).join("")+`</tr>`;
     h+=`<tr class="prow"><td>平均</td>`+KPI2_COLS.map(k=>{
       const vs=rows.map(p=>M(k).calc(p)).filter(v=>v!=null);
       const av=vs.length?vs.reduce((s,v)=>s+v,0)/vs.length:null;
-      return `<td>${M(k).fmt(av==null?0:av)}</td>`;}).join("")+`</tr>`;
+      return `<td>${kpiCell(k,av)}</td>`;}).join("")+`</tr>`;
   }else if(!rows.length){ h+=`<tr><td colspan="${KPI2_COLS.length+1}" class="sub">店舗が選択されていません</td></tr>`; }
   el.innerHTML=h+`</tbody>`;
   el.querySelectorAll(".stbtn").forEach(b=>b.onclick=()=>{location.href="index.html?g="+GROUP+"&store="+b.dataset.sid;});
