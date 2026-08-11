@@ -683,12 +683,73 @@ def _inject_config(html: str, supa_url: str, anon: str, public_data_url: str) ->
             ).encode("utf-8")
 
 
+def write_dash_tables(sb: Supabase, data: dict) -> None:
+    """集計結果を dash_* テーブルにも書く（sql/027）。
+
+    【なぜJSONと二重に持つのか】
+      いまは data.json（10.5MB）を丸ごと配って、画面側で絞り込んでいる。
+      テーブルなら RLS が効くので「加盟店には自店の行しか返さない」ことを
+      Postgres 側で担保できる。アプリの作り方に関係なく守られる。
+
+      この段階では両方に書く。数字が一致することを確かめてから、
+      画面をテーブル読みに切り替える。先に片方を止めると戻せない。
+
+    【集計はやり直さない】
+      data.json に入れるのと同じ行を、名前だけ付け替えて書く。
+      別々に集計すると、必ずどこかで数字がずれる。
+    """
+    print("\n  集計結果をテーブルにも書きます（dash_*）...")
+
+    daily = [{
+        "date": r["d"], "store_id": r["s"],
+        "sales_in": r.get("in"), "sales_ex": r.get("ex"),
+        "tx": r.get("tx"), "items": r.get("it"), "visitors": r.get("v"),
+        "bag_in": r.get("bag"), "bag_ex": r.get("bagEx"), "bag_qty": r.get("bagq"),
+        "coupon_qty": r.get("coup"), "coupon_amount": r.get("coupAmt"),
+        # exU/exM/vm は該当する店・日にしか付かない。無ければ null のまま。
+        "sales_ex_unmanned": r.get("exU"), "sales_ex_manned": r.get("exM"),
+        "visitors_staffed": r.get("vm"),
+    } for r in data.get("daily", [])]
+
+    cat = [{"date": r["d"], "store_id": r["s"], "category": r["c"],
+            "amount": r.get("a"), "qty": r.get("q")} for r in data.get("cat", [])]
+
+    catp = [{"date": r["d"], "store_id": r["s"], "category": r["c"], "price": r["p"],
+             "amount": r.get("a"), "qty": r.get("q")} for r in data.get("catp", [])]
+
+    bundle = [{"date": r["d"], "store_id": r["s"], "code": r["code"],
+               "n": r.get("n"), "amount": r.get("a")} for r in data.get("bundles", [])]
+
+    jobs = [
+        ("dash_daily", daily, "date,store_id"),
+        ("dash_category", cat, "date,store_id,category"),
+        ("dash_category_price", catp, "date,store_id,category,price"),
+        ("dash_bundle", bundle, "date,store_id,code"),
+    ]
+    for table, rows, key in jobs:
+        if not rows:
+            print(f"    {table}: 0件（書くものがありません）")
+            continue
+        try:
+            n = sb.upsert(table, rows, on_conflict=key)
+            # 送った件数と反映された行数がずれたら、取りこぼしている。
+            # data.json と数字が合わなくなるので、その場で気づけるようにする。
+            mark = "" if n == len(rows) else f"  ⚠️ {len(rows)-n:,}件が反映されていません"
+            print(f"    {table}: {len(rows):,}件を書きました（{n:,}行）{mark}")
+        except Exception as e:                   # noqa: BLE001
+            # ここで落としても data.json は既にできている。配信は続ける。
+            print(f"    ⚠️ {table} に書けませんでした: {str(e)[:200]}")
+            print(f"       （sql/027_dashboard_tables.sql を実行済みか確認してください）")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="ダッシュボードデータの集計と配信")
     parser.add_argument("--print-json", action="store_true",
                         help="data.json の中身を標準出力にも出す")
     parser.add_argument("--no-deploy", action="store_true",
                         help="Storageへの配信をせず集計だけ行う")
+    parser.add_argument("--no-tables", action="store_true",
+                        help="集計結果のテーブル(dash_*)への書き込みをしない")
     args = parser.parse_args()
 
     load_dotenv()
@@ -707,6 +768,9 @@ def main() -> int:
     print(f"  日別×店舗: {len(data['daily'])}件 / カテゴリ日別: {len(data['cat'])}件 / 価格帯別: {len(data.get('catp',[]))}件")
     data_bytes = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     print(f"  data.json サイズ: {len(data_bytes)//1024} KB")
+
+    if not args.no_tables:
+        write_dash_tables(sb, data)
 
     if args.print_json:
         print("----DATA_JSON_BEGIN----")
