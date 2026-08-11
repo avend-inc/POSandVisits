@@ -766,8 +766,15 @@ def main() -> int:
     print("ダッシュボード用データを集計しています...")
     data = build_data(sb)
     print(f"  日別×店舗: {len(data['daily'])}件 / カテゴリ日別: {len(data['cat'])}件 / 価格帯別: {len(data.get('catp',[]))}件")
-    data_bytes = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    print(f"  data.json サイズ: {len(data_bytes)//1024} KB")
+    # カテゴリ別・価格帯別は data.json から外す（テーブルにあるので画面が期間ぶんだけ取る）。
+    # この2つで11.6万行あり、data.json の半分以上を占めていた。
+    # ※ data 自体からは消さない。加盟店バンドル(store_bundles)がこれを使って
+    #   自店ぶんを切り出しているため。ここでは「配る中身」からだけ抜く。
+    payload = {k: v for k, v in data.items() if k not in ("cat", "catp")}
+    data_bytes = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    _full = len(json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+    print(f"  data.json サイズ: {len(data_bytes)//1024} KB"
+          f"（カテゴリ別・価格帯別を外す前: {_full//1024} KB）")
 
     if not args.no_tables:
         write_dash_tables(sb, data)

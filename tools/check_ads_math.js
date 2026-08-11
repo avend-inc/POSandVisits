@@ -158,5 +158,20 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
   else { console.log("  NG  日別の推移が、データのある日だけになっています"); ng++; }
 }
 
+
+// --- カテゴリ別を期間ぶんだけ取る仕組みの約束ごと ---------------------
+//   data.json から外したので、取り漏らすと画面が黙って空になる。
+//   「足りなければ取りに行って描き直す」経路が残っているかを見る。
+{
+  const has = (re, label) => {
+    if (re.test(src)) console.log(`  OK  ${label}`);
+    else { console.log(`  NG  ${label}`); ng++; }
+  };
+  has(/if\(!catNeed\(hf,ht\)\)return/, "期間が足りなければ空を返して取りに行く（比率表）");
+  has(/await ensureCatRange\(state\.from,state\.to\)/, "描く前に期間ぶんを取りにいく");
+  has(/function catFromBundle\(\)\{ return !!window\.FRANCHISEE/, "加盟店はバンドルのまま（取り直さない）");
+  has(/ensureCatRange\(ymArg\+"-01"/, "レポートは見る月を取りにいく");
+}
+
 console.log(ng ? `\n❌ ${ng}件ずれています。` : "\n✅ すべて期待どおりです。");
 process.exit(ng ? 1 : 0);
