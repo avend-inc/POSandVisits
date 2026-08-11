@@ -185,5 +185,26 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
   } else console.log("  OK  値が無いところは「—」で出す（0にしない）");
 }
 
+
+// --- 日別×店舗をテーブルから読む ------------------------------------
+//   data.json から外したので、読み込みが欠けると画面が丸ごと空になる。
+//   全期間を取ること（期間で切ると店舗一覧・日付の範囲が壊れる）を確かめる。
+{
+  const has = (re, label) => {
+    if (re.test(src)) console.log(`  OK  ${label}`);
+    else { console.log(`  NG  ${label}`); ng++; }
+  };
+  has(/DATA\.daily=await loadDaily\(\)/, "日別はテーブルから読み込む");
+  has(/async function loadDaily\(\)/, "loadDaily がある");
+  // 期間で絞る条件（gte/lte）が入っていたら、全期間でなくなっている
+  const fn = src.slice(src.indexOf("async function loadDaily()"),
+                       src.indexOf("// 加盟店モード"));
+  if (/\.gte\("date"|\.lte\("date"/.test(fn)) {
+    console.log("  NG  日別を期間で絞っています（全期間が要ります）"); ng++;
+  } else console.log("  OK  日別は全期間を取る");
+  // data.json 側の形に戻していること（画面のコードを触らないための約束）
+  has(/o=\{d:r\.date, s:r\.store_id/, "data.json と同じ形に戻している");
+}
+
 console.log(ng ? `\n❌ ${ng}件ずれています。` : "\n✅ すべて期待どおりです。");
 process.exit(ng ? 1 : 0);

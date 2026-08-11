@@ -555,7 +555,44 @@ async function authBoot(url,anon){
   const {data,error}=await SB.storage.from("dashboard-data").download("data.json");
   if(error)throw new Error("データを取得できませんでした（"+error.message+"）");
   DATA=JSON.parse(await data.text());
+  // 日別×店舗は data.json から外し、テーブル(dash_daily)から読む。
+  // 期間で切らずに全期間を取る：店舗一覧・日付の範囲・推移・着地見込みなど、
+  // 画面ごとに要る期間がばらばらで、切ると必ずどこかが足りなくなるため。
+  DATA.daily=await loadDaily();
   prep();render();
+}
+// dash_daily を全部読む。1回1000行までなので、ページを並べて同時に取る。
+// 順番に取ると15往復ぶん待たされる（体感で数秒）。
+// RLS(can_view_store)が効くので、返るのは自分が見られる店の行だけ。
+async function loadDaily(){
+  const PAGE=1000, CONC=8;
+  const cols="date,store_id,sales_in,sales_ex,tx,items,visitors,bag_in,bag_ex,bag_qty,"+
+             "coupon_qty,coupon_amount,sales_ex_unmanned,sales_ex_manned,visitors_staffed";
+  const out=[]; let page=0, done=false;
+  while(!done){
+    const jobs=[];
+    for(let i=0;i<CONC;i++,page++){
+      const off=page*PAGE;
+      jobs.push(SB.from("dash_daily").select(cols).order("date").range(off,off+PAGE-1));
+    }
+    const res=await Promise.all(jobs);
+    for(const {data,error} of res){
+      if(error)throw new Error("日別データを取得できませんでした（"+error.message+"）");
+      out.push(...(data||[]));
+      if(!data||data.length<PAGE)done=true;   // 最後まで来た
+    }
+  }
+  // data.json に入っていたのと同じ形にそろえる（画面側は一切変えない）。
+  // 該当しない店・日には付けない列（exU/exM/vm）は、null のときは付けない。
+  return out.map(r=>{
+    const o={d:r.date, s:r.store_id, in:r.sales_in, ex:r.sales_ex, tx:r.tx, it:r.items,
+             v:r.visitors, bag:r.bag_in, bagEx:r.bag_ex, bagq:r.bag_qty,
+             coup:r.coupon_qty, coupAmt:r.coupon_amount};
+    if(r.sales_ex_unmanned!=null)o.exU=r.sales_ex_unmanned;
+    if(r.sales_ex_manned!=null)o.exM=r.sales_ex_manned;
+    if(r.visitors_staffed!=null)o.vm=r.visitors_staffed;
+    return o;
+  });
 }
 // 加盟店モード：割り当て店舗の store-<id>.json（自店の明細＋事前計算した比較値）だけ読む。
 async function franchiseeBoot(ids){
