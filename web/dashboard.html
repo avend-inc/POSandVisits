@@ -2140,6 +2140,9 @@ function openReportDialog(){
   const inp=box.querySelector("#rpt-ym"); if(inp&&inp.focus)inp.focus();
 }
 async function makeReport(ymArg){
+  // レポートは任意の月を見る。まずその月のカテゴリ別を取りにいく。
+  if(/^\d{4}-\d{2}$/.test(String(ymArg||"")))
+    await ensureCatRange(ymArg+"-01", fMonthEnd(ymArg));
   const btn=document.getElementById("reportbtn"); const old=btn?btn.textContent:"";
   try{
     if(btn){btn.disabled=true;btn.textContent="⏳ 生成中…";}
@@ -3138,7 +3141,70 @@ function mdLabel(f,t){ const g=s=>`${+s.slice(5,7)}/${+s.slice(8,10)}`; return f
 function mdShort(s){ return s?`${+s.slice(5,7)}/${+s.slice(8,10)}`:"—"; }
 function genShort(g){ if(!g)return"—"; const s=g.replace("T"," "); return `${+s.slice(5,7)}/${+s.slice(8,10)} ${s.slice(11,16)}`; }
 
-function draw(){ if(VIEW==="ads"){ drawPeriod(); drawAds(); return; } drawSlicer(); drawPeriod(); refresh(); }
+
+// ============================================================
+// カテゴリ別・価格帯別は data.json から外し、必要な期間だけテーブルから取る。
+//   全期間で11.6万行あり、data.json の半分以上を占めていた。毎回それを配るのは
+//   重いうえ、実際に使うのは「いま選んでいる期間」だけ。
+//   テーブル(dash_category / dash_category_price)には RLS が効くので、
+//   加盟店には自店の行しか返らない（アプリの作りに関係なく守られる）。
+//
+// 取得済みの期間を覚えておき、足りないときだけ広げて取り直す。
+// 画面側の集計コード（heatData など）は同期のまま触っていない。
+// 足りない期間を求められたら、その場では空を返し、取り終えてから描き直す。
+// 中途半端な数字を出すより、一瞬空のほうが安全。
+// ============================================================
+let CATRANGE=null;          // 取得済みの期間 {from,to}
+let CATLOADING=false;
+// 加盟店は store-<id>.json（自店ぶんを全期間ぶん焼き込んだもの）で動いているので、
+// テーブルから取り直さない。取り直すと、焼き込んである比較値と食い違う。
+function catFromBundle(){ return !!window.FRANCHISEE; }
+function catCovered(f,t){
+  if(catFromBundle())return true;
+  return !!(CATRANGE&&CATRANGE.from<=f&&CATRANGE.to>=t);
+}
+async function catFetch(table,select,from,to){
+  const out=[], PAGE=1000;
+  for(let off=0;;off+=PAGE){
+    const {data,error}=await SB.from(table).select(select)
+      .gte("date",from).lte("date",to).range(off,off+PAGE-1);
+    if(error)throw error;
+    out.push(...(data||[]));
+    if(!data||data.length<PAGE)break;
+  }
+  return out;
+}
+async function ensureCatRange(from,to){
+  if(!SB||!from||!to||catFromBundle())return; // 公開モード・加盟店は取りに行かない
+  if(catCovered(from,to)||CATLOADING)return;
+  CATLOADING=true;
+  // いちど広げた範囲は狭めない（期間を行き来するたびに取り直さないため）
+  const f=CATRANGE&&CATRANGE.from<from?CATRANGE.from:from;
+  const t=CATRANGE&&CATRANGE.to>to?CATRANGE.to:to;
+  try{
+    const [cat,catp]=await Promise.all([
+      catFetch("dash_category","date,store_id,category,amount,qty",f,t),
+      catFetch("dash_category_price","date,store_id,category,price,amount,qty",f,t),
+    ]);
+    DATA.cat =cat .map(r=>({d:r.date,s:r.store_id,c:r.category,a:+r.amount||0,q:+r.qty||0}));
+    DATA.catp=catp.map(r=>({d:r.date,s:r.store_id,c:r.category,p:+r.price,a:+r.amount||0,q:+r.qty||0}));
+    CATRANGE={from:f,to:t};
+  }catch(e){
+    console.warn("カテゴリ別の取得に失敗しました",e);
+  }finally{ CATLOADING=false; }
+}
+// 同期の集計から呼ぶ用。足りなければ取りに行って、終わったら描き直す。
+function catNeed(f,t){
+  if(catCovered(f,t))return true;
+  if(!SB)return true;                        // 公開モードは data.json に入っている
+  ensureCatRange(f,t).then(()=>{ if(catCovered(f,t))draw(); });
+  return false;
+}
+async function draw(){ if(VIEW==="ads"){ drawPeriod(); drawAds(); return; }
+  drawSlicer(); drawPeriod();
+  // 描く前に、その期間のカテゴリ別がそろっているか確かめる
+  await ensureCatRange(state.from,state.to);
+  refresh(); }
 // 選択・期間の変更でスライサー本体以外を描き直す（チェックのたびにリストを作り直さない）
 function refresh(){ if(state.detail){drawDetailExtras(); drawDayKpi();} drawKpi2(); drawStoreKpi(); drawTrend2();
   if(state.detail){ drawHeatX(); }                       // 店舗ページ＝1表（販売数/税抜売上を切替）
@@ -4084,6 +4150,9 @@ function heatRange(){ return state.detail?[state.hFrom,state.hTo]:[state.from,st
 function heatData(idSet,f0,t0){
   const hr=heatRange(), hf=f0||hr[0], ht=t0||hr[1];
   const cells={},catTot={},gradeTot={}; let gQ=0,gA=0;
+  // 店舗ページの比率表など、上の集計期間とは別の期間を見るところがある。
+  // その期間がまだ取れていなければ、取りに行ってから描き直す（下は空で返す）。
+  if(!catNeed(hf,ht))return {cells,catTot,gradeTot,gQ,gA,loading:true};
   for(const r of (DATA.catp||[])){ if(idSet?!idSet.has(r.s):!storeMatch(r.s,"__sel__"))continue; if(r.d<hf||r.d>ht)continue; if(isDropCat(r.c))continue;
     const gr=gradeOf(r.c,r.p); if(!gr)continue; const cat=tCanon(r.c);   // ⑤⑥はTシャツを4分類(Tシャツ/プリントT/バンドT/アニメT)に分けて表示・表記ゆれも正規化
     (cells[gr]||(cells[gr]={})); (cells[gr][cat]||(cells[gr][cat]={q:0,a:0}));
