@@ -206,5 +206,20 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
   has(/o=\{d:r\.date, s:r\.store_id/, "data.json と同じ形に戻している");
 }
 
+
+// --- 加盟店をテーブルから読む ----------------------------------------
+//   ここが一番効く変更。他店を見せない保証が「ETLの切り出し方」から
+//   「PostgresのRLS」に移る。JSONの経路は当面フォールバックとして残す。
+{
+  const has = (re, label) => {
+    if (re.test(src)) console.log(`  OK  ${label}`);
+    else { console.log(`  NG  ${label}`); ng++; }
+  };
+  has(/if\(await franchiseeBootFromTables\(ids\)\)return;/, "加盟店はまずテーブルから読む");
+  has(/async function franchiseeBootFromTables/, "テーブル経路がある");
+  has(/return false;[\s\S]{0,400}JSONの経路|console\.warn\("加盟店データをテーブルから読めませんでした/,
+      "読めないときはJSONに落ちる（黙って空にしない）");
+}
+
 console.log(ng ? `\n❌ ${ng}件ずれています。` : "\n✅ すべて期待どおりです。");
 process.exit(ng ? 1 : 0);
