@@ -197,7 +197,7 @@ async function boot(){
     const {data:{session}}=await SB.auth.getSession();
     if(!session){showLogin();return;}
     ME.email=(session.user&&session.user.email||"").toLowerCase();
-    let role=null; try{const {data:u}=await SB.from("app_users").select("role").eq("email",ME.email).maybeSingle();role=u&&u.role||null;}catch(e){}
+    let role=null; try{const {data:u}=await SB.from("users").select("role,is_active,segments").ilike("email",ME.email).maybeSingle(); if(u&&u.is_active&&(u.segments||[]).includes("sales")) role=u.role==="admin"?"admin":(u.role==="manager"?"editor":"viewer");}catch(e){}
     ME.role=role;
     if(ME.role!=="admin"){ showDenied(ME.role?("この画面は管理者専用です（あなたの権限："+({viewer:"閲覧",editor:"編集"}[ME.role]||ME.role)+"）"):"アクセス権がありません。管理者にユーザー追加を依頼してください。"); return; }
     const {data,error}=await SB.storage.from("dashboard-data").download("data.json");
