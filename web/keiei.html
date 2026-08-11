@@ -73,6 +73,31 @@ const CONFIG_URL="https://qcdxhsrnlsgpntbiellh.supabase.co/storage/v1/object/pub
 let SB=null, DATA=null, ME={email:"",role:null}, TARGETS=null;
 async function loadTargets(){ if(window.__TARGETS__){TARGETS=window.__TARGETS__;return;} try{TARGETS=await (await fetch("targets.json",{cache:"no-store"})).json();}catch(e){TARGETS=null;} }
 
+// ===== 集計テーブル(dash_*)から読む（keiei/pl は daily と stores しか使わない） =====
+//  空 or 失敗のときは null を返し、呼び出し側が従来どおり data.json にフォールバックする。
+//  → テーブルに問題があっても「今と同じ挙動」に自動で戻るので既存機能に影響しない。
+async function loadDaily(){
+  const PAGE=1000, CONC=8;
+  const cols="date,store_id,sales_in,sales_ex,tx,items,visitors,bag_in,bag_ex,bag_qty,coupon_qty,coupon_amount,sales_ex_unmanned,sales_ex_manned,visitors_staffed";
+  const out=[]; let page=0, done=false;
+  while(!done){
+    const jobs=[];
+    for(let i=0;i<CONC;i++,page++){ const off=page*PAGE; jobs.push(SB.from("dash_daily").select(cols).order("date").range(off,off+PAGE-1)); }
+    const res=await Promise.all(jobs);
+    for(const {data,error} of res){ if(error)throw new Error(error.message); out.push(...(data||[])); if(!data||data.length<PAGE)done=true; }
+  }
+  return out.map(r=>{ const o={d:r.date,s:r.store_id,in:r.sales_in,ex:r.sales_ex,tx:r.tx,it:r.items,v:r.visitors,bag:r.bag_in,bagEx:r.bag_ex,bagq:r.bag_qty,coup:r.coupon_qty,coupAmt:r.coupon_amount};
+    if(r.sales_ex_unmanned!=null)o.exU=r.sales_ex_unmanned; if(r.sales_ex_manned!=null)o.exM=r.sales_ex_manned; if(r.visitors_staffed!=null)o.vm=r.visitors_staffed; return o; });
+}
+async function loadDataFromTables(){
+  try{
+    const [dy, st]=await Promise.all([ loadDaily(), SB.from("dash_store").select("store_id,name,ownership,kpi_visitors,visible") ]);
+    if(st.error||!st.data||!st.data.length||!dy||!dy.length) return null;
+    const stores=st.data.map(r=>({id:r.store_id,name:r.name,own:r.ownership,kv:r.kpi_visitors!==false,visible:r.visible!==false}));
+    return {generated_at:"",daily:dy,stores,cat:[],catp:[],bundles:[],bundleNames:{},catSeason:{},gradeBands:[]};
+  }catch(e){ return null; }
+}
+
 function screen(h){document.getElementById("app").innerHTML=h;}
 function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));}
 function showError(e){screen('<div class="err">読み込めませんでした：'+esc(String(e&&e.message||e))+'</div>');}
@@ -201,9 +226,13 @@ async function boot(){
     let role=null; try{const {data:u}=await SB.from("users").select("role,is_active,segments").ilike("email",ME.email).maybeSingle(); if(u&&u.is_active&&(u.segments||[]).includes("sales")) role=u.role==="admin"?"admin":(u.role==="manager"?"editor":"viewer");}catch(e){}
     ME.role=role;
     if(ME.role!=="admin"){ showDenied(ME.role?("この画面は管理者専用です（あなたの権限："+({viewer:"閲覧",editor:"編集"}[ME.role]||ME.role)+"）"):"アクセス権がありません。管理者にユーザー追加を依頼してください。"); return; }
-    const {data,error}=await SB.storage.from("dashboard-data").download("data.json");
-    if(error)throw new Error("データを取得できませんでした（"+error.message+"）");
-    DATA=JSON.parse(await data.text()); prep(); await loadTargets(); renderKeiei();
+    DATA=await loadDataFromTables();                 // まず集計テーブル(dash_*)から
+    if(!DATA){                                        // 空/失敗のときだけ従来どおり data.json
+      const {data,error}=await SB.storage.from("dashboard-data").download("data.json");
+      if(error)throw new Error("データを取得できませんでした（"+error.message+"）");
+      DATA=JSON.parse(await data.text());
+    }
+    prep(); await loadTargets(); renderKeiei();
   }catch(e){ showError(e); }
 }
 function showLogin(){ screen('<div class="gate"><div class="logo">🧮 経営レポート</div><div class="t">ログイン</div><div class="m">管理者の Google アカウントでログインしてください。</div><button class="gbtn" id="gl"><span class="g"></span>Google でログイン</button></div>');

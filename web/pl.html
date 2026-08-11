@@ -141,6 +141,31 @@ let CANEDIT=true, RT=null, DIRTY=false;   // 編集可否／リアルタイム�
 // 月次予実「予算」（目標）。経営レポートと同じ targets.json を読む（KPIごとの予算表示に使う）。
 let TARGETS=null;
 async function loadTargets(){ if(TARGETS)return; if(window.__TARGETS__){TARGETS=window.__TARGETS__;return;} try{TARGETS=await (await fetch("targets.json",{cache:"no-store"})).json();}catch(e){TARGETS=null;} }
+
+// ===== 集計テーブル(dash_*)から読む（keiei/pl は daily と stores しか使わない） =====
+//  空 or 失敗のときは null を返し、呼び出し側が従来どおり data.json にフォールバックする。
+//  → テーブルに問題があっても「今と同じ挙動」に自動で戻るので既存機能に影響しない。
+async function loadDaily(){
+  const PAGE=1000, CONC=8;
+  const cols="date,store_id,sales_in,sales_ex,tx,items,visitors,bag_in,bag_ex,bag_qty,coupon_qty,coupon_amount,sales_ex_unmanned,sales_ex_manned,visitors_staffed";
+  const out=[]; let page=0, done=false;
+  while(!done){
+    const jobs=[];
+    for(let i=0;i<CONC;i++,page++){ const off=page*PAGE; jobs.push(SB.from("dash_daily").select(cols).order("date").range(off,off+PAGE-1)); }
+    const res=await Promise.all(jobs);
+    for(const {data,error} of res){ if(error)throw new Error(error.message); out.push(...(data||[])); if(!data||data.length<PAGE)done=true; }
+  }
+  return out.map(r=>{ const o={d:r.date,s:r.store_id,in:r.sales_in,ex:r.sales_ex,tx:r.tx,it:r.items,v:r.visitors,bag:r.bag_in,bagEx:r.bag_ex,bagq:r.bag_qty,coup:r.coupon_qty,coupAmt:r.coupon_amount};
+    if(r.sales_ex_unmanned!=null)o.exU=r.sales_ex_unmanned; if(r.sales_ex_manned!=null)o.exM=r.sales_ex_manned; if(r.visitors_staffed!=null)o.vm=r.visitors_staffed; return o; });
+}
+async function loadDataFromTables(){
+  try{
+    const [dy, st]=await Promise.all([ loadDaily(), SB.from("dash_store").select("store_id,name,ownership,kpi_visitors,visible") ]);
+    if(st.error||!st.data||!st.data.length||!dy||!dy.length) return null;
+    const stores=st.data.map(r=>({id:r.store_id,name:r.name,own:r.ownership,kv:r.kpi_visitors!==false,visible:r.visible!==false}));
+    return {generated_at:"",daily:dy,stores,cat:[],catp:[],bundles:[],bundleNames:{},catSeason:{},gradeBands:[]};
+  }catch(e){ return null; }
+}
 // 店舗名に含まれる予算トークン（山形/福井/いわき）で、その月の予算オブジェクトを引く。
 function tgtOf(store,ym){const T=(TARGETS&&TARGETS.targets)||{};const nm=budStoreName(store)||"";for(const tok in T){if(nm.indexOf(tok)>=0&&T[tok][ym])return T[tok][ym];}return null;}
 
@@ -169,9 +194,13 @@ async function authBoot(url,anon){ screen('<div class="sub" style="padding:40px 
   let role=null; try{const {data:u}=await SB.from("users").select("role,is_active,segments").ilike("email",ME.email).maybeSingle(); if(u&&u.is_active&&(u.segments||[]).includes("sales")) role=u.role==="admin"?"admin":(u.role==="manager"?"editor":"viewer");}catch(e){}
   ME.role=role;
   if(!ME.role){showDenied(ME.email);return;}
-  const {data,error}=await SB.storage.from("dashboard-data").download("data.json");
-  if(error)throw new Error("データを取得できませんでした（"+error.message+"）");
-  DATA=JSON.parse(await data.text()); prep(); subscribeRealtime(); reload(); }
+  DATA=await loadDataFromTables();                   // まず集計テーブル(dash_*)から
+  if(!DATA){                                          // 空/失敗のときだけ従来どおり data.json
+    const {data,error}=await SB.storage.from("dashboard-data").download("data.json");
+    if(error)throw new Error("データを取得できませんでした（"+error.message+"）");
+    DATA=JSON.parse(await data.text());
+  }
+  prep(); subscribeRealtime(); reload(); }
 function showLogin(){ screen(`<div class="gate"><div class="logo">NOTIME 月次予実</div>
   <div class="t">ログイン</div><div class="m">許可されたメンバー専用です。<br>管理者に登録された Google アカウントでログインしてください。</div>
   <button class="gbtn" id="glogin"><span class="g"></span>Google でログイン</button></div>`);
