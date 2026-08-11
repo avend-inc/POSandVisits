@@ -293,6 +293,12 @@
   .kmat th.adsort{cursor:pointer;user-select:none;white-space:nowrap}
   .kmat th.adsort:hover{color:var(--accent)}
   .kmat th.adsort.on{color:var(--accent)}
+  /* クリエイティブ別の1列目（広告名）。長い広告名でも列が伸びないよう折り返して幅を抑える。
+     ここを抑えないと、並べ替えで長い名前が1位に来たとき数値列が画面の外に出てしまう。
+     名前は2行までにして、行の高さも一定に保つ（全文は title で見られる）。 */
+  #adcrtbl th:first-child,#adcrtbl td:first-child{white-space:normal;overflow-wrap:anywhere;
+    max-width:min(170px,42vw);min-width:120px}
+  #adcrtbl .adname{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
   /* 未紐付けキャンペーンの割り当て。スマホでは縦積みにして、はみ出させない */
   .admaprow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 0;border-top:1px solid var(--line)}
   .admaprow:first-child{border-top:none}
@@ -326,7 +332,6 @@
   <a href="pl.html"><span class="ic">📋</span>予実</a>
   <a href="trends.html"><span class="ic">📈</span>推移</a>
   <a href="promo.html"><span class="ic">🏷️</span>販促</a>
-  <a href="stock.html"><span class="ic">📦</span>棚卸</a>
   <a href="ask.html"><span class="ic">🔍</span>分析AI</a>
   <a href="index.html?view=ads" id="tab-ads" style="display:none"><span class="ic">📣</span>広告</a>
   <a href="keiei.html" id="tab-keiei" style="display:none"><span class="ic">🧮</span>経営</a>
@@ -1597,14 +1602,15 @@ function adDrawCreatives(shortName){
   const body=top.length?top.map(([nm,e],i)=>{
     const sts=[...e.st];
     const where=sts.length?(sts.length===1?esc(sts[0]):`${esc(sts[0])} 他${sts.length-1}店`):`<span style="color:#b8860b">未紐付け</span>`;
-    return `<tr><td style="text-align:left"><div><b>${i+1}.</b> ${esc(nm)}</div>`+
+    return `<tr><td style="text-align:left"><div class="adname" title="${esc(nm)}"><b>${i+1}.</b> ${esc(nm)}</div>`+
       `<div class="sub" style="font-weight:500">${where}／1日 ${YEN(Math.round(e.spd))}円</div></td>`+
       COLS.map(c=>`<td>${ready(c)?F(c.val(e),c.fmt):"—"}</td>`).join("")+`</tr>`;
   }).join(""):`<tr><td colspan="${COLS.length+1}" class="sub">この条件に合うクリエイティブがありません</td></tr>`;
   // ランキングの切り替えボタン。列見出しでも同じことができる。
   const RANK=COLS.filter(c=>c.best);
+  // 「◯位まで」は下の説明文に書いてあるのでボタン列には出さない
+  // （狭い画面で潰れて縦積みになり、ボタンの高さまで引き伸ばしてしまうため）
   const btns=`<div class="adperiod" style="margin-bottom:8px">`+
-    `<span class="sub" style="align-self:center;font-weight:700">${AD_CR_TOP}位まで／</span>`+
     RANK.map(c=>`<button class="chip adrank${c.k===sc.k?" on":""}${ready(c)?"":" nodata"}"`+
       ` data-k="${c.k}" title="${c.name}が${c.best}順に並べます">${c.name}が${c.best}順</button>`).join("")+
     `<button class="chip adrank${sc.k==="sp"?" on":""}" data-k="sp">広告費が多い順</button></div>`;
