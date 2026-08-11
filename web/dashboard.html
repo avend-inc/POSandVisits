@@ -909,9 +909,16 @@ const AD_COLOR={sp:"#2f6fd0",fl:"#d6336c",fl:"#d6336c",pv:"#e8590c",
   sr:"#1098ad"};
 const AD_DEFAULT=["sp","sr","ctr","cpc"];
 // 散布図の縦軸。来店数＝集客に効いているか／税抜売上＝売上につながっているか。
-let AD_SCY=(function(){try{return localStorage.getItem("notime-adscy")||"vis";}catch(e){return "vis";}})();
-// クリエイティブ別一覧の並び順（列見出しを押すと変わる）
-let AD_CRSORT={k:"sp",desc:true};
+// 散布図の期間（"1w" / "4w"）。以前は縦軸の選択に使っていたキーなので、
+// 古い値が保存されていることがある。知らない値なら既定に戻す。
+let AD_SCY=(function(){
+  try{const v=localStorage.getItem("notime-adscy");
+    return (v==="1w"||v==="4w")?v:"4w";}catch(e){return "4w";}
+})();
+// クリエイティブ別一覧：何位まで出すか／並び順／土俵に乗せる最低の広告費
+const AD_CR_TOP=5;
+const AD_CR_MINSPEND=1000;      // 1日あたりの広告費がこれ未満のものは外す
+let AD_CRSORT={k:"ctr",desc:true};
 // 割当画面で「割当済み」を開いているか
 let AD_MAPOPEN=false;
 let AD_COLS=(function(){
@@ -1084,7 +1091,8 @@ function renderAds(){
       <p class="note" id="adscnote"></p>
     </div>
     <div class="panel">
-      <h2>クリエイティブ別 <span class="sub" style="font-weight:500">（広告費の多い順・上位20）</span></h2>
+      <h2>クリエイティブ別</h2>
+      <div id="adcrbtns"></div>
       <div class="tblwrap"><table class="kmat" id="adcrtbl"></table></div>
       <p class="note" id="adcrnote"></p>
     </div>
@@ -1246,7 +1254,13 @@ function drawAds(){
   if(el){
     // 日別も同じ考え方。その日の売上は「期間中に広告を出している店」の合計にする
     // （日ごとに対象店が入れ替わると、線がガタついて比べられなくなるため）。
+    // 横軸は「選んだ期間の全日」。広告を出していない日も0円として並べる。
+    //   データがある日だけを並べると、たとえば期間が28日でも出稿が6日なら
+    //   軸が6日ぶんしか無く、「期間28日」の表示と食い違って日付がおかしく見える。
+    //   0円の日も見えるほうが、止めていた期間が分かって役に立つ。
+    //   ※比率（CTR・CPC・売上比率）は、分母が0の日は「—」になる（0にはしない）。
     const byDay=new Map();
+    for(let d=state.from; d<=state.to; d=addDays(d,1))byDay.set(d,adZero());
     for(const r of rows){ let a=byDay.get(r.d); if(!a){a=adZero();byDay.set(r.d,a);} adAdd(a,r); }
     for(const [d,a] of byDay){ a.sids=tot.sids; adSales(a,d,d); }
     const days=[...byDay.keys()].sort();
@@ -1402,45 +1416,46 @@ function drawAds(){
 //   ※ネブラスカ未導入の店は来店数がそもそも取れないので、図には載せず
 //     名前を下に出す。0人として原点に置くと相関を見誤るため。
 // ============================================================
-const AD_SCAXIS={
-  vis:{name:"来店数",  unit:"人", fmt:v=>NUM(Math.round(v)),
-       pick:e=>e.acc.vis, need:"ネブラスカ未導入のため来店数が取れません"},
-  ex: {name:"税抜売上", unit:"円", fmt:v=>YEN(Math.round(v)),
-       pick:e=>e.acc.ex,  need:"この期間の税抜売上がありません"},
-};
+// 散布図の期間。ページ上部の集計期間とは切り離す（相関は期間の長さで
+// 見え方が変わるので、1週間と4週間を並べて見比べられるほうが役に立つ）。
+const AD_SCRANGE=[["1w","直近1週間",7],["4w","直近4週間",28]];
+function adScPeriod(){
+  const last=(DATA.meta||[]).reduce((a,r)=>r.d>a?r.d:a,"")||DATA._salesMax||DATA._max;
+  const days=(AD_SCRANGE.find(x=>x[0]===AD_SCY)||AD_SCRANGE[1])[2];
+  return [addDays(last,-(days-1)), last];
+}
 function adDrawScatter(shortName){
   const host=document.getElementById("adscatter"); if(!host)return;
   const note=document.getElementById("adscnote");
-  const ax=AD_SCAXIS[AD_SCY]||AD_SCAXIS.vis;
+  const [from,to]=adScPeriod();
   const toggle=`<div class="adperiod" style="margin-bottom:8px">`+
-    Object.entries(AD_SCAXIS).map(([k,a])=>
-      `<button class="chip adscy${AD_SCY===k?" on":""}" data-y="${k}">${a.name}</button>`).join("")+
-    `<span class="sub" style="align-self:center">を縦軸にする</span></div>`;
+    AD_SCRANGE.map(([k,n])=>
+      `<button class="chip adscy${AD_SCY===k?" on":""}" data-y="${k}">${n}</button>`).join("")+
+    `<span class="sub" style="align-self:center">で見る</span></div>`;
   const wire=()=>host.querySelectorAll(".adscy").forEach(b=>b.onclick=()=>{
     AD_SCY=b.dataset.y;
     try{localStorage.setItem("notime-adscy",AD_SCY);}catch(e){}
     drawAds();
   });
   const g=new Map();
-  for(const r of adRowsAll()){
-    if(r.si==null)continue;
+  // ここだけは自前の期間で集計する（上の集計期間には連動させない）
+  for(const r of (DATA.meta||[])){
+    if(r.si==null||r.d<from||r.d>to)continue;
+    if(AD_HIDE.has(r.st||UNMAPPED))continue;
     let e=g.get(r.si); if(!e){e={name:r.st,own:r.ow,acc:adZero()};g.set(r.si,e);}
     adAdd(e.acc,r);
   }
-  for(const [,e] of g)adSales(e.acc,state.from,state.to);
+  for(const [,e] of g)adSales(e.acc,from,to);
   const pts=[],skip=[];
   for(const [sid,e] of g){
     if(e.acc.sp<=0)continue;
-    // 来店軸のときは、来店をKPIに使わない店（kpi_visitors=false）と記録が
-    // 1件も無い店を外す。0人なのか取れないのかが区別できないため。
-    // 売上軸のときはどの店も取れるので、そのまま全店を載せる。
-    const y=ax.pick(e);
-    const ok=(AD_SCY==="vis")?(kvOf(sid)&&y>0):(y>0);
-    if(ok)pts.push({x:e.acc.sp,y,n:shortName(e.name),own:e.own});
+    // 来店をKPIに使わない店（kpi_visitors=false）と、記録が1件も無い店は外す。
+    // 0人なのか取れないのかが区別できないため。
+    if(kvOf(sid)&&e.acc.vis>0)pts.push({x:e.acc.sp,y:e.acc.vis,n:shortName(e.name),own:e.own});
     else skip.push(shortName(e.name));
   }
   if(pts.length<2){
-    host.innerHTML=toggle+`<p class="note">この期間に、広告費と${ax.name}がそろっている店舗が足りません。</p>`;
+    host.innerHTML=toggle+`<p class="note">この期間に、広告費と来店数がそろっている店舗が足りません。</p>`;
     wire();
     if(note)note.textContent="";
     return;
@@ -1460,30 +1475,64 @@ function adDrawScatter(shortName){
   const FS=NARROW?8:9;
   const tick=(m,f)=>[0,.5,1].map(t=>t*m).map(f);
   const grid=tick(yM,v=>`<line x1="${L}" y1="${py(v)}" x2="${W-R}" y2="${py(v)}" stroke="var(--line)" stroke-width="1"/>`+
-      `<text x="${L-4}" y="${py(v)+3}" font-size="${FS}" text-anchor="end" fill="var(--sub)">${ax.fmt(v)}</text>`).join("")+
+      `<text x="${L-4}" y="${py(v)+3}" font-size="${FS}" text-anchor="end" fill="var(--sub)">${NUM(Math.round(v))}</text>`).join("")+
     tick(xM,v=>`<text x="${px(v)}" y="${H-B+14}" font-size="${FS}" text-anchor="middle" fill="var(--sub)">${YEN(Math.round(v))}</text>`).join("");
   const line=`<line x1="${px(0)}" y1="${py(Math.max(0,icpt))}" x2="${px(xM)}" y2="${py(Math.max(0,icpt+slope*xM))}" stroke="var(--sub)" stroke-dasharray="4 3" stroke-width="1.5"/>`;
   // 名前は広告費の多い上位だけに出す（全部出すと重なって読めない）
   const named=new Set([...pts].sort((a,b)=>b.x-a.x).slice(0,NARROW?4:8).map(p=>p.n));
-  const dots=pts.map(p=>{
+  // 点は押せる。押すと黒い吹き出しでその店の数字を出す（スマホでは
+  // カーソルを載せられないので、title頼みだと読めないため）。
+  const dots=pts.map((p,i)=>{
     const c=p.own==="FC"?"#e8590c":"#2f6fd0";
-    return `<circle cx="${px(p.x)}" cy="${py(p.y)}" r="5" fill="${c}" fill-opacity=".75" stroke="#fff" stroke-width="1"><title>${esc(p.n)}／広告費 ${YEN(p.x)}円／${ax.name} ${ax.fmt(p.y)}${ax.unit}</title></circle>`+
-      (named.has(p.n)?`<text x="${px(p.x)+7}" y="${py(p.y)+3}" font-size="${FS}" fill="var(--ink)">${esc(p.n)}</text>`:"");
+    return `<circle class="scdot" data-i="${i}" cx="${px(p.x)}" cy="${py(p.y)}" r="6" fill="${c}"`+
+      ` fill-opacity=".75" stroke="#fff" stroke-width="1" style="cursor:pointer"></circle>`+
+      (named.has(p.n)?`<text x="${px(p.x)+8}" y="${py(p.y)+3}" font-size="${FS}" fill="var(--ink)" style="pointer-events:none">${esc(p.n)}</text>`:"");
   }).join("");
   host.innerHTML=toggle+
     `<div class="adlegend" style="margin-bottom:4px">`+
       `<span><i style="background:#2f6fd0"></i>直営店</span><span><i style="background:#e8590c"></i>FC店</span>`+
-      `<span class="sub">縦＝${ax.name}（${ax.unit}）／横＝広告費（円）</span></div>`+
-    `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="xMidYMid meet">`+
-    grid+line+dots+`</svg>`;
+      `<span class="sub">縦＝来店数（人）／横＝広告費（円）</span></div>`+
+    `<div class="scwrap" style="position:relative">`+
+    `<svg id="adscsvg" viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="xMidYMid meet">`+
+    grid+line+dots+`</svg><div class="adtip" id="adsctip" hidden></div></div>`;
   wire();
+  // 点を押したら黒い吹き出し。もう一度押すか、余白を押すと閉じる。
+  const svg=document.getElementById("adscsvg"), tip=document.getElementById("adsctip");
+  if(svg&&tip){
+    const wrap=svg.parentElement;
+    let open=-1;
+    const hide=()=>{ tip.hidden=true; open=-1; };
+    svg.querySelectorAll(".scdot").forEach(el=>el.addEventListener("click",ev=>{
+      ev.stopPropagation();
+      const i=+el.dataset.i;
+      if(open===i){ hide(); return; }
+      open=i;
+      const p=pts[i];
+      const cpv=p.y>0?p.x/p.y:null;
+      tip.innerHTML=`<b>${esc(p.n)}</b>`+
+        `<div class="l"><i style="background:${p.own==="FC"?"#e8590c":"#2f6fd0"}"></i>広告費<b>${YEN(p.x)}円</b></div>`+
+        `<div class="l"><i style="background:#0ca678"></i>来店数<b>${NUM(p.y)}人</b></div>`+
+        `<div class="l"><i style="background:#b8860b"></i>来店1人あたり<b>${cpv==null?"—":YEN(Math.round(cpv))+"円"}</b></div>`;
+      tip.hidden=false;
+      // SVGの座標を画面の座標に直して、点の右上に置く
+      const box=svg.getBoundingClientRect(), sx2=box.width/W, sy2=box.height/H;
+      let x=px(p.x)*sx2+10, y=py(p.y)*sy2-10;
+      const tw=tip.offsetWidth||150, th=tip.offsetHeight||70;
+      if(x+tw>box.width)x=Math.max(0,px(p.x)*sx2-tw-10);
+      if(y+th>box.height)y=Math.max(0,box.height-th);
+      if(y<0)y=0;
+      tip.style.left=x+"px"; tip.style.top=y+"px";
+    }));
+    if(wrap)wrap.addEventListener("click",hide);
+  }
   if(note){
     const strength=r==null?"":(Math.abs(r)>=.7?"強い":Math.abs(r)>=.4?"ゆるやかな":"ほとんど無い");
     note.innerHTML=
       (r==null?"":`相関係数 <b>${F2(r)}</b>（${strength}相関）。点線は最小二乗法の直線で、`+
-        `線より上＝同じ広告費で${ax.name}が多い店、下＝出しているわりに伸びていない店です。`)+
-      `<br>期間: ${state.from}〜${state.to}／${pts.length}店舗`+
-      (skip.length?`<br><b style="color:#b8860b">対象外 ${skip.length}店</b>（${skip.map(esc).join("・")}）：${ax.need}。`:"");
+        `線より上＝同じ広告費で来店が多い店、下＝出しているわりに来ていない店です。`)+
+      `<br>点を押すと、その店の数字が出ます。`+
+      `<br>期間: ${from}〜${to}（上の集計期間には連動しません）／${pts.length}店舗`+
+      (skip.length?`<br><b style="color:#b8860b">対象外 ${skip.length}店</b>（${skip.map(esc).join("・")}）：ネブラスカ未導入のため来店数が取れません。`:"");
   }
 }
 
@@ -1503,10 +1552,18 @@ function adDrawCreatives(shortName){
     &&!AD_HIDE.has(r.st||UNMAPPED));
   const g=new Map();
   for(const r of src){
-    let e=g.get(r.an); if(!e){e={sp:0,im:0,ck:0,rc:0,st:new Set()};g.set(r.an,e);}
+    let e=g.get(r.an); if(!e){e={sp:0,im:0,ck:0,rc:0,vt:null,st:new Set(),days:new Set()};g.set(r.an,e);}
     e.sp+=r.sp||0;e.im+=r.im||0;e.ck+=r.ck||0;e.rc+=r.rc||0;
+    e.days.add(r.d);
+    if(r.vt!=null)e.vt=(e.vt||0)+r.vt;   // 平均視聴時間（取込後に入る）
     if(r.st)e.st.add(shortName(r.st));
   }
+  // 1日あたりの広告費が少ないものは外す。数百円しか使っていない広告は
+  // クリックが数回しかなく、CTRやクリック単価が偶然で大きく振れる。
+  // 上位に紛れ込むと「効いている広告」を見誤るため、土俵に乗せない。
+  for(const [,e] of g)e.spd=e.days.size?e.sp/e.days.size:0;
+  const weak=[...g.entries()].filter(([,e])=>e.spd<AD_CR_MINSPEND);
+  for(const [nm]of weak)g.delete(nm);
   // 列の定義。val が並べ替えの値で、比率はここでも 実額÷実額 で出す。
   //   ※CTR・クリック単価・FQ は、値が出せない行を並べ替えの最後に送る
   //     （0として扱うと「クリック0で単価も0＝最安」に見えてしまうため）。
@@ -1515,44 +1572,74 @@ function adDrawCreatives(shortName){
     {k:"sp", name:"広告費",     val:e=>e.sp, fmt:v=>YEN(Math.round(v))+"円"},
     {k:"im", name:"表示回数",   val:e=>e.im, fmt:v=>NUM(v)},
     {k:"ck", name:"クリック数", val:e=>e.ck, fmt:v=>NUM(v)},
-    {k:"ctr",name:"CTR",       val:e=>e.im>0?e.ck/e.im*100:null, fmt:v=>F1(v)+"%"},
-    {k:"cpc",name:"クリック単価",val:e=>e.ck>0?e.sp/e.ck:null,   fmt:v=>YEN(Math.round(v))+"円"},
+    {k:"ctr",name:"CTR",       val:e=>e.im>0?e.ck/e.im*100:null, fmt:v=>F1(v)+"%", best:"高い"},
+    {k:"cpc",name:"クリック単価",val:e=>e.ck>0?e.sp/e.ck:null,   fmt:v=>YEN(Math.round(v))+"円", best:"安い", asc:true},
+    // 平均視聴時間は Meta から取れる（video_avg_time_watched_actions）が、
+    // いまDBに列が無いので「—」になる。列だけ先に出しておく。
+    {k:"vt", name:"平均視聴時間", val:e=>e.vt!=null&&e.im>0?e.vt/e.im:null, fmt:v=>F1(v)+"秒", best:"長い",
+     need:"vt", src:"video_avg_time_watched_actions"},
     {k:"frq",name:"FQ",        val:e=>e.rc>0?e.im/e.rc:null,    fmt:v=>F2(v)+"回"},
   ];
-  const sc=COLS.find(c=>c.k===AD_CRSORT.k)||COLS[0];
+  // 元データがまだ無い列は、値ではなく理由が分かるように「—」にする
+  const hasVT=(DATA.metaAds||[]).some(r=>r.vt!=null);
+  const ready=c=>c.need!=="vt"||hasVT;
+  const sc=COLS.find(c=>c.k===AD_CRSORT.k&&ready(c))||COLS.find(c=>c.k==="ctr");
+  // 「良い順」は項目で向きが違う。クリック単価だけは安いほうが良い。
+  const desc=AD_CRSORT.k===sc.k?AD_CRSORT.desc:!sc.asc;
   const all=[...g.entries()].sort((a,b)=>{
     const x=sc.val(a[1]), y=sc.val(b[1]);
     if(x==null&&y==null)return 0;
     if(x==null)return 1;                 // 出せない行はいつも最後
     if(y==null)return -1;
-    return AD_CRSORT.desc?y-x:x-y;
+    return desc?y-x:x-y;
   });
-  const top=all.slice(0,20);
-  const body=top.length?top.map(([nm,e])=>{
+  const top=all.slice(0,AD_CR_TOP);
+  const body=top.length?top.map(([nm,e],i)=>{
     const sts=[...e.st];
     const where=sts.length?(sts.length===1?esc(sts[0]):`${esc(sts[0])} 他${sts.length-1}店`):`<span style="color:#b8860b">未紐付け</span>`;
-    return `<tr><td style="text-align:left"><div>${esc(nm)}</div>`+
-      `<div class="sub" style="font-weight:500">${where}</div></td>`+
-      COLS.map(c=>`<td>${F(c.val(e),c.fmt)}</td>`).join("")+`</tr>`;
-  }).join(""):`<tr><td colspan="${COLS.length+1}" class="sub">この期間のクリエイティブ別データがありません</td></tr>`;
+    return `<tr><td style="text-align:left"><div><b>${i+1}.</b> ${esc(nm)}</div>`+
+      `<div class="sub" style="font-weight:500">${where}／1日 ${YEN(Math.round(e.spd))}円</div></td>`+
+      COLS.map(c=>`<td>${ready(c)?F(c.val(e),c.fmt):"—"}</td>`).join("")+`</tr>`;
+  }).join(""):`<tr><td colspan="${COLS.length+1}" class="sub">この条件に合うクリエイティブがありません</td></tr>`;
+  // ランキングの切り替えボタン。列見出しでも同じことができる。
+  const RANK=COLS.filter(c=>c.best);
+  const btns=`<div class="adperiod" style="margin-bottom:8px">`+
+    `<span class="sub" style="align-self:center;font-weight:700">${AD_CR_TOP}位まで／</span>`+
+    RANK.map(c=>`<button class="chip adrank${c.k===sc.k?" on":""}${ready(c)?"":" nodata"}"`+
+      ` data-k="${c.k}" title="${c.name}が${c.best}順に並べます">${c.name}が${c.best}順</button>`).join("")+
+    `<button class="chip adrank${sc.k==="sp"?" on":""}" data-k="sp">広告費が多い順</button></div>`;
   el.innerHTML=`<thead><tr><th>広告</th>`+
-    COLS.map(c=>{const on=c.k===AD_CRSORT.k;
+    COLS.map(c=>{const on=c.k===sc.k;
       return `<th class="adsort${on?" on":""}" data-k="${c.k}" title="押すと並べ替え">`+
-             `${c.name}${on?(AD_CRSORT.desc?" ▼":" ▲"):""}</th>`;}).join("")+
+             `${c.name}${on?(desc?" ▼":" ▲"):""}</th>`;}).join("")+
     `</tr></thead><tbody>${body}</tbody>`;
+  const bar=document.getElementById("adcrbtns");
+  if(bar){
+    bar.innerHTML=btns;
+    bar.querySelectorAll(".adrank").forEach(b=>b.onclick=()=>{
+      const c=COLS.find(x=>x.k===b.dataset.k);
+      AD_CRSORT={k:b.dataset.k, desc:!(c&&c.asc)};
+      adDrawCreatives(shortName);
+    });
+  }
   el.querySelectorAll(".adsort").forEach(th=>th.onclick=()=>{
     const k=th.dataset.k;
     // 同じ列をもう一度押したら昇順・降順を入れ替える
-    AD_CRSORT=(AD_CRSORT.k===k)?{k,desc:!AD_CRSORT.desc}:{k,desc:true};
+    AD_CRSORT=(sc.k===k)?{k,desc:!desc}:{k,desc:true};
     adDrawCreatives(shortName);
   });
   if(note)note.innerHTML=
-    (all.length>top.length?`${all.length}種のうち、${sc.name}の${AD_CRSORT.desc?"多い":"少ない"}順に20種。`:
-     all.length?`${all.length}種。`:"")+
-    `列見出しを押すと並べ替えできます。`+
-    `<b>クリック単価</b>は1クリックあたりの広告費で、`+
+    `<b>${sc.name}が${sc.best||"多い"}順</b>に${AD_CR_TOP}位まで。`+
+    (all.length>top.length?`（対象 ${all.length}種）`:"")+
+    `ボタンか列見出しで並べ替えできます。`+
+    `<br>1日あたりの広告費が <b>${YEN(AD_CR_MINSPEND)}円未満</b> のものは外しています`+
+    (weak.length?`（${weak.length}種）`:"")+
+    `。少額の広告はクリックが数回しかなく、CTRやクリック単価が偶然で大きく振れるためです。`+
+    `<br><b>クリック単価</b>は1クリックあたりの広告費で、`+
     `AVENDで言うCPC（＝1プロフアクセスあたりの広告費）とは別物です`+
     `（広告単位のデータには プロフアクセス数 がまだ入っていないため）。`+
+    (hasVT?"":`<br><b>平均視聴時間</b>は Meta から取れます（<code>video_avg_time_watched_actions</code>）が、`+
+      `まだDBに列が無いため「—」です。`)+
     `<br>上の店舗の絞り込みには連動しません（常に全店）。`+
     (DATA.metaAds&&DATA.metaAds.length?"":`<br>広告単位のデータが data.json に入っていません（データ更新後に出ます）。`);
 }
