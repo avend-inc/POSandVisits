@@ -318,7 +318,7 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
   has(/if\(window\.FRANCHISEE\|\|!newPanelOn\(id\)\|\|!adStoreHas\(id\)\)return ""/,
       "加盟店にはKPIまとめの広告行を出さない");
   has(/wxStat=await weatherStats\(id,f,t\)/, "天気をAIのまとめに渡している");
-  has(/const auto=autoInsight\(wxStat\)/, "AIが使えないときも天気を使う");
+  has(/const auto=autoInsight\(wxStat,weeklyStat\)/, "AIが使えないときも天気・広告・納品を使う");
   has(/sunny\.days<3\|\|rainy\.days<3/, "日数が少ない天気には触れない");
 }
 
@@ -353,6 +353,29 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
   has(/on\("adto","onchange"/, "広告の段の終了日を直せる");
   has(/\.achip\.on\{|,\.achip\.on\{/, "選んだ期間のボタンが点灯する（CSS）");
   has(/b\.dataset\.apreset===state\.aKind/, "選んだ期間のボタンが点灯する（描画）");
+}
+
+// --- AIのまとめ・予算の出所・レポート -------------------------------
+{
+  const has = (re, label) => {
+    if (re.test(src)) console.log(`  OK  ${label}`);
+    else { console.log(`  NG  ${label}`); ng++; }
+  };
+  // ① 週次に広告費と納品点数を載せてAIへ渡す
+  has(/ad:sumIn\(adDayA,wf,wt\), buy:sumIn\(shipA,wf,wt\)/, "週次に広告費と納品点数を載せている");
+  has(/ad=Meta広告費/, "凡例に広告費を書いている（列だけ渡して意味を伝えない事故を防ぐ）");
+  has(/buy=納品点数/, "凡例に納品点数を書いている");
+  has(/因果と決めつけず/, "AIに因果と決めつけないよう指示している");
+  has(/function adBuyLine\(weekly\)/, "AIが使えないときの自動まとめにも広告・納品がある");
+  has(/if\(Math\.abs\(exCh\)<10\)return "";/, "売上が動いていない週には触れない");
+  // ④' 予算の出所
+  has(/let BUDGET=\{ym:null,ex:null,src:null\}/, "予算に出所を持たせている");
+  has(/if\(ex!=null\)src="事業計画"/, "事業計画から取れたことを記録する");
+  has(/note\.textContent=`\$\{\+ym\.slice\(5,7\)\}月`\+\(src\?`・\$\{src\}`:""\)/, "予算カードに出所を出す");
+  // ⑥ レポートの広告と納品
+  has(/head\(sl,"広告と納品"/, "レポートに広告と納品のページがある");
+  has(/if\(\(rAd&&rAd\.sp>0\)\|\|\(rSh&&rSh\.qty>0\)\)\{/, "どちらも無い店ではページごと出さない");
+  has(/納品が空いた最長日数/, "納品の間隔が空いていないかを出す");
 }
 
 console.log(ng ? `\n❌ ${ng}件ずれています。` : "\n✅ すべて期待どおりです。");

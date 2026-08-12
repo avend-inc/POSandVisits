@@ -3239,7 +3239,74 @@ async function makeStoreReport(sid,ymArg){
     }else{ sl.addText("ランク（グレード）の設定が未登録のため表示できません。",{x:0.6,y:4.7,w:12,h:0.5,fontSize:12,color:MUT}); }
     foot(sl,pg());
 
-    // ===== Slide 8: 今月のアクション（締め）=====
+    // ===== Slide 8: 広告と納品（統合してから出せるようになったページ）=====
+    //   広告は広告タブ、納品は在庫アプリにあり、レポートを作る人が別アプリから
+    //   手で拾ってきていた。同じDBに乗ったので自動で載せられる。
+    //   広告データも納品データも無い店では、このページごと出さない（空欄の紙を増やさない）。
+    const rAd=(newPanelOn(sid)&&adStoreHas(sid))?adStoreSum(sid,cf,ct):null;
+    const rAdP=(rAd)?adStoreSum(sid,pf,pt):null;
+    let rShip=null;
+    try{ const sp3=await loadPurchases(sid); if(sp3&&sp3!=="none")rShip=sp3; }catch(_){}
+    const shipSum=(f2,t2)=>{ if(!rShip)return null; let q=0,n=0;
+      for(const d in rShip){ if(d>=f2&&d<=t2){ q+=rShip[d]||0; if(rShip[d]>0)n++; } }
+      return {qty:q,times:n}; };
+    const rSh=shipSum(cf,ct), rShP=shipSum(pf,pt);
+    if((rAd&&rAd.sp>0)||(rSh&&rSh.qty>0)){
+      sl=P.addSlide(); sl.background={color:BG};
+      head(sl,"広告と納品","Meta広告の消化と、倉庫からの納品。売上と同じ月で並べる（"+cf+"〜"+ct+"）");
+      let ry=1.5;
+      if(rAd&&rAd.sp>0){
+        const exC=rptEx(cA);
+        const sr=exC>0?rAd.sp/exC*100:null;
+        const srP=(rAdP&&rptEx(pA)>0)?rAdP.sp/rptEx(pA)*100:null;
+        const ctr=rAd.im>0?rAd.ck/rAd.im*100:null;
+        const cpc=rAd.ck>0?rAd.sp/rAd.ck:null;
+        const frq=rAd.rc>0?rAd.im/rAd.rc:null;
+        sl.addText("Meta広告",{x:0.6,y:ry,w:6,h:0.3,fontSize:13.5,bold:true,color:NAVY}); ry+=0.34;
+        const dSp=(rAdP&&rAdP.sp>0)?(rAd.sp/rAdP.sp-1)*100:null;
+        sl.addTable([
+          [th("指標"),thR("当月"),thR("前月"),thR("差")],
+          [{text:"広告費"},{text:yen(rAd.sp),options:{align:"right",bold:true}},
+           {text:rAdP?yen(rAdP.sp):"—",options:{align:"right",color:MUT}},
+           {text:dSp==null?"—":sp(dSp),options:{align:"right",bold:true,color:MUT}}],
+          [{text:"売上比率（広告費÷税抜売上）"},{text:sr==null?"—":F1(sr)+"%",options:{align:"right",bold:true}},
+           {text:srP==null?"—":F1(srP)+"%",options:{align:"right",color:MUT}},
+           {text:(sr==null||srP==null)?"—":((sr-srP>=0?"+":"−")+Math.abs(sr-srP).toFixed(1)+"pt"),options:{align:"right",color:MUT}}],
+          [{text:"CTR（クリック÷表示回数）"},{text:ctr==null?"—":F1(ctr)+"%",options:{align:"right"}},{text:"—",options:{align:"right",color:MUT}},{text:"—",options:{align:"right",color:MUT}}],
+          [{text:"クリック単価"},{text:cpc==null?"—":yen(cpc),options:{align:"right"}},{text:"—",options:{align:"right",color:MUT}},{text:"—",options:{align:"right",color:MUT}}],
+          [{text:"フリークエンシー（表示÷リーチ）"},{text:frq==null?"—":frq.toFixed(2)+"回",options:{align:"right"}},{text:"—",options:{align:"right",color:MUT}},{text:"—",options:{align:"right",color:MUT}}],
+        ],{x:0.6,y:ry,w:12.13,colW:[4.63,2.5,2.5,2.5],fontSize:11,rowH:0.4,valign:"middle",border:{pt:0.5,color:LINE},fill:{color:"FFFFFF"}});
+        ry+=0.4*6+0.3;
+      }
+      if(rSh&&rSh.qty>0){
+        sl.addText("納品（倉庫からの発送）",{x:0.6,y:ry,w:6,h:0.3,fontSize:13.5,bold:true,color:NAVY}); ry+=0.34;
+        // 納品が空いた最長日数。棚が薄いまま週末を迎えていないかを見る
+        const ds=Object.keys(rShip).filter(d=>d>=cf&&d<=ct&&rShip[d]>0).sort();
+        let gap=0, prevD=cf;
+        for(const d of ds){ const g=Math.round((Date.parse(d)-Date.parse(prevD))/86400000); if(g>gap)gap=g; prevD=d; }
+        { const g=Math.round((Date.parse(ct)-Date.parse(prevD))/86400000); if(g>gap)gap=g; }
+        sl.addTable([
+          [th("指標"),thR("当月"),thR("前月"),thR("差")],
+          [{text:"納品点数"},{text:NUM(rSh.qty)+"点",options:{align:"right",bold:true}},
+           {text:rShP?NUM(rShP.qty)+"点":"—",options:{align:"right",color:MUT}},
+           {text:(rShP&&rShP.qty>0)?sp((rSh.qty/rShP.qty-1)*100):"—",options:{align:"right",color:MUT}}],
+          [{text:"納品回数"},{text:NUM(rSh.times)+"回",options:{align:"right"}},
+           {text:rShP?NUM(rShP.times)+"回":"—",options:{align:"right",color:MUT}},{text:"—",options:{align:"right",color:MUT}}],
+          [{text:"納品が空いた最長日数"},{text:gap+"日",options:{align:"right",color:gap>=14?DN:INK,bold:gap>=14}},
+           {text:"—",options:{align:"right",color:MUT}},{text:"—",options:{align:"right",color:MUT}}],
+        ],{x:0.6,y:ry,w:12.13,colW:[4.63,2.5,2.5,2.5],fontSize:11,rowH:0.4,valign:"middle",border:{pt:0.5,color:LINE},fill:{color:"FFFFFF"}});
+        ry+=0.4*4+0.3;
+      }
+      const an=[];
+      if(rAd&&rAd.sp>0&&rptEx(cA)>0)an.push("広告費 "+yen(rAd.sp)+"（売上の "+F1(rAd.sp/rptEx(cA)*100)+"%）。売上は広告を止めていた日も含む当月の税抜売上。");
+      if(rSh&&rSh.qty>0)an.push("納品 "+NUM(rSh.qty)+"点／"+NUM(rSh.times)+"回。納品の間隔が空くと棚の鮮度が落ちるため、回数と最長の空きを見る。");
+      if(rAd&&!rSh)an.push("この店は在庫管理アプリと紐付いていないため、納品は表示できません（設定→POS連携）。");
+      an.push("広告のキャンペーン割り当ては広告タブで直せます。割り当てていないキャンペーンはこの数字に入りません。");
+      sl.addText(an.map(t=>({text:t,options:{bullet:{code:"25AA"},color:INK,fontSize:10.5,paraSpaceAfter:4}})),{x:0.6,y:Math.min(ry,6.2),w:12.13,h:0.9});
+      foot(sl,pg());
+    }
+
+    // ===== Slide 9: 今月のアクション（締め）=====
     sl=P.addSlide(); sl.background={color:NAVY};
     sl.addShape(P.ShapeType.rect,{x:0,y:1.15,w:13.333,h:0.06,fill:{color:GOLD}});
     sl.addText(nm+" ｜ 今月のアクション",{x:0.6,y:0.35,w:12,h:0.7,fontSize:26,bold:true,color:"FFFFFF"});
@@ -3634,7 +3701,8 @@ async function aiWeeklyInsight(){
   if(!SB){ out.textContent="AIのまとめはログイン版でのみ表示されます。"; return; }
   const wk=mondayOf(todayStr()), key="aiWeekly:"+id+":"+wk;
   try{ const c=localStorage.getItem(key); if(c){ out.innerHTML=c; return; } }catch(_){}
-  let wxStat=null;   // 天気×売上。AIに繋がらなかったときの自動まとめでも使う
+  let wxStat=null;      // 天気×売上。AIに繋がらなかったときの自動まとめでも使う
+  let weeklyStat=null;  // 週次（売上・広告費・納品）。同上
   try{
     const sd=DATA._salesMax||DATA._max, f=addDays(sd,-13), t=sd;
     const s=storeMeta(id), nm=(s&&s.name)||("店舗"+id);
@@ -3652,24 +3720,40 @@ async function aiWeeklyInsight(){
     const selfD=heatData(undefined,f,t);
     const brandIds=new Set(usableStores().filter(x=>brandOf(x.id)===brandOf(id)).map(x=>x.id));
     const brandD=heatData(brandIds,f,t);
-    // 週次推移（直近6週の税抜売上・来店）
+    // 週次推移（直近6週の税抜売上・来店・広告費・納品点数）
+    //   広告と納品は在庫アプリ／広告タブにしか無く、統合前は同じ表に並べられなかった。
+    //   これを渡すと「落ちた週は広告を止めていた」「納品が空いた週だった」まで書ける。
+    const adDayA=(newPanelOn(id)&&adStoreHas(id))?adSpendByDay(id):null;
+    let shipA=null;
+    try{ const sp2=await loadPurchases(id); if(sp2&&sp2!=="none")shipA=sp2; }catch(_){}
+    const sumIn=(m,f2,t2)=>{ if(!m)return null; let x=0;
+      if(m instanceof Map)m.forEach((v,d)=>{ if(d>=f2&&d<=t2)x+=v; });
+      else for(const d in m){ if(d>=f2&&d<=t2)x+=m[d]; }
+      return x; };
     const weekly=[]; const mon0=mondayOf(sd);
     for(let i=5;i>=0;i--){ const wf=addDays(mon0,-7*i), wt=addDays(wf,6);
       const a=sumRows(rowsIn(wf,wt,id));
-      weekly.push({week:mdLabel(wf,wt), ex:M("ex").calc(a), v:a.hasV?a.v:null}); }
+      weekly.push({week:mdLabel(wf,wt), ex:M("ex").calc(a), v:a.hasV?a.v:null,
+        ad:sumIn(adDayA,wf,wt), buy:sumIn(shipA,wf,wt)}); }
+    weeklyStat=weekly;
     // 天気ごとの1日あたり売上・来店（取れなければ null のまま渡さない）
     wxStat=await weatherStats(id,f,t);
     const digest={
       today:todayStr(), closing:sd,
       stores:top3.map(x=>(storeMeta(x)||{}).name||x),
       note:`店舗「${nm}」の直近2週間（${f}〜${t}）の分析。cmp=自店KPIと同ブランド上位3店（${own==="直営"?"直営":b3}${own==="直営"?"":"・直営除く"}・下北沢除く）平均の比較。selfShare/brandShare=販売数の構成比%（ランク帯×カテゴリ）。weekly=直近6週の週次推移。`,
-      legend:"cmp:[{kpi,self,top3avg}] / selfShare,brandShare:{ランク×カテゴリ:シェア%} / weekly:[{week,ex=税抜売上,v=来店}]"
+      legend:"cmp:[{kpi,self,top3avg}] / selfShare,brandShare:{ランク×カテゴリ:シェア%}"
+        +" / weekly:[{week,ex=税抜売上,v=来店"
+        +(adDayA?",ad=Meta広告費":"")+(shipA?",buy=納品点数":"")+"}]"
         +(wxStat?" / weather:[{cond=天気,days=日数,exPerDay=1日あたり税抜売上,vPerDay=1日あたり来店}]":""),
       series:Object.assign({cmp,selfShare:shareOf(selfD),brandShare:shareOf(brandD),weekly},
                            wxStat?{weather:wxStat}:{}),
     };
     const q="このデータから、この店舗の運営にとって特に大事なポイントだけを日本語で3〜4行にまとめてください。"
       +"同ブランド上位店との差・売れ筋構成の違い・直近の週次トレンドのうち、行動につながる重要なものだけ。"
+      +"weekly に ad（広告費）や buy（納品点数）がある場合は、売上が動いた週にそれらが動いていたかを確かめ、"
+      +"広告を止めた週・納品が無かった週の影響と、それでは説明できない動きを分けて書いてください"
+      +"（因果と決めつけず、同じ週に起きていた事実として述べること）。"
       +"weather がある場合は、天気で売上がどれくらい変わるかにも触れてください"
       +"（ただし日数が少ない天気は偶然で振れるので断定しないこと。天気で説明できる落ち込みと、そうでない落ち込みを分けて書いてください）。"
       +"見出し・箇条書き・Markdown記法は使わず、プレーンな文章のみ。数字は重要なものだけ添えてください。";
@@ -3681,7 +3765,7 @@ async function aiWeeklyInsight(){
     // AIに繋がらないときは、同じデータから自動集計でまとめを出す（中身が空にならないように）。
     // AI版ではないことが分かるよう明記し、原因も併記する。
     const why=await askDiagnose((e&&e.message)||String(e));
-    const auto=autoInsight(wxStat);
+    const auto=autoInsight(wxStat,weeklyStat);
     out.innerHTML=(auto?esc(auto).replace(/\n+/g,"<br>"):`<span class="sub">まとめを作成できませんでした。</span>`)+
       `<div class="sub" style="margin-top:8px;font-size:11px">※ 自動集計版（AI未接続：${esc(why)}）`+
       `<button class="chip" id="ai-retry" style="margin-left:6px;padding:3px 8px">再試行</button></div>`;
@@ -3705,7 +3789,7 @@ async function askDiagnose(baseMsg){
   }
 }
 // AIが使えないときの自動まとめ（同じデータをルールで要約する。数字は実データから計算）
-function autoInsight(wx){
+function autoInsight(wx,weekly){
   const id=state.detail; if(id==null)return "";
   const sd=DATA._salesMax||DATA._max, f=addDays(sd,-13), t=sd;
   const own=ownOf(id), b3=rptBrand3(id);
@@ -3740,9 +3824,31 @@ function autoInsight(wx){
     }
     if(best&&best.d>=3)out.push(`販売構成では「ランク${best.g}×${best.c}」がブランド全体${F1(best.bs)}%に対し自店${F1(best.ss)}%と低く、品揃えの見直し余地があります。`);
   }
-  // ④ 天気による差（渡されたときだけ。日数が少ない天気には触れない）
+  // ④ 広告・納品で説明できる動きがあれば1文（因果とは書かず、同じ週の事実として書く）
+  const al=adBuyLine(weekly); if(al)out.push(al);
+  // ⑤ 天気による差（渡されたときだけ。日数が少ない天気には触れない）
   const wl=wxLine(wx); if(wl)out.push(wl);
   return out.slice(0,4).join("");
+}
+// 直近3週の売上の動きに、広告費・納品が並走していたかを1文にする。
+// 「広告のせいで落ちた」とは書かない（同じ週に起きていた事実として並べるだけ）。
+function adBuyLine(weekly){
+  if(!weekly||weekly.length<3)return "";
+  const w=weekly.slice(-3);
+  const ex0=w[0].ex||0, ex2=w[2].ex||0;
+  if(!ex0)return "";
+  const exCh=(ex2-ex0)/ex0*100;
+  if(Math.abs(exCh)<10)return "";              // 動いていない週は触れない
+  const parts=[];
+  const ad0=w[0].ad, ad2=w[2].ad;
+  if(ad0!=null&&ad2!=null&&ad0>0){
+    const c=(ad2-ad0)/ad0*100;
+    if(Math.abs(c)>=20)parts.push(`広告費は${Math.abs(Math.round(c))}%${c>0?"増":"減"}（${YEN(Math.round(ad0))}円→${YEN(Math.round(ad2))}円）`);
+  }else if(ad0>0&&ad2===0){ parts.push("直近週は広告を出していません"); }
+  const noBuy=w.filter(x=>x.buy===0).length;
+  if(noBuy>0)parts.push(`直近3週のうち${noBuy}週は納品がありません`);
+  if(!parts.length)return "";
+  return `売上は直近3週で${exCh>0?"増加":"減少"}（${exCh>0?"+":""}${Math.round(exCh)}%）していますが、同じ期間に${parts.join("、")}。`;
 }
 // Edge Function "ask"（分析AI）を呼ぶ。まず直接 fetch し、だめなら supabase-js 経由で再試行する。
 // 直接 fetch にすることで、失敗時に HTTP ステータスと本文が読めて原因が分かる。
@@ -3835,7 +3941,9 @@ function drawDetailExtras(){
 //  カードを出すのは直営店だけ（FCには出さない）。
 // ============================================================
 let TARGETS=null;               // targets.json（未読込は null、読めなければ {}）
-let BUDGET={ym:null,ex:null};   // いま表示している店・月の税抜売上予算
+// src＝この予算がどこから来たか。①事業計画 ②予実タブ ③月次予実のファイル の順に探すので、
+// どれが当たったかを画面に出さないと「事業計画に入れ忘れていて古い数字が出ている」に気づけない。
+let BUDGET={ym:null,ex:null,src:null};
 function budgetShown(id){ return id!=null && !window.FRANCHISEE && ownOf(id)==="直営"; }
 async function loadTargets(){
   if(TARGETS!==null)return;
@@ -3869,19 +3977,21 @@ async function bizplanEx(id,ym){
   return null;
 }
 async function loadBudget(id,ym){
-  BUDGET={ym:ym,ex:null};
+  BUDGET={ym:ym,ex:null,src:null};
   if(!budgetShown(id))return;
+  let src=null;
   let ex=await bizplanEx(id,ym);        // ① 経営の事業計画（正）
+  if(ex!=null)src="事業計画";
   if(ex==null&&SB){                     // ② 予実タブで保存した税抜売上予算
     try{
       const {data}=await SB.from("plan_data").select("data")
         .eq("page","pl").eq("scope",String(id)).eq("ym",ym).maybeSingle();
       const v=data&&data.data&&data.data.b_ex;
-      if(Number.isFinite(v))ex=v;
+      if(Number.isFinite(v)){ex=v;src="予実タブ";}
     }catch(e){}
   }
-  if(ex==null){ await loadTargets(); ex=planEx(id,ym); }   // ③ 月次予実の予算
-  BUDGET={ym:ym,ex:ex};
+  if(ex==null){ await loadTargets(); ex=planEx(id,ym); if(ex!=null)src="ファイル"; }   // ③ 月次予実の予算
+  BUDGET={ym:ym,ex:ex,src:src};
 }
 // 予算カードの中身（金額＋達成見込み＝着地÷予算）を描く。
 function drawBudgetCard(ym,landing){
@@ -3889,7 +3999,16 @@ function drawBudgetCard(ym,landing){
   const ex=(BUDGET.ym===ym)?BUDGET.ex:null;
   el.innerHTML=(ex==null)?"—":YEN(Math.round(ex))+"<small>円</small>";
   const note=document.getElementById("dtop-bud-note");
-  if(note)note.textContent=`${+ym.slice(5,7)}月`;
+  // 出所も一緒に出す。事業計画（在庫アプリの経営タブ）が正で、そこに無いときだけ
+  // 予実タブ→ファイルへ落ちる。ファイル版は更新が止まりやすいので分かるようにする。
+  if(note){
+    const src=(BUDGET.ym===ym)?BUDGET.src:null;
+    note.textContent=`${+ym.slice(5,7)}月`+(src?`・${src}`:"");
+    note.title=src==="事業計画"?"経営の事業計画（bizplan）の数字です"
+      :src==="予実タブ"?"予実タブで保存した予算です。事業計画に入れると、そちらが優先されます"
+      :src==="ファイル"?"配信ファイル（targets.json）の数字です。更新が止まっている可能性があります。経営の事業計画に入れてください"
+      :"";
+  }
   const sp=document.getElementById("dtop-bud-split"); if(!sp)return;
   if(ex==null||ex<=0||landing==null){ sp.style.display="none"; sp.innerHTML=""; return; }
   const rate=landing/ex*100, up=rate>=100;
