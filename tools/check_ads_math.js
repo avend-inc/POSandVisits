@@ -241,7 +241,10 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
       function dayClass(d){ const w=new Date(d+"T00:00:00Z").getUTCDay(); return (w===0||w===6)?"we":"wd"; }
       function sumRows(rows){ let ex=0,hasEx=false; for(const r of rows){ if(r.ex!=null){ex+=r.ex;hasEx=true;} } return {ex,hasEx}; }
       function M(k){ return {calc:p=>p.hasEx?p.ex:null}; }
-    ` + src.slice(f2, t2), ctx2);
+    `
+      // 実物の adZero / adAdd も入れる（店舗ページの集計はこれを使っている）
+      + src.slice(src.indexOf("function adZero()"), src.indexOf("function adSales("))
+      + src.slice(f2, t2), ctx2);
     const setMeta = (meta, daily, stores) => {
       ctx2.DATA = { meta, daily, stores: stores || [{ id: 1, name: "いわき" }, { id: 2, name: "山形" }] };
       vm.runInContext("AD_BYSID=null;", ctx2);
@@ -291,6 +294,38 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
       { s: 1, d: "2026-08-04", ex: null, in: 0, tx: 0 },        // 休業
     ]);
     eq("休業日は1日あたりの分母に数えない", ctx2.adDayAvg(1, "2026-08-03", "2026-08-04", "wd").per, 1000);
+
+    // 「いいね率」は 実額÷実額（いいね数 ÷ 表示回数）
+    setMeta([
+      { d: "2026-08-03", si: 1, sp: 1000, im: 1000, lk: 30, c: "A" },
+      { d: "2026-08-04", si: 1, sp: 1000, im: 3000, lk: 10, c: "A" },
+    ], [{ s: 1, d: "2026-08-03", ex: 100000, in: 110000, tx: 10 }]);
+    {
+      const p = ctx2.adStoreSum(1, "2026-08-03", "2026-08-04");
+      eq("いいねは足す", p.lk, 40);
+      eq("いいね率＝40÷4,000", p.im > 0 ? p.lk / p.im * 100 : null, 1);
+    }
+
+    // 平均視聴時間は「1行ごとの平均秒数」なので、表示回数で重みを付けて平均する。
+    // 単純に足して割ると、少額で回した日が同じ重みで効いてしまう。
+    setMeta([
+      { d: "2026-08-03", si: 1, sp: 1000, im: 1000, vt: 10, c: "A" },   // 1,000回×10秒
+      { d: "2026-08-04", si: 1, sp: 1000, im: 9000, vt: 20, c: "A" },   // 9,000回×20秒
+    ], [{ s: 1, d: "2026-08-03", ex: 100000, in: 110000, tx: 10 }]);
+    {
+      const p = ctx2.adStoreSum(1, "2026-08-03", "2026-08-04");
+      // (10*1000 + 20*9000) / 10000 = 19秒。単純平均だと15秒になってしまう
+      eq("平均視聴時間は表示回数で重み付け", p.vi > 0 ? p.vw / p.vi : null, 19);
+    }
+    // 視聴時間が無い行は分母にも入れない（0秒として薄めない）
+    setMeta([
+      { d: "2026-08-03", si: 1, sp: 1000, im: 1000, vt: 10, c: "A" },
+      { d: "2026-08-04", si: 1, sp: 1000, im: 9000, c: "A" },           // 動画ではない広告
+    ], [{ s: 1, d: "2026-08-03", ex: 100000, in: 110000, tx: 10 }]);
+    {
+      const p = ctx2.adStoreSum(1, "2026-08-03", "2026-08-04");
+      eq("視聴時間が無い行は分母に入れない", p.vi > 0 ? p.vw / p.vi : null, 10);
+    }
 
     // 広告を出していない店には列も段も出さない
     setMeta([{ d: "2026-08-03", si: 1, sp: 1000, c: "A" }], []);
@@ -376,6 +411,34 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
   has(/head\(sl,"広告と納品"/, "レポートに広告と納品のページがある");
   has(/if\(\(rAd&&rAd\.sp>0\)\|\|\(rSh&&rSh\.qty>0\)\)\{/, "どちらも無い店ではページごと出さない");
   has(/納品が空いた最長日数/, "納品の間隔が空いていないかを出す");
+}
+
+// --- 店舗ページの広告カードを選べること -------------------------------
+{
+  const has = (re, label) => {
+    if (re.test(src)) console.log(`  OK  ${label}`);
+    else { console.log(`  NG  ${label}`); ng++; }
+  };
+  has(/const ST_AD_DEFAULT=\["sp","sr","ctr","frq"\];/, "既定は これまでの4つ（広告費・売上比率・CTR・FQ）");
+  has(/localStorage\.setItem\("notime-stadcols"/, "選んだ項目を端末に覚える");
+  // 全社を見る広告タブと、1店を見る店舗ページとで、見たい項目は違う。別のキーで持つ
+  has(/"notime-adcols"/, "広告タブは notime-adcols で覚える");
+  has(/"notime-stadcols"/, "店舗ページは notime-stadcols で覚える（別のキー）");
+  has(/if\(i>=0\)\{ if\(ST_AD_COLS\.length<=1\)return;/, "最後の1つは消せない（空のカード列を作らない）");
+  has(/ST_AD_COLS=AD_METRICS\.map\(m=>m\.k\)\.filter/, "並びは指標の定義順にそろえる（押した順に散らばらせない）");
+  has(/adHas\(m\.need\)\?\(m\.note\|\|""\):"元データがまだDBにありません"/, "値が出せない指標は理由をカードに書く");
+  has(/\{k:"lkr", name:"いいね率"/, "いいね率がある");
+  has(/\{k:"vt",  name:"平均視聴時間"/, "平均視聴時間がある");
+  has(/calc:p=>p\.im>0\?p\.lk\/p\.im\*100:null/, "いいね率＝いいね数÷表示回数");
+  has(/calc:p=>p\.vi>0\?p\.vw\/p\.vi:null/, "平均視聴時間は重み付き平均で出す");
+  has(/if\(r\.vt!=null\)\{ a\.vw\+=\(r\.vt\|\|0\)\*\(r\.im\|\|0\); a\.vi\+=r\.im\|\|0; \}/,
+      "視聴時間が無い行は重み付けの分母に入れない");
+  // クリエイティブ別の一覧も同じ扱いにする（平均を足して割る間違いをしない）
+  has(/if\(r\.vt!=null\)\{ e\.vw\+=\(r\.vt\|\|0\)\*\(r\.im\|\|0\); e\.vi\+=r\.im\|\|0; \}/,
+      "クリエイティブ別も重み付き平均で出す");
+  if (/e\.vt=\(e\.vt\|\|0\)\+r\.vt/.test(src)) {
+    console.log("  NG  クリエイティブ別が平均秒数を足しています"); ng++;
+  } else console.log("  OK  平均秒数をそのまま足していない");
 }
 
 console.log(ng ? `\n❌ ${ng}件ずれています。` : "\n✅ すべて期待どおりです。");
