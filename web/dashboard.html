@@ -228,6 +228,11 @@
   .dtop .card.adcard.goff{opacity:.5;border-top-color:var(--border)}
   .dtop .card.adcard.goff .k i{background:var(--border) !important}
   .dtop .card.adcard.goff .knote{color:var(--muted)}
+  /* 店舗ページのカードは項目名が長い（「プロフアクセス数」「平均視聴時間」）。
+     1行に収めようとすると途中で切れて何のカードか分からなくなるので、2行にする。
+     カードの高さは行の中でそろうので、1枚だけ背が伸びることはない */
+  #stad-cards .card.adcard .k{align-items:flex-start;white-space:normal;line-height:1.3}
+  #stad-cards .card.adcard .k i{margin-top:3px}
   .dtop .card.bud{border-top-color:#2e9e5b}
   .dtop .card .rate{margin-top:4px;font-size:10px;font-weight:800;white-space:nowrap}
   .dtop .card{padding:11px 12px;border-radius:12px;border-top:3px solid var(--accent)}
@@ -1299,13 +1304,17 @@ function renderAds(){
 //   ・線は項目ごとに「その期間の最小〜最大」で正規化する。左右の軸はその最小〜最大を
 //     そのまま目盛りにしているので、1番目・2番目の線は軸の数字と一致する。
 //   ・グラフに触れると、その日の全項目をまとめて黒い吹き出しで出す。
-function adChart(days,byDay){
+// cols/tot を渡すと、その項目・その合計で描く（省略すると広告タブの選択を使う）。
+// 店舗ページの広告カードからも同じグラフを使うため、外から差し込めるようにしている。
+function adChart(days,byDay,cols,tot){
+  cols=cols||AD_COLS.filter(k=>!AD_GOFF.has(k));
+  tot=tot||adSum(adRows());
   // スマホは座標系ごと小さくする。760幅のまま縮めると目盛りの文字が潰れて読めないため。
   const NARROW=(window.innerWidth||760)<560;
   const W=NARROW?380:760, H=NARROW?190:230, L=NARROW?40:54, R=NARROW?40:54, T=NARROW?8:12, B=NARROW?22:26;
   const FS=NARROW?8:9;
   const x=i=>days.length<2?(L+(W-R))/2:L+i*(W-L-R)/(days.length-1);
-  const series=AD_COLS.filter(k=>!AD_GOFF.has(k)).map(k=>{
+  const series=cols.map(k=>{
     const m=AD_METRICS.find(z=>z.k===k), vals=days.map(d=>adVal(k,byDay.get(d)));
     const fin=vals.filter(v=>v!=null&&isFinite(v));
     if(!fin.length)return null;
@@ -1328,7 +1337,6 @@ function adChart(days,byDay){
       return `<text x="${at}" y="${(yy+3).toFixed(1)}" font-size="${FS}" fill="${s2.c}" text-anchor="${an}">${esc(adShort(s2.m,v))}</text>`;
     }).join("");
   };
-  const tot=adSum(adRows());
   return `<div class="adlegend">`+series.map((s2,i)=>
       `<span><i style="background:${s2.c}"></i>${s2.m.name}${i<2?`<em>${i?"右軸":"左軸"}</em>`:""}<b>${s2.m.fmt(adVal(s2.k,tot))}</b>`+
       `<small>${s2.m.fmt(s2.min)}〜${s2.m.fmt(s2.max)}</small></span>`).join("")+`</div>
@@ -1354,8 +1362,9 @@ function adShort(m,v){
   return (a<10?F1(v):String(Math.round(v)))+(u||"");
 }
 // グラフに触れたとき、その日の全項目を黒い吹き出しでまとめて出す
-function adWireTip(days,byDay){
-  const wrap=document.querySelector("#adtrend .adwrap"); if(!wrap)return;
+function adWireTip(days,byDay,cols,sel){
+  cols=cols||AD_COLS.filter(k=>!AD_GOFF.has(k));
+  const wrap=document.querySelector((sel||"#adtrend")+" .adwrap"); if(!wrap)return;
   const svg=wrap.querySelector("svg"), tip=wrap.querySelector(".adtip");
   if(!svg||!tip||!days.length)return;
   const L=+svg.dataset.l, R=+svg.dataset.r, W=+svg.dataset.w, cur=svg.querySelector(".adcursor");
@@ -1370,7 +1379,7 @@ function adWireTip(days,byDay){
     if(cur){const gx=days.length<2?(L+(W-R))/2:L+i*(W-L-R)/(days.length-1);
       cur.setAttribute("x1",gx);cur.setAttribute("x2",gx);cur.setAttribute("opacity","1");}
     tip.innerHTML=`<div class="d">${d.slice(0,4)}/${+d.slice(5,7)}/${+d.slice(8,10)}（${WK[new Date(d+"T00:00:00Z").getUTCDay()]}）</div>`+
-      AD_COLS.filter(k=>!AD_GOFF.has(k)).map(k=>{const m=AD_METRICS.find(z=>z.k===k);
+      cols.map(k=>{const m=AD_METRICS.find(z=>z.k===k);
         return `<div class="l"><i style="background:${AD_COLOR[k]||"#fff"}"></i>${m.name}<b>${m.fmt(adVal(k,p))}</b></div>`;}).join("");
     tip.style.display="block";
     const box=wrap.getBoundingClientRect();
@@ -1431,8 +1440,9 @@ function drawAds(){
     for(const r of rows){ let a=byDay.get(r.d); if(!a){a=adZero();byDay.set(r.d,a);} adAdd(a,r); }
     for(const [d,a] of byDay){ a.sids=tot.sids; adSales(a,d,d); }
     const days=[...byDay.keys()].sort();
-    el.innerHTML=days.length?adChart(days,byDay):`<p class="note">この期間の広告データがありません。</p>`;
-    if(days.length)adWireTip(days,byDay);
+    const gcols=AD_COLS.filter(k=>!AD_GOFF.has(k));
+    el.innerHTML=days.length?adChart(days,byDay,gcols,tot):`<p class="note">この期間の広告データがありません。</p>`;
+    if(days.length)adWireTip(days,byDay,gcols);
   }
   // ---- 週次KPI／月次KPI ----
   //   どちらも同じ作り：区分（店舗/キャンペーン/アカウント）を親にして、その下に期間を並べる。
@@ -2147,6 +2157,7 @@ function renderDetail(){
       </div>
       <div class="pickwrap" id="stad-pick" style="margin:6px 0 10px"></div>
       <div class="dtop four" id="stad-cards"></div>
+      <div id="stad-trend" style="margin-top:10px"></div>
       <p class="note" id="stad-note" style="margin:8px 0 0"></p>
       <h2 style="margin-top:16px">キャンペーン別</h2>
       <div class="tblwrap"><table class="kmat" id="stad-camp"></table></div>
@@ -3738,17 +3749,48 @@ function drawStoreAds(){
 
   // 比率はすべて 実額÷実額。日ごと・キャンペーンごとの比率を平均すると別の数字になる。
   // 値は AD_METRICS の計算式をそのまま使う（広告タブと同じ数字になるように）。
-  const card=(k,v,note)=>`<div class="card"><div class="k">${k}</div><div class="val">${v}</div><div class="knote">${note||""}</div></div>`;
+  // カードはタップでグラフの線を出し入れする（広告タブと同じ操作）。
+  // 色はカードの丸とグラフの線でそろえてある。
   cards.innerHTML=ST_AD_COLS.map(k=>{
     const m=AD_METRICS.find(x=>x.k===k); if(!m)return "";
-    const v=adVal(k,p);
+    const v=adVal(k,p), c=AD_COLOR[k]||"var(--accent)", off=ST_AD_GOFF.has(k);
     // 単位は小さく出す（他のカードとそろえる）。「—」のときはそのまま
     const txt=(v==null)?"—":m.fmt(v).replace(/([0-9%])(円|%|回|人|秒)$/,'$1<small>$2</small>');
-    return card(m.name,txt,adHas(m.need)?(m.note||""):"元データがまだDBにありません");
+    const note=off?"グラフ非表示":(adHas(m.need)?(m.note||""):"元データがまだDBにありません");
+    return `<div class="card adcard${off?" goff":""}" data-k="${k}" title="タップでグラフの表示/非表示">`+
+      `<div class="k"><i style="background:${c}"></i>${esc(m.name)}</div>`+
+      `<div class="val">${txt}</div><div class="knote">${note}</div></div>`;
   }).join("");
+  cards.querySelectorAll(".adcard").forEach(c2=>c2.onclick=()=>{
+    const k=c2.dataset.k;
+    if(ST_AD_GOFF.has(k))ST_AD_GOFF.delete(k); else ST_AD_GOFF.add(k);
+    try{localStorage.setItem("notime-stadgoff",JSON.stringify([...ST_AD_GOFF]));}catch(e){}
+    drawStoreAds();
+  });
 
   // 表示する項目はプルダウン（開いていればそのまま開いた状態で描き直す）
   drawStoreAdPick();
+
+  // ---- 日別の推移（この店だけ）----
+  //   広告タブと同じグラフをそのまま使う。単位も桁も違う（円・回・%）ので、
+  //   各項目を「その項目の最小〜最大」で正規化して形を比べる。実際の値は凡例と吹き出しで見る。
+  //   横軸は選んだ期間の全日。広告を出していない日も0円として並べる
+  //   （止めていた期間が見えるほうが役に立つ。比率は分母が0の日は「—」）。
+  const tel=document.getElementById("stad-trend");
+  if(tel){
+    const gcols=ST_AD_COLS.filter(k=>!ST_AD_GOFF.has(k));
+    const byDay=new Map();
+    for(let d=f; d<=t; d=addDays(d,1))byDay.set(d,adZero());
+    for(const r of adRowsOfStore(id,f,t)){ let a=byDay.get(r.d); if(!a){a=adZero();byDay.set(r.d,a);} adAdd(a,r); }
+    // 各日の税抜売上。店は1つに決まっているので店舗集合は使わない
+    for(const [d,a] of byDay){ a.sids=null; a.ex=M("ex").calc(sumRows(rowsIn(d,d,id)))||0;
+      const v2=sumRows(rowsIn(d,d,id)); a.vis=v2.hasV?v2.v:0; }
+    const days=[...byDay.keys()].sort();
+    tel.innerHTML=!days.length?`<p class="note">この期間の広告データがありません。</p>`
+      :!gcols.length?`<p class="note">グラフに出す項目がありません。上のカードをタップすると、その項目をグラフに出せます。</p>`
+      :adChart(days,byDay,gcols,p);
+    if(days.length&&gcols.length)adWireTip(days,byDay,gcols,"#stad-trend");
+  }
 
   const note=document.getElementById("stad-note");
   const missing=AD_METRICS.filter(m=>ST_AD_COLS.includes(m.k)&&!adHas(m.need));
@@ -4405,6 +4447,14 @@ let ST_AD_COLS=(function(){
       const v=AD_METRICS.map(m=>m.k).filter(k=>s.includes(k)).slice(0,ST_AD_MAX);
       if(v.length)return v;}}catch(e){}
   return ST_AD_DEFAULT.slice();
+})();
+// カードをタップしてグラフから外した項目（端末ごとに覚える）。
+// 広告タブの AD_GOFF とは別に持つ：全社を見る画面と1店を見る画面で、
+// 出したい線が違ううえ、片方の操作がもう片方に飛び火すると分かりにくいため。
+let ST_AD_GOFF=(function(){
+  try{const s=JSON.parse(localStorage.getItem("notime-stadgoff")||"null");
+    if(Array.isArray(s))return new Set(s.filter(k=>AD_METRICS.some(m=>m.k===k)));}catch(e){}
+  return new Set();
 })();
 // 日付 → 広告費（日別推移の列と、平日/土日祝の平均に使う）
 function adSpendByDay(id){
