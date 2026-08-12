@@ -1,4 +1,4 @@
-"""Meta広告のアクション系（プロフアクセス数・フォロー数）を取り込む。
+"""Meta広告のアクション系（プロフアクセス数・フォロー数・いいね数・平均視聴時間）を取り込む。
 
     python -m etl.meta_actions_fetch                          # 前日ぶん
     python -m etl.meta_actions_fetch --date 2026-08-09
@@ -9,6 +9,9 @@
   meta_insights_daily には、広告費・表示回数・クリックは入っているのに
   follows / profile_visits（フォロー数・プロフアクセス数）が空のままになっている。
   そこを、この取り込みが Meta の insights から取って埋める。
+  あわせて likes（いいね数）と video_avg_seconds（平均視聴時間）も入れる。
+  ・いいね数    … actions の post_reaction（候補は下の LIKE_CANDS）
+  ・平均視聴時間 … video_avg_time_watched_actions（actions とは別のフィールド。秒）
 
 【行は作らない。既にある行の列だけ埋める】
   meta_insights_daily の持ち主は別の取り込み（avend-meta-ads）で、そちらが
@@ -74,6 +77,13 @@ PROFILE_CANDS = _cands("META_PROFILE_ACTIONS", [
     "profile_visit",
     "onsite_conversion.instagram_profile_visit",
 ])
+# いいね（投稿へのリアクション）。Metaは post_reaction を返すことが多いが、
+# like を返す環境もあるので、フォロー数と同じく候補から選ぶ。
+LIKE_CANDS = _cands("META_LIKE_ACTIONS", [
+    "post_reaction",
+    "like",
+    "onsite_conversion.post_save",
+])
 
 
 def _token() -> str:
@@ -128,7 +138,10 @@ def insights(act: str, since: str, until: str) -> list[dict]:
         "level": "campaign",
         "time_increment": "1",
         "time_range": f'{{"since":"{since}","until":"{until}"}}',
-        "fields": "date_start,campaign_id,campaign_name,actions",
+        # video_avg_time_watched_actions は actions とは別のフィールド。
+        # 動画でない広告では返ってこないので、無くても壊れないようにしてある。
+        "fields": ("date_start,campaign_id,campaign_name,actions,"
+                   "video_avg_time_watched_actions"),
         "use_unified_attribution_setting": "true",
         "limit": "500",
     })
@@ -178,6 +191,8 @@ def main() -> int:
     # ---- 取得 ----------------------------------------------------------
     # (日, キャンペーンID) → {action_type: 値}
     got: dict[tuple[str, str], dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    # (日, キャンペーンID) → 平均視聴秒数。actions とは別に持つ
+    vid: dict[tuple[str, str], float] = {}
     seen: set[str] = set()
     totals: dict[str, float] = defaultdict(float)
     failed = 0
@@ -204,6 +219,15 @@ def main() -> int:
                 seen.add(t)
                 totals[t] += v
                 got[(d, str(cid))][t] += v
+            # 平均視聴時間。配列で返るので、いちばん代表的な値（先頭）を採る。
+            # ここは「平均」なので、日をまたいで足してはいけない（画面側で
+            # 表示回数の重み付き平均にしている）。
+            for w in (r.get("video_avg_time_watched_actions") or []):
+                try:
+                    vid[(d, str(cid))] = float(w.get("value") or 0)
+                except (TypeError, ValueError):
+                    pass
+                break
 
     print(f"\n  取れた 日×キャンペーン: {len(got)}件 / action_type {len(seen)}種"
           + (f" / 失敗 {failed}アカウント" if failed else ""))
@@ -211,10 +235,13 @@ def main() -> int:
     # ---- どの action_type を使うか決める --------------------------------
     fk = pick(seen, FOLLOW_CANDS)
     pk = pick(seen, PROFILE_CANDS)
+    lk = pick(seen, LIKE_CANDS)
     print(f"\n  フォロー数      に使う action_type: {fk or '（見つからず）'}")
     print(f"  プロフアクセス数 に使う action_type: {pk or '（見つからず）'}")
+    print(f"  いいね数        に使う action_type: {lk or '（見つからず）'}")
+    print(f"  平均視聴時間    が取れた 日×キャンペーン: {len(vid)}件")
 
-    if not fk and not pk:
+    if not fk and not pk and not lk and not vid:
         # ここで0を書き込むと「本当に0だった」と読めてしまうので、何も書かない。
         print("\n❌ 候補の action_type がどれも返ってきませんでした。書き込みは行いません。")
         print("   返ってきた action_type は次のとおりです。この中から正しいものを選び、")
@@ -224,7 +251,7 @@ def main() -> int:
         return 1
 
     print(f"\n  期間合計: フォロー {totals.get(fk, 0):,.0f} / "
-          f"プロフアクセス {totals.get(pk, 0):,.0f}")
+          f"プロフアクセス {totals.get(pk, 0):,.0f} / いいね {totals.get(lk, 0):,.0f}")
 
     if args.dry_run:
         print("\n  （--dry-run のためDBには書いていません）")
@@ -233,12 +260,18 @@ def main() -> int:
     # ---- 既にある行の列だけ埋める（行は作らない）------------------------
     sb = Supabase()
     updated = missing = 0
-    for (d, cid), acts in sorted(got.items()):
+    keys = sorted(set(got) | set(vid))
+    for (d, cid) in keys:
+        acts = got.get((d, cid), {})
         patch = {}
         if fk:
             patch["follows"] = int(acts.get(fk, 0))
         if pk:
             patch["profile_visits"] = int(acts.get(pk, 0))
+        if lk:
+            patch["likes"] = int(acts.get(lk, 0))
+        if (d, cid) in vid:
+            patch["video_avg_seconds"] = round(vid[(d, cid)], 2)
         if not patch:
             continue
         n = sb.update("meta_insights_daily",

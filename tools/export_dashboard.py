@@ -456,15 +456,20 @@ def build_data(sb: Supabase) -> dict:
                     camp_override[str(cid)] = o.get("destination_id")
         except Exception:
             pass    # まだテーブルが無い環境でも動く
-        # follows / profile_visits は取り込みの拡張後に増える列。まだ無い環境でも動くよう、
-        # 付きで取りに行って失敗したら基本の列だけで取り直す（列が増えたら自動で拾う）。
+        # follows / profile_visits / likes / video_avg_seconds は取り込みの拡張後に
+        # 増える列。まだ無い環境でも動くよう、付きで取りに行って失敗したら基本の列だけで
+        # 取り直す（列が増えたら自動で拾う）。
         BASE = ("date,account_name,campaign_id,campaign_name,destination_id,"
                 "spend,impressions,reach,clicks")
+        EXTRA = ",follows,profile_visits,likes,video_avg_seconds"
         try:
-            meta_src = _select_all(sb, "meta_insights_daily",
-                                   BASE + ",follows,profile_visits", order="date")
+            meta_src = _select_all(sb, "meta_insights_daily", BASE + EXTRA, order="date")
         except Exception:
-            meta_src = _select_all(sb, "meta_insights_daily", BASE, order="date")
+            try:
+                meta_src = _select_all(sb, "meta_insights_daily",
+                                       BASE + ",follows,profile_visits", order="date")
+            except Exception:
+                meta_src = _select_all(sb, "meta_insights_daily", BASE, order="date")
         for r in meta_src:
             cid = r.get("campaign_id")
             did = r.get("destination_id")
@@ -488,11 +493,16 @@ def build_data(sb: Supabase) -> dict:
                 "rc": int(r.get("reach") or 0),
                 "ck": int(r.get("clicks") or 0),
             })
-            # フォロー数・プロフアクセス数は、列がある環境だけ載せる（無い日は付けない）
+            # フォロー数・プロフアクセス数・いいね数・平均視聴時間は、
+            # 列がある環境だけ載せる（無い日は付けない＝画面では「—」になる）
             if r.get("follows") is not None:
                 meta_rows[-1]["fl"] = int(r["follows"] or 0)
             if r.get("profile_visits") is not None:
                 meta_rows[-1]["pv"] = int(r["profile_visits"] or 0)
+            if r.get("likes") is not None:
+                meta_rows[-1]["lk"] = int(r["likes"] or 0)
+            if r.get("video_avg_seconds") is not None:
+                meta_rows[-1]["vt"] = float(r["video_avg_seconds"] or 0)
         runs = sb.select("meta_sync_runs", {
             "select": "started_at,status,unmapped_campaigns,rows_upserted,since,until",
             "order": "started_at.desc", "limit": "1"})
@@ -517,10 +527,14 @@ def build_data(sb: Supabase) -> dict:
     meta_ads: list[dict] = []
     try:
         since = (datetime.now(JST).date() - timedelta(days=META_AD_DAYS)).isoformat()
-        src = _select_all(sb, "meta_insights_daily_ad",
-                          "date,ad_name,campaign_name,destination_id,"
-                          "spend,impressions,reach,clicks",
-                          order="date", extra={"date": f"gte.{since}"})
+        ADBASE = ("date,ad_name,campaign_name,destination_id,"
+                  "spend,impressions,reach,clicks")
+        try:
+            src = _select_all(sb, "meta_insights_daily_ad", ADBASE + ",video_avg_seconds",
+                              order="date", extra={"date": f"gte.{since}"})
+        except Exception:
+            src = _select_all(sb, "meta_insights_daily_ad", ADBASE,
+                              order="date", extra={"date": f"gte.{since}"})
         for r in src:
             did = r.get("destination_id")
             meta_ads.append({
@@ -534,6 +548,8 @@ def build_data(sb: Supabase) -> dict:
                 "rc": int(r.get("reach") or 0),
                 "ck": int(r.get("clicks") or 0),
             })
+            if r.get("video_avg_seconds") is not None:
+                meta_ads[-1]["vt"] = float(r["video_avg_seconds"] or 0)
         if meta_ads:
             names = len({r["an"] for r in meta_ads})
             print(f"  Meta広告(クリエイティブ): {len(meta_ads)}行 / {names}種"
