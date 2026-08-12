@@ -322,5 +322,38 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
   has(/sunny\.days<3\|\|rainy\.days<3/, "日数が少ない天気には触れない");
 }
 
+// --- 推移グラフの広告費と、広告の段の期間 -----------------------------
+{
+  const has = (re, label) => {
+    if (re.test(src)) console.log(`  OK  ${label}`);
+    else { console.log(`  NG  ${label}`); ng++; }
+  };
+  // 推移グラフ：広告費の系列
+  has(/\{key:"ad", label:"広告費"/, "推移グラフに広告費の系列がある");
+  has(/data-tmet="ad"/, "推移グラフに広告費のボタンがある");
+  has(/if\(k==="ad"\)\{ if\(!adDay\)return null;/, "広告費は日ぶんを合算してから期間で足す");
+  // 広告の無い店で「広告費」が選ばれたまま残ると、0円の線が引かれて
+  //「使っていない」ではなく「出していない」が実績0に見えてしまう
+  has(/state\.trendSel=state\.trendSel\.filter\(x=>x!=="ad"\)/, "広告の無い店では広告費の選択を外す");
+  // 「売上推移」は中身が売上だけではないので名前を変えた
+  has(/<h2>KPIの推移 /, "推移グラフの見出しがKPIの推移になっている");
+  if (/<h2>売上推移 /.test(src)) { console.log("  NG  古い見出し『売上推移』が残っています"); ng++; }
+  else console.log("  OK  古い見出しは残っていない");
+
+  // 広告の段の期間（ページ上部の期間とは独立）
+  has(/data-apreset="thismonth"/, "広告の段に今月のボタン");
+  has(/data-apreset="d7"/, "広告の段に7日間のボタン");
+  has(/data-apreset="d28"/, "広告の段に28日間のボタン");
+  has(/data-apreset="d90"/, "広告の段に3ヶ月のボタン");
+  has(/if\(kind==="d7"\) return clampRange\(addDays\(today,-6\),today\);/, "7日間＝今日を含む7日");
+  has(/if\(kind==="d28"\)return clampRange\(addDays\(today,-27\),today\);/, "28日間＝今日を含む28日");
+  has(/const f=state\.aFrom\|\|state\.from, t=state\.aTo\|\|state\.to;/, "広告の段は自前の期間で集計する");
+  has(/state\.aKind=b\.dataset\.apreset; state\.aFrom=f; state\.aTo=t;/, "期間ボタンが広告の段だけを描き直す");
+  has(/on\("adfrom","onchange"/, "広告の段の開始日を直せる");
+  has(/on\("adto","onchange"/, "広告の段の終了日を直せる");
+  has(/\.achip\.on\{|,\.achip\.on\{/, "選んだ期間のボタンが点灯する（CSS）");
+  has(/b\.dataset\.apreset===state\.aKind/, "選んだ期間のボタンが点灯する（描画）");
+}
+
 console.log(ng ? `\n❌ ${ng}件ずれています。` : "\n✅ すべて期待どおりです。");
 process.exit(ng ? 1 : 0);
