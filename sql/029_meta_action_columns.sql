@@ -17,9 +17,8 @@
 --     登録するまでは列が NULL のままで、画面には「—」と出る（0とは区別される）。
 --
 -- 【平均視聴時間の扱い】
---   これは「その日・そのキャンペーンの平均秒数」であって、足せる値ではない。
---   期間や店舗でまとめるときは、画面側で表示回数の重み付き平均にしている。
---   DBには生の平均秒数をそのまま置く。
+--   Meta が返す秒数をそのまま入れる。画面側でも重み付けなどの加工はせず、
+--   値がある行の平均をそのまま出す（動画でない広告は値が無いので、数に入れない）。
 --
 -- 【使い方】Supabase 管理画面 → SQL Editor に貼って [Run]。何度実行しても安全。
 -- =====================================================================
@@ -30,11 +29,11 @@ alter table public.meta_insights_daily add column if not exists video_avg_second
 comment on column public.meta_insights_daily.likes is
   'いいね数（insights の actions／post_reaction ほか）。NULL＝未取得';
 comment on column public.meta_insights_daily.video_avg_seconds is
-  '平均視聴時間の秒数（video_avg_time_watched_actions）。行ごとの平均なので足さないこと';
+  '平均視聴時間の秒数（video_avg_time_watched_actions）。Metaが返す値をそのまま入れる';
 
 -- 広告（クリエイティブ）単位にも同じ列を置く。どの動画が見られているかを比べるため
 alter table public.meta_insights_daily_ad add column if not exists video_avg_seconds numeric;
 comment on column public.meta_insights_daily_ad.video_avg_seconds is
-  '平均視聴時間の秒数（video_avg_time_watched_actions）。行ごとの平均なので足さないこと';
+  '平均視聴時間の秒数（video_avg_time_watched_actions）。Metaが返す値をそのまま入れる';
 
 notify pgrst, 'reload schema';
