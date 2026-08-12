@@ -1001,10 +1001,10 @@ const AD_METRICS=[
   {k:"frq", name:"FQ",            fmt:v=>v==null?"—":F2(v)+"回",  calc:p=>p.rc>0?p.im/p.rc:null, note:"フリークエンシー＝表示回数÷リーチ"},
   {k:"lkr", name:"いいね率",       fmt:v=>v==null?"—":F1(v)+"%",  calc:p=>p.im>0?p.lk/p.im*100:null, need:"lk", src:"post_reaction",
    note:"いいね数÷表示回数。見た人のうち、どれだけが反応したか"},
-  // 平均視聴時間は「1行ごとの平均秒数」なので、期間で足すときは表示回数で重みを付ける。
-  // 単純に足して割ると、少額で回した日の数字が同じ重みで効いてしまう。
-  {k:"vt",  name:"平均視聴時間",   fmt:v=>v==null?"—":F1(v)+"秒", calc:p=>p.vi>0?p.vw/p.vi:null, need:"vt", src:"video_avg_time_watched_actions",
-   note:"動画の平均視聴秒数（表示回数で重み付けした平均）"},
+  // 平均視聴時間は Meta が返す秒数がそのままDBに入る。こちらで重み付けなどの加工はせず、
+  // 値がある行の平均をそのまま出す。
+  {k:"vt",  name:"平均視聴時間",   fmt:v=>v==null?"—":F1(v)+"秒", calc:p=>p.vn>0?p.vt/p.vn:null, need:"vt", src:"video_avg_time_watched_actions",
+   note:"動画の平均視聴秒数（Metaの値）"},
 ];
 // その指標の元データが1行でも入っているか（入っていない指標は出さない）
 function adHas(need){
@@ -1105,14 +1105,14 @@ function adStoreIdx(){
   }
   return AD_BYSTORE;
 }
-function adZero(){ return {sp:0,im:0,rc:0,ck:0,fl:0,pv:0,lk:0,vw:0,vi:0,ex:0,vis:0,sids:null}; }
+function adZero(){ return {sp:0,im:0,rc:0,ck:0,fl:0,pv:0,lk:0,vt:0,vn:0,ex:0,vis:0,sids:null}; }
 // 広告の1行を集計に足す。ここで足すのは広告の実額だけ。
 // 売上・来店は「店舗×日」に1つしかない値なので、ここで足すとキャンペーンの
 // 本数ぶん膨らむ。どの店が対象かだけ覚えておき、あとで期間ごとに1回だけ足す。
 function adAdd(a,r){
   a.sp+=r.sp||0;a.im+=r.im||0;a.rc+=r.rc||0;a.ck+=r.ck||0;a.fl+=r.fl||0;a.pv+=r.pv||0;a.lk+=r.lk||0;
-  // 平均視聴時間は表示回数で重みを付けて平均する（vw=秒×表示回数、vi=その表示回数）
-  if(r.vt!=null){ a.vw+=(r.vt||0)*(r.im||0); a.vi+=r.im||0; }
+  // 平均視聴時間はMetaが返す秒数がそのまま入っている。値がある行だけを数えて平均する
+  if(r.vt!=null){ a.vt+=r.vt||0; a.vn++; }
   if(r.si==null)return;
   if(!a.sids)a.sids=new Set();
   a.sids.add(r.si);
@@ -1676,11 +1676,11 @@ function adDrawCreatives(shortName){
     &&!AD_HIDE.has(r.st||UNMAPPED));
   const g=new Map();
   for(const r of src){
-    let e=g.get(r.an); if(!e){e={sp:0,im:0,ck:0,rc:0,vw:0,vi:0,st:new Set(),days:new Set()};g.set(r.an,e);}
+    let e=g.get(r.an); if(!e){e={sp:0,im:0,ck:0,rc:0,vt:0,vn:0,st:new Set(),days:new Set()};g.set(r.an,e);}
     e.sp+=r.sp||0;e.im+=r.im||0;e.ck+=r.ck||0;e.rc+=r.rc||0;
     e.days.add(r.d);
-    // 平均視聴時間は「1行ごとの平均秒数」。足してはいけないので、表示回数で重みを付ける
-    if(r.vt!=null){ e.vw+=(r.vt||0)*(r.im||0); e.vi+=r.im||0; }
+    // 平均視聴時間はMetaが返す秒数がそのまま入っている。値がある行だけを数えて平均する
+    if(r.vt!=null){ e.vt+=r.vt||0; e.vn++; }
     if(r.st)e.st.add(shortName(r.st));
   }
   // 1日あたりの広告費が少ないものは外す。数百円しか使っていない広告は
@@ -1701,7 +1701,7 @@ function adDrawCreatives(shortName){
     {k:"cpc",name:"クリック単価",val:e=>e.ck>0?e.sp/e.ck:null,   fmt:v=>YEN(Math.round(v))+"円", best:"安い", asc:true},
     // 平均視聴時間は Meta から取れる（video_avg_time_watched_actions）が、
     // いまDBに列が無いので「—」になる。列だけ先に出しておく。
-    {k:"vt", name:"平均視聴時間", val:e=>e.vi>0?e.vw/e.vi:null, fmt:v=>F1(v)+"秒", best:"長い",
+    {k:"vt", name:"平均視聴時間", val:e=>e.vn>0?e.vt/e.vn:null, fmt:v=>F1(v)+"秒", best:"長い",
      need:"vt", src:"video_avg_time_watched_actions"},
     {k:"frq",name:"FQ",        val:e=>e.rc>0?e.im/e.rc:null,    fmt:v=>F2(v)+"回"},
   ];
