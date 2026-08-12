@@ -129,7 +129,7 @@
   .kmat tr.land td{color:var(--accent);font-weight:800}
   .kmat tr.prow td{font-weight:800;background:color-mix(in srgb,var(--accent) 8%,transparent)}
   .stbtn{background:none;border:none;color:var(--accent);font-weight:800;text-decoration:underline;cursor:pointer;padding:0;font:inherit}
-  .pchip.on,.gchip.on,.hchip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  .pchip.on,.gchip.on,.hchip.on,.achip.on{background:var(--accent);border-color:var(--accent);color:#fff}
   .dd summary{list-style:none;display:flex;justify-content:space-between;align-items:center;border:1px solid var(--border);border-radius:10px;padding:11px 13px;background:var(--surface);font-weight:700;cursor:pointer;margin-top:4px}
   .dd summary::-webkit-details-marker{display:none}
   .dd .ddarrow{color:var(--ink2);transition:transform .15s}
@@ -398,9 +398,11 @@ function restoreSharedUrl(){
 
 // sel=選択店舗ID(Set)。kind=③期間プリセット。grain=⑤推移の粒度。trendAnchor=⑤の＜＞位置。
 const state={store:"__sel__",sel:null,grain:DETAIL_ID?"day":"month",metric:"ex",from:null,to:null,kind:"thismonth",trendEnd:null,detail:DETAIL_ID,
-  heatMetric:"q",trendSel:["ex"],hKind:"thismonth",hFrom:null,hTo:null};
+  heatMetric:"q",trendSel:["ex"],hKind:"thismonth",hFrom:null,hTo:null,
+  aKind:"d28",aFrom:null,aTo:null};
   // heatMetric=店舗ページ比率表の切替（q=販売数/a=税抜売上）。trendSel=推移グラフの表示系列（最大3）
   // hKind/hFrom/hTo=店舗ページ比率表の集計期間（KPIまとめの期間とは独立）
+  // aKind/aFrom/aTo=店舗ページ広告の段の集計期間（これも独立。既定＝直近28日）
 let DATA=null;
 // リロード／直アクセスか？（＝タブ移動でないか）。リロード時は選択・期間をデフォルトへ戻す。
 function navIsReload(){
@@ -476,6 +478,9 @@ function prep(){
   if(navIsReload()){ try{sessionStorage.removeItem("kpiSel");sessionStorage.removeItem("kpiPeriodSS");}catch(e){} }
   const [tf,tt]=presetRange("thismonth"); state.from=tf; state.to=tt; state.kind="thismonth";  // 既定＝今月
   state.hFrom=tf; state.hTo=tt; state.hKind="thismonth";  // 店舗ページ比率表の期間（独立）も既定＝今月
+  // 広告の段の期間（独立）。既定は直近28日＝広告タブの既定とそろえる
+  // （週の偏り〔週末に寄る出稿〕を均すのに4週ちょうどが読みやすいため）
+  {const[af,at]=presetRange("d28"); state.aFrom=af; state.aTo=at; state.aKind="d28";}
   const sp=loadPeriodSS(); if(sp){state.from=sp.from;state.to=sp.to;state.kind=sp.kind;}       // タブ移動での引き継ぎ
   state.sel=loadSel();                                   // 既定＝全選択／タブ移動で引き継ぎ
   if(state.detail)state.sel=new Set([state.detail]);     // 店舗専用ページはその店だけ
@@ -931,7 +936,9 @@ function todayStr(){const d=new Date();return `${d.getFullYear()}-${String(d.get
 function presetRange(kind){
   const today=todayStr(), y1=addDays(today,-1);
   if(kind==="all")return[DATA._min,DATA._max];
+  if(kind==="d7") return clampRange(addDays(today,-6),today);
   if(kind==="d14")return clampRange(addDays(today,-13),today);
+  if(kind==="d28")return clampRange(addDays(today,-27),today);
   if(kind==="d30")return clampRange(addDays(today,-29),today);
   if(kind==="d90")return clampRange(addDays(today,-89),today);
   if(kind==="prevday")return clampRange(y1,y1);
@@ -1862,6 +1869,22 @@ function wireCommon(){
     else{ state.trendSel.push(k); if(state.trendSel.length>3)state.trendSel.shift(); }
     drawTrendDetail();
   });
+  // 広告の段専用の期間（KPIまとめの期間とは連動しない）
+  document.querySelectorAll(".achip").forEach(b=>b.onclick=()=>{
+    const[f,t]=presetRange(b.dataset.apreset);
+    state.aKind=b.dataset.apreset; state.aFrom=f; state.aTo=t;
+    drawStoreAds();
+  });
+  on("adfrom","onchange",e=>{
+    state.aFrom=clampLo(e.target.value||DATA._min);
+    if(state.aFrom>state.aTo)state.aTo=state.aFrom;
+    state.aKind="custom"; drawStoreAds();
+  });
+  on("adto","onchange",e=>{
+    state.aTo=clampHi(e.target.value||DATA._max);
+    if(state.aTo<state.aFrom)state.aFrom=state.aTo;
+    state.aKind="custom"; drawStoreAds();
+  });
   // 比率表専用の期間チップ（KPIまとめの期間とは連動しない）
   document.querySelectorAll(".hchip").forEach(b=>b.onclick=()=>{
     const[f,t]=presetRange(b.dataset.hpreset);
@@ -1998,7 +2021,7 @@ function renderDetail(){
       <p class="note" style="margin:7px 0 0"><b>青字＝土日祝</b>／気温は最高・最低<span id="dk-adnote"></span></p>
     </div>
     <div class="panel">
-      <h2>売上推移 <span class="sub" id="trend-range" style="font-weight:700;color:var(--accent)"></span></h2>
+      <h2>KPIの推移 <span class="sub" id="trend-range" style="font-weight:700;color:var(--accent)"></span></h2>
       <div style="display:flex;align-items:center;gap:6px;margin:6px 0 8px">
         <button class="gchip" data-grain="month">月</button>
         <button class="gchip" data-grain="week">週</button>
@@ -2012,6 +2035,7 @@ function renderDetail(){
         <button class="gchip tmet" data-tmet="pr">購入率</button>
         <button class="gchip tmet" data-tmet="buy">仕入数</button>
         <button class="gchip tmet" data-tmet="aov">客単価</button>
+        ${(!FRAN&&newPanelOn(state.detail)&&adStoreHas(state.detail))?`<button class="gchip tmet" data-tmet="ad">広告費</button>`:""}
       </div>
       <div class="chart" id="trendchart"></div>
       <p class="note" id="trend-note" style="margin:6px 0 0"></p>
@@ -2055,6 +2079,19 @@ function renderDetail(){
     </div>
     ${(!FRAN&&newPanelOn(state.detail)&&adStoreHas(state.detail))?`<div class="panel">
       <h2>広告（Meta） <span class="sub" id="stad-rng" style="font-weight:700;color:var(--accent)"></span></h2>
+      <div class="adperiod" style="margin:7px 0 8px">
+        <button class="chip achip" data-apreset="thismonth">今月</button>
+        <button class="chip achip" data-apreset="lastmonth">前月</button>
+        <button class="chip achip" data-apreset="prevday">前日</button>
+        <button class="chip achip" data-apreset="d7">7日間</button>
+        <button class="chip achip" data-apreset="d28">28日間</button>
+        <button class="chip achip" data-apreset="d90">3ヶ月</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 10px">
+        <input type="date" id="adfrom" min="${DATA._min}" max="${DATA._max}" value="${state.aFrom}">
+        <span class="sub">〜</span>
+        <input type="date" id="adto" min="${DATA._min}" max="${DATA._max}" value="${state.aTo}">
+      </div>
       <div class="dtop four" id="stad-cards"></div>
       <p class="note" id="stad-note" style="margin:8px 0 0"></p>
       <h2 style="margin-top:16px">キャンペーン別</h2>
@@ -3511,10 +3548,16 @@ function kpi2AdRows(id,ctx){
 //   「どの期間の数字を見ているのか」が画面の中で食い違う）。
 function drawStoreAds(){
   const cards=document.getElementById("stad-cards"); if(!cards)return;
-  const id=state.detail, f=state.from, t=state.to;
+  // 期間はページ上部（KPIまとめ）とは独立。広告は「今月ぜんぶ」「直近7日」のように
+  // 出稿の区切りで見たいことが多く、売上の期間と一致させると使いづらいため。
+  const id=state.detail;
+  const f=state.aFrom||state.from, t=state.aTo||state.to;
   const p=adStoreSum(id,f,t);
   const ex=M("ex").calc(sumRows(rowsIn(f,t,id)));
   const rl=document.getElementById("stad-rng"); if(rl)rl.textContent="期間 "+mdLabel(f,t);
+  document.querySelectorAll(".achip").forEach(b=>b.classList.toggle("on",b.dataset.apreset===state.aKind));
+  const af=document.getElementById("adfrom"), at=document.getElementById("adto");
+  if(af)af.value=f; if(at)at.value=t;
 
   // 比率はすべて 実額÷実額。日ごと・キャンペーンごとの比率を平均すると別の数字になる。
   const sr=adSrOf(p.sp,ex);
@@ -4347,6 +4390,8 @@ const TREND_METRICS=[
   {key:"pr", label:"購入率", color:"#009E73", fmt:v=>F1(v)+"%",  axf:v=>Math.round(v)+"%"},
   {key:"buy",label:"仕入数", color:"#D55E00", fmt:v=>NUM(v)+"点", axf:shortNum},
   {key:"aov",label:"客単価", color:"#CC79A7", fmt:v=>YEN(v)+"円", axf:shortNum},
+  // 広告費は「店舗×日×キャンペーン」で複数行あるので、日ぶんを合算してから期間で足す
+  {key:"ad", label:"広告費", color:"#8E44AD", fmt:v=>YEN(v)+"円", axf:shortNum},
 ];
 const TM=k=>TREND_METRICS.find(m=>m.key===k);
 // 仕入数（在庫管理アプリ）：pos_store_links で請求先を引き、shipments の納品点数を日付ごとに合計。
@@ -4404,11 +4449,22 @@ function drawTrendDetail(){
   const needBuy=state.trendSel.includes("buy");
   if(needBuy&&SHIP[id]===undefined)loadPurchases(id).then(()=>drawTrendDetail());
   const ship=(SHIP[id]&&SHIP[id]!=="none")?SHIP[id]:null;
+  // 広告費はこの店に広告データがあるときだけ。無い店で選ばれたままにならないよう外す
+  //   （店を移動しても選択が残るため。0で描くと「使っていない」ではなく「出していない」が
+  //     0円として線になってしまう）
+  const adOK=newPanelOn(id)&&adStoreHas(id);
+  if(!adOK&&state.trendSel.includes("ad")){
+    state.trendSel=state.trendSel.filter(x=>x!=="ad");
+    if(!state.trendSel.length)state.trendSel=["ex"];
+  }
+  const adDay=adOK?adSpendByDay(id):null;
   const series=state.trendSel.map(k=>{
     const m=TM(k);
     const vals=keys.map((kk,i)=>{
       if(k==="buy"){ if(!ship)return null; const[f,t]=spans[i]; let s=0;
         for(const d in ship){ if(d>=f&&d<=t)s+=ship[d]; } return s; }
+      if(k==="ad"){ if(!adDay)return null; const[f,t]=spans[i]; let s=0;
+        adDay.forEach((v,d)=>{ if(d>=f&&d<=t)s+=v; }); return s; }
       const p=sumRows(byKey.get(kk)||[]);
       let v=M(k).calc(p);
       if(k==="ex"&&kk===fkey)v=landingForIds(new Set([id]),fkey);
