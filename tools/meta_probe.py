@@ -4,6 +4,9 @@ Meta広告データ（meta_insights_daily / meta_sync_runs）の点検（読み�
     python -m tools.meta_probe
 
 【何を見るか】
+  ⓪ 誰が動かしているか … DBの中の仕掛け（pg_cron・Edge Function）を並べる。
+     取り込みのコードがこのリポジトリに無いのに毎日入っているなら、
+     DB側で動いているか、外部サービスから叩かれている。まずそこを切り分ける。
   ① 同期の実行記録 … いつ・どこから走っているか。実行時刻が毎日ほぼ同じなら
      自動（cron）、バラバラで日中だけなら手動/PC実行の疑い。
   ② 未紐付け … destination_id（店舗）が付いていない行がどれだけあるか。
@@ -67,7 +70,56 @@ def show(title: str, rows, cols=None) -> None:
         print("  " + " | ".join(str(r.get(c)) for c in cols))
 
 
+def functions() -> None:
+    """Edge Function の一覧（管理APIから。中身は出さず名前と更新日だけ）。"""
+    print("\n===== Edge Function の一覧 =====")
+    if not REF or not TOKEN:
+        print("  ⚠️ SUPABASE_ACCESS_TOKEN が無いので調べられません。")
+        return
+    try:
+        r = requests.get(f"https://api.supabase.com/v1/projects/{REF}/functions",
+                         headers={"Authorization": f"Bearer {TOKEN}"}, timeout=60)
+        if r.status_code >= 400:
+            print(f"  ⚠️ HTTP {r.status_code}: {r.text[:200]}")
+            return
+        rows = r.json() or []
+        if not rows:
+            print("  （1つもありません）")
+            return
+        print("  名前 | 状態 | 更新(UTC)")
+        for f in rows:
+            import datetime as _dt
+            up = f.get("updated_at")
+            when = ""
+            if isinstance(up, (int, float)):
+                when = _dt.datetime.utcfromtimestamp(up / 1000).strftime("%Y-%m-%d %H:%M")
+            print(f"  {f.get('name') or f.get('slug')} | {f.get('status')} | {when}")
+    except Exception as e:                       # noqa: BLE001
+        print(f"  ⚠️ 取れませんでした: {str(e)[:200]}")
+
+
 def main() -> int:
+    # ⓪ 誰が動かしているか（DBの中の仕掛けを並べる）
+    ask("DBの中で定期実行されているもの（pg_cron）", """
+        select jobid, schedule, jobname,
+               left(command, 120) as command, active
+          from cron.job order by jobid
+    """)
+    ask("pg_cron の直近の実行（20件）", """
+        select j.jobname,
+               to_char(d.start_time at time zone 'Asia/Tokyo','MM/DD HH24:MI') as 開始JST,
+               d.status, left(coalesce(d.return_message,''),60) as message
+          from cron.job_run_details d join cron.job j on j.jobid = d.jobid
+         order by d.start_time desc limit 20
+    """)
+    # 外から書かれているなら、DB側に仕掛けは無いはず。その切り分けに使う
+    ask("meta_insights_daily を書いた時刻の分布（JSTの時間帯）", """
+        select extract(hour from updated_at at time zone 'Asia/Tokyo')::int as 時,
+               count(*) as 行数, max(updated_at at time zone 'Asia/Tokyo')::text as 最新
+          from meta_insights_daily group by 1 order by 1
+    """)
+    functions()
+
     # ① 同期の実行記録（JSTに直して表示）
     ask("同期の実行記録（直近15件・JST）", """
         select to_char(started_at at time zone 'Asia/Tokyo','MM/DD HH24:MI') as 開始JST,
