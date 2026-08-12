@@ -1940,6 +1940,7 @@ function renderMain(){
     <div class="panel">
       <h2>② KPIまとめ <span class="sub" style="font-weight:500">（前日／今週／今月）</span></h2>
       <div class="tblwrap"><table class="kmat" id="kpi2"></table></div>
+      <p class="note" style="margin:7px 0 0">商品販売数＝実際に売れた商品の点数（レジ袋・クーポン・小物・セット割の器「セール商品」は数えない）／平均購入数＝商品販売数÷取引数／商品単価＝(税抜売上−レジ袋−小物)÷商品販売数（分子・分母ともレジ袋・小物を除く）／客単価＝売上÷取引数（レジ袋・小物も客が払った額なので含む）。</p>
     </div>
 
     <div class="panel">
@@ -2070,7 +2071,7 @@ function renderDetail(){
         <span class="sub" id="periodlabel"></span>
       </div>
       <div class="tblwrap"><table class="kmat" id="kpi2"></table></div>
-      <p class="note" style="margin:7px 0 0">上位3店＝同ブランドの売上トップ3（下北沢除く）</p>
+      <p class="note" style="margin:7px 0 0">上位3店＝同ブランドの売上トップ3（下北沢除く）。商品販売数＝実際に売れた点数（レジ袋・クーポン・小物・セット割の器は数えない）／平均購入数＝商品販売数÷取引数／商品単価＝(税抜売上−レジ袋−小物)÷商品販売数（分子・分母とも除く）／客単価＝売上÷取引数（レジ袋・小物は含む）。</p>
     </div>
     <div class="panel">
       <h2>販売・売上比率 <span class="sub" style="font-weight:500">（価格帯×カテゴリ）</span> <span class="sub" id="heatX-rng" style="font-weight:700;color:var(--accent)"></span></h2>
