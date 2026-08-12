@@ -1823,6 +1823,9 @@ function adDrawMapper(){
         const d=did?(dests.find(x=>x.id===did)||{}):{};
         for(const r of (DATA.meta||[]))if(r.ci===ci){ r.st=d.name||null; r.si=d.s??null; r.ow=d.ow||null; }
         for(const r of (DATA.metaAds||[]))if(r.c===ent.name){ r.st=d.name||null; r.si=d.s??null; }
+        // 店舗ID→広告行 の索引を作り直させる（割り当てを変えたのに
+        // 店舗ページの広告が古い店のままになるのを防ぐ）
+        AD_BYSID=null; AD_BYSTORE=null;
         msg.innerHTML=`<b style="color:#0ca678">✓ ${label}</b>`;
         setTimeout(drawAds,600);
       }catch(err){
@@ -1992,7 +1995,7 @@ function renderDetail(){
       <h2>日別推移 <span class="sub" style="font-weight:500">（下スクロールで過去）</span>
         ${posMixed(state.detail)?'<button class="chip" id="stf-btn" style="margin-left:auto;flex:none;white-space:nowrap">👥 有人来店を入力<span id="stf-badge"></span></button>':''}</h2>
       <div class="tblwrap daywrap"><table class="kmat daykpi" id="daykpi"></table></div>
-      <p class="note" style="margin:7px 0 0"><b>青字＝土日祝</b>／気温は最高・最低</p>
+      <p class="note" style="margin:7px 0 0"><b>青字＝土日祝</b>／気温は最高・最低<span id="dk-adnote"></span></p>
     </div>
     <div class="panel">
       <h2>売上推移 <span class="sub" id="trend-range" style="font-weight:700;color:var(--accent)"></span></h2>
@@ -2050,6 +2053,16 @@ function renderDetail(){
       ${FRAN?'':`<h2 style="margin-top:16px">同ブランド全体 <span class="sub" style="font-weight:500">（${esc(rptBrand3(state.detail))}・比率のみ）</span></h2>
       <div class="tblwrap" style="margin-top:6px"><table class="heat" id="heatB"></table></div>`}
     </div>
+    ${(!FRAN&&newPanelOn(state.detail)&&adStoreHas(state.detail))?`<div class="panel">
+      <h2>広告（Meta） <span class="sub" id="stad-rng" style="font-weight:700;color:var(--accent)"></span></h2>
+      <div class="dtop four" id="stad-cards"></div>
+      <p class="note" id="stad-note" style="margin:8px 0 0"></p>
+      <h2 style="margin-top:16px">キャンペーン別</h2>
+      <div class="tblwrap"><table class="kmat" id="stad-camp"></table></div>
+      <h2 style="margin-top:16px">クリエイティブ別 <span class="sub" style="font-weight:500">（この店・広告費の多い順）</span></h2>
+      <div class="tblwrap"><table class="kmat" id="stad-cr"></table></div>
+      <p class="note" id="stad-crnote" style="margin:7px 0 0"></p>
+    </div>`:""}
     ${FRAN?'':`<div class="panel">
       <h2>AIのまとめ <span class="sub" style="font-weight:500">（直近2週間・毎週月曜更新）</span></h2>
       <div id="ai-out" style="margin-top:6px;padding:10px 12px;border-left:3px solid var(--accent);background:var(--surface2);border-radius:0 10px 10px 0;font-size:12.5px;line-height:1.9">⏳ 分析を読み込み中…</div>
@@ -3301,7 +3314,7 @@ async function draw(){ if(VIEW==="ads"){ drawPeriod(); drawAds(); return; }
   await ensureCatRange(state.from,state.to);
   refresh(); }
 // 選択・期間の変更でスライサー本体以外を描き直す（チェックのたびにリストを作り直さない）
-function refresh(){ if(state.detail){drawDetailExtras(); drawDayKpi();} drawKpi2(); drawStoreKpi(); drawTrend2();
+function refresh(){ if(state.detail){drawDetailExtras(); drawDayKpi(); drawStoreAds();} drawKpi2(); drawStoreKpi(); drawTrend2();
   if(state.detail){ drawHeatX(); }                       // 店舗ページ＝1表（販売数/税抜売上を切替）
   else{ const D=heatData();                              // ⑥⑦で同じ集計・同じ列順を使う
     const cats=heatCatsOf(D);                            // 売上降順・共通
@@ -3453,8 +3466,121 @@ function drawKpi2Detail(el,ctx){
       <td style="${diffColor(cur,av)}">${diff==null?"—":(diff>=0?"+":"−")+m.fmt(Math.abs(diff))}</td>
       <td>${wd==null?"—":m.fmt(wd)}</td>
       <td>${we==null?"—":m.fmt(we)}</td></tr>`;}
+  h+=kpi2AdRows(id,{selCol,wdCol,weCol,top3,baked});
   el.innerHTML=h+`</tbody>`;
 }
+// KPIまとめの広告2行（広告費・売上比率）。
+//   単店の広告費だけを眺めても「使いすぎか足りないか」は判断できない。
+//   この表の値打ちは上位3店平均との差分なので、そこに並べて初めて意味が出る。
+//   ・広告費は実額。上位3店平均は「各店の広告費の平均」（他の行と同じ作り方）
+//   ・売上比率は 広告費÷税抜売上。自店は実額どうしを割り、
+//     上位3店平均は各店の比率の平均（＝店の平均であって、日の平均ではない）
+//   ・加盟店には広告データを配っていないので、この2行は出ない
+function kpi2AdRows(id,ctx){
+  if(window.FRANCHISEE||!newPanelOn(id)||!adStoreHas(id))return "";
+  const {selCol,wdCol,weCol,top3,baked}=ctx;
+  const yen=v=>v==null?"—":YEN(Math.round(v))+"円";
+  const pct=v=>v==null?"—":F1(v)+"%";
+  const spOf=(sid,c)=>adStoreHas(sid)?adStoreSum(sid,c.from,c.to).sp:null;
+  const srOf=(sid,c)=>{
+    if(!adStoreHas(sid))return null;
+    return adSrOf(adStoreSum(sid,c.from,c.to).sp, M("ex").calc(sumRows(rowsIn(c.from,c.to,sid))));
+  };
+  const avg=vs=>{const a=vs.filter(v=>v!=null);return a.length?a.reduce((s,v)=>s+v,0)/a.length:null;};
+  // 加盟店モード（baked）は他店を持たないので比較列を出さない
+  const peerSp=baked?null:avg(top3.map(x=>spOf(x,selCol)));
+  const peerSr=baked?null:avg(top3.map(x=>srOf(x,selCol)));
+  const wdA=adDayAvg(id,wdCol.from,wdCol.to,wdCol.day);
+  const weA=adDayAvg(id,weCol.from,weCol.to,weCol.day);
+  const curSp=spOf(id,selCol), curSr=srOf(id,selCol);
+  const dSp=(curSp!=null&&peerSp!=null)?curSp-peerSp:null;
+  const dSr=(curSr!=null&&peerSr!=null)?curSr-peerSr:null;
+  // 広告費は「多い＝良い」ではないので、差分に色を付けない（色は売上比率にも付けない）
+  return `<tr><td>広告費 <span class="sub" style="font-weight:500;font-size:9.5px">Meta</span></td>
+      <td>${yen(curSp)}</td><td class="peer">${yen(peerSp)}</td>
+      <td>${dSp==null?"—":(dSp>=0?"+":"−")+YEN(Math.round(Math.abs(dSp)))+"円"}</td>
+      <td>${yen(wdA.per)}</td><td>${yen(weA.per)}</td></tr>
+    <tr><td>売上比率 <span class="sub" style="font-weight:500;font-size:9.5px">広告費÷税抜売上</span></td>
+      <td>${pct(curSr)}</td><td class="peer">${pct(peerSr)}</td>
+      <td>${dSr==null?"—":(dSr>=0?"+":"−")+F1(Math.abs(dSr))+"%"}</td>
+      <td>${pct(wdA.sr)}</td><td>${pct(weA.sr)}</td></tr>`;
+}
+// ---- 店舗ページの「広告（Meta）」の段 ----
+//   広告タブは全社を見る画面なので、店の人が自店の広告を見るには絞り込みが要る。
+//   ここは最初からこの店だけ。期間は上のKPIまとめと同じ（別々にすると
+//   「どの期間の数字を見ているのか」が画面の中で食い違う）。
+function drawStoreAds(){
+  const cards=document.getElementById("stad-cards"); if(!cards)return;
+  const id=state.detail, f=state.from, t=state.to;
+  const p=adStoreSum(id,f,t);
+  const ex=M("ex").calc(sumRows(rowsIn(f,t,id)));
+  const rl=document.getElementById("stad-rng"); if(rl)rl.textContent="期間 "+mdLabel(f,t);
+
+  // 比率はすべて 実額÷実額。日ごと・キャンペーンごとの比率を平均すると別の数字になる。
+  const sr=adSrOf(p.sp,ex);
+  const ctr=p.im>0?p.ck/p.im*100:null;
+  const frq=p.rc>0?p.im/p.rc:null;
+  const card=(k,v,note)=>`<div class="card"><div class="k">${k}</div><div class="val">${v}</div><div class="knote">${note}</div></div>`;
+  cards.innerHTML=
+    card("広告費",YEN(Math.round(p.sp))+"<small>円</small>","この店に割り当てたぶん")+
+    card("売上比率",sr==null?"—":F1(sr)+"<small>%</small>","広告費÷税抜売上")+
+    card("CTR",ctr==null?"—":F1(ctr)+"<small>%</small>","クリック÷表示回数")+
+    card("FQ",frq==null?"—":F2(frq)+"<small>回</small>","表示回数÷リーチ");
+
+  const note=document.getElementById("stad-note");
+  if(note)note.innerHTML=
+    `売上は<b>広告を止めていた日も含む</b>この店の税抜売上です（店舗ページ・予実タブの売上と一致します）。`+
+    `<br>キャンペーンの店舗への割り当ては広告タブで直せます。割り当てていないキャンペーンはここに出ません。`+
+    (p.pv>0?"":`<br>プロフアクセス数・フォロー数はまだDBに入っていないため、CPF・プロフ単価は出せません。`);
+
+  // ---- キャンペーン別 ----
+  const g=new Map();
+  for(const r of adRowsOfStore(id,f,t)){
+    let e=g.get(r.c); if(!e){e={sp:0,im:0,ck:0,rc:0,days:new Set()};g.set(r.c,e);}
+    e.sp+=r.sp||0;e.im+=r.im||0;e.ck+=r.ck||0;e.rc+=r.rc||0;e.days.add(r.d);
+  }
+  const camps=[...g.entries()].sort((a,b)=>b[1].sp-a[1].sp);
+  const ct=document.getElementById("stad-camp");
+  if(ct){
+    const row=([nm,e])=>`<tr><td style="text-align:left"><div class="adname" title="${esc(nm)}">${esc(nm)}</div>`+
+      `<div class="sub" style="font-weight:500">${e.days.size}日／1日 ${YEN(Math.round(e.days.size?e.sp/e.days.size:0))}円</div></td>`+
+      `<td>${YEN(Math.round(e.sp))}円</td><td>${NUM(e.im)}</td><td>${NUM(e.ck)}</td>`+
+      `<td>${e.im>0?F1(e.ck/e.im*100)+"%":"—"}</td>`+
+      `<td>${e.ck>0?YEN(Math.round(e.sp/e.ck))+"円":"—"}</td></tr>`;
+    ct.innerHTML=`<thead><tr><th>キャンペーン</th><th>広告費</th><th>表示回数</th><th>クリック数</th><th>CTR</th><th>クリック単価</th></tr></thead>`+
+      `<tbody>${camps.length?camps.map(row).join(""):`<tr><td colspan="6" class="sub">この期間の広告はありません</td></tr>`}</tbody>`;
+  }
+
+  // ---- クリエイティブ別（この店・上位5）----
+  //   広告タブの一覧はCTRなどで並べ替えるので少額の広告を土俵から外しているが、
+  //   ここは広告費の多い順にそろえる。単店では母数が小さく、比率で並べると
+  //   数回のクリックで順位がひっくり返ってしまうため。
+  const cg=new Map();
+  for(const r of (DATA.metaAds||[])){
+    if(r.si!==id||r.d<f||r.d>t)continue;
+    let e=cg.get(r.an); if(!e){e={sp:0,im:0,ck:0,rc:0,days:new Set()};cg.set(r.an,e);}
+    e.sp+=r.sp||0;e.im+=r.im||0;e.ck+=r.ck||0;e.rc+=r.rc||0;e.days.add(r.d);
+  }
+  const crs=[...cg.entries()].sort((a,b)=>b[1].sp-a[1].sp);
+  const top=crs.slice(0,5);
+  const crt=document.getElementById("stad-cr");
+  if(crt){
+    const row=([nm,e],i)=>`<tr><td style="text-align:left"><div class="adname" title="${esc(nm)}"><b>${i+1}.</b> ${esc(nm)}</div>`+
+      `<div class="sub" style="font-weight:500">${e.days.size}日／1日 ${YEN(Math.round(e.days.size?e.sp/e.days.size:0))}円</div></td>`+
+      `<td>${YEN(Math.round(e.sp))}円</td><td>${NUM(e.im)}</td><td>${NUM(e.ck)}</td>`+
+      `<td>${e.im>0?F1(e.ck/e.im*100)+"%":"—"}</td>`+
+      `<td>${e.ck>0?YEN(Math.round(e.sp/e.ck))+"円":"—"}</td>`+
+      `<td>${e.rc>0?F2(e.im/e.rc)+"回":"—"}</td></tr>`;
+    crt.innerHTML=`<thead><tr><th>広告</th><th>広告費</th><th>表示回数</th><th>クリック数</th><th>CTR</th><th>クリック単価</th><th>FQ</th></tr></thead>`+
+      `<tbody>${top.length?top.map(row).join(""):`<tr><td colspan="7" class="sub">この期間のクリエイティブ別データがありません</td></tr>`}</tbody>`;
+  }
+  const cn=document.getElementById("stad-crnote");
+  if(cn)cn.innerHTML=
+    (crs.length>top.length?`対象 ${crs.length}種のうち上位5件。`:"")+
+    `<b>クリック単価</b>は1クリックあたりの広告費で、AVENDで言うCPC（＝1プロフアクセスあたり）とは別物です。`+
+    ((DATA.metaAds&&DATA.metaAds.length)?"":`<br>広告単位のデータがまだ入っていません（データ更新後に出ます）。`);
+}
+
 // ---- AIのまとめ（ページ最下部のカード）----
 // 直近2週間の「同ブランド比較KPI・販売比率・週次推移」を Edge Function "ask"（Claude）に渡し、
 // 店舗運営に大事なポイントだけを3〜4行で自動生成する。週1回（毎週月曜に更新）だけAPIを呼び、
@@ -3465,6 +3591,7 @@ async function aiWeeklyInsight(){
   if(!SB){ out.textContent="AIのまとめはログイン版でのみ表示されます。"; return; }
   const wk=mondayOf(todayStr()), key="aiWeekly:"+id+":"+wk;
   try{ const c=localStorage.getItem(key); if(c){ out.innerHTML=c; return; } }catch(_){}
+  let wxStat=null;   // 天気×売上。AIに繋がらなかったときの自動まとめでも使う
   try{
     const sd=DATA._salesMax||DATA._max, f=addDays(sd,-13), t=sd;
     const s=storeMeta(id), nm=(s&&s.name)||("店舗"+id);
@@ -3487,14 +3614,22 @@ async function aiWeeklyInsight(){
     for(let i=5;i>=0;i--){ const wf=addDays(mon0,-7*i), wt=addDays(wf,6);
       const a=sumRows(rowsIn(wf,wt,id));
       weekly.push({week:mdLabel(wf,wt), ex:M("ex").calc(a), v:a.hasV?a.v:null}); }
+    // 天気ごとの1日あたり売上・来店（取れなければ null のまま渡さない）
+    wxStat=await weatherStats(id,f,t);
     const digest={
       today:todayStr(), closing:sd,
       stores:top3.map(x=>(storeMeta(x)||{}).name||x),
       note:`店舗「${nm}」の直近2週間（${f}〜${t}）の分析。cmp=自店KPIと同ブランド上位3店（${own==="直営"?"直営":b3}${own==="直営"?"":"・直営除く"}・下北沢除く）平均の比較。selfShare/brandShare=販売数の構成比%（ランク帯×カテゴリ）。weekly=直近6週の週次推移。`,
-      legend:"cmp:[{kpi,self,top3avg}] / selfShare,brandShare:{ランク×カテゴリ:シェア%} / weekly:[{week,ex=税抜売上,v=来店}]",
-      series:{cmp,selfShare:shareOf(selfD),brandShare:shareOf(brandD),weekly},
+      legend:"cmp:[{kpi,self,top3avg}] / selfShare,brandShare:{ランク×カテゴリ:シェア%} / weekly:[{week,ex=税抜売上,v=来店}]"
+        +(wxStat?" / weather:[{cond=天気,days=日数,exPerDay=1日あたり税抜売上,vPerDay=1日あたり来店}]":""),
+      series:Object.assign({cmp,selfShare:shareOf(selfD),brandShare:shareOf(brandD),weekly},
+                           wxStat?{weather:wxStat}:{}),
     };
-    const q="このデータから、この店舗の運営にとって特に大事なポイントだけを日本語で3〜4行にまとめてください。同ブランド上位店との差・売れ筋構成の違い・直近の週次トレンドのうち、行動につながる重要なものだけ。見出し・箇条書き・Markdown記法は使わず、プレーンな文章のみ。数字は重要なものだけ添えてください。";
+    const q="このデータから、この店舗の運営にとって特に大事なポイントだけを日本語で3〜4行にまとめてください。"
+      +"同ブランド上位店との差・売れ筋構成の違い・直近の週次トレンドのうち、行動につながる重要なものだけ。"
+      +"weather がある場合は、天気で売上がどれくらい変わるかにも触れてください"
+      +"（ただし日数が少ない天気は偶然で振れるので断定しないこと。天気で説明できる落ち込みと、そうでない落ち込みを分けて書いてください）。"
+      +"見出し・箇条書き・Markdown記法は使わず、プレーンな文章のみ。数字は重要なものだけ添えてください。";
     const answer=await callAsk(q,digest);
     const html=esc(answer).replace(/\n+/g,"<br>");
     try{ localStorage.setItem(key,html); }catch(_){}
@@ -3503,7 +3638,7 @@ async function aiWeeklyInsight(){
     // AIに繋がらないときは、同じデータから自動集計でまとめを出す（中身が空にならないように）。
     // AI版ではないことが分かるよう明記し、原因も併記する。
     const why=await askDiagnose((e&&e.message)||String(e));
-    const auto=autoInsight();
+    const auto=autoInsight(wxStat);
     out.innerHTML=(auto?esc(auto).replace(/\n+/g,"<br>"):`<span class="sub">まとめを作成できませんでした。</span>`)+
       `<div class="sub" style="margin-top:8px;font-size:11px">※ 自動集計版（AI未接続：${esc(why)}）`+
       `<button class="chip" id="ai-retry" style="margin-left:6px;padding:3px 8px">再試行</button></div>`;
@@ -3527,7 +3662,7 @@ async function askDiagnose(baseMsg){
   }
 }
 // AIが使えないときの自動まとめ（同じデータをルールで要約する。数字は実データから計算）
-function autoInsight(){
+function autoInsight(wx){
   const id=state.detail; if(id==null)return "";
   const sd=DATA._salesMax||DATA._max, f=addDays(sd,-13), t=sd;
   const own=ownOf(id), b3=rptBrand3(id);
@@ -3562,6 +3697,8 @@ function autoInsight(){
     }
     if(best&&best.d>=3)out.push(`販売構成では「ランク${best.g}×${best.c}」がブランド全体${F1(best.bs)}%に対し自店${F1(best.ss)}%と低く、品揃えの見直し余地があります。`);
   }
+  // ④ 天気による差（渡されたときだけ。日数が少ない天気には触れない）
+  const wl=wxLine(wx); if(wl)out.push(wl);
   return out.slice(0,4).join("");
 }
 // Edge Function "ask"（分析AI）を呼ぶ。まず直接 fetch し、だめなら supabase-js 経由で再試行する。
@@ -3860,6 +3997,69 @@ async function saveStaffedDay(inp){
 // 日別推移（縦=日付・最新が上／横=KPI）。直近7日ぶんの高さに収め、下スクロールで過去を表示。
 // 列は客単価まで（販売数・平均購入数・商品単価は出さない）＝スマホ幅で横スクロールなしで収める。
 const WK=["日","月","火","水","木","金","土"];
+// ============================================================
+// 店舗ページの広告（Meta）
+//   広告は「店舗 × 日 × キャンペーン」で複数行、売上・来店は「店舗 × 日」に1つ。
+//   素直に足すとキャンペーンの本数ぶん売上が膨らむので、ここで足すのは広告の
+//   実額だけにして、比率（売上比率・CTR・FQ）は 実額÷実額 でその都度出す。
+//
+//   【段階導入】まず1店で確かめてから全店に広げる。
+//   NEWPANEL_STORES を空配列 [] にすると全店に出る。
+// ============================================================
+const NEWPANEL_STORES=["いわき"];
+function newPanelOn(id){
+  if(!NEWPANEL_STORES.length)return true;
+  const nm=(storeMeta(id)||{}).name||"";
+  return NEWPANEL_STORES.some(k=>nm.indexOf(k)>=0);
+}
+// 店舗ID → その店の広告行。結び目は店名ではなく si（POS店舗ID）。店名は表記ゆれがある。
+let AD_BYSID=null;
+function adBySid(){
+  if(AD_BYSID)return AD_BYSID;
+  AD_BYSID=new Map();
+  for(const r of (DATA.meta||[])){
+    if(r.si==null)continue;
+    let a=AD_BYSID.get(r.si); if(!a){a=[];AD_BYSID.set(r.si,a);}
+    a.push(r);
+  }
+  return AD_BYSID;
+}
+function adRowsOfStore(id,from,to){
+  return (adBySid().get(id)||[]).filter(r=>r.d>=from&&r.d<=to);
+}
+// その店の広告実額を足す（比率は持たせない）
+function adStoreSum(id,from,to){
+  const p={sp:0,im:0,rc:0,ck:0,fl:0,pv:0};
+  for(const r of adRowsOfStore(id,from,to)){
+    p.sp+=r.sp||0;p.im+=r.im||0;p.rc+=r.rc||0;p.ck+=r.ck||0;p.fl+=r.fl||0;p.pv+=r.pv||0;
+  }
+  return p;
+}
+// 日付 → 広告費（日別推移の列と、平日/土日祝の平均に使う）
+function adSpendByDay(id){
+  const m=new Map();
+  for(const r of (adBySid().get(id)||[]))m.set(r.d,(m.get(r.d)||0)+(r.sp||0));
+  return m;
+}
+// その店に広告データがあるか。無い店には列も段も出さない（空欄で幅を取らない）
+function adStoreHas(id){ const a=adBySid().get(id); return !!(a&&a.length); }
+// 売上比率＝広告費÷税抜売上。売上が取れない期間は「—」（0にしない）
+function adSrOf(sp,ex){ return (ex!=null&&ex>0)?sp/ex*100:null; }
+// 平日／土日祝の「1日あたり広告費」。
+//   分母は税抜売上の平均行と同じ「売上があった日数」にそろえる。
+//   別の分母で割ると、すぐ上の行と並べて読めなくなる。
+function adDayAvg(id,from,to,day){
+  const spd=adSpendByDay(id);
+  let rws=rowsIn(from,to,id);
+  if(day)rws=rws.filter(r=>dayClass(r.d)===day);
+  const days=new Set();
+  for(const r of rws)if((r.in||0)>0||(r.tx||0)>0)days.add(r.d);
+  if(!days.size)return {sp:null,per:null,ex:null,sr:null};
+  let sp=0; days.forEach(d=>{sp+=spd.get(d)||0;});
+  const ex=M("ex").calc(sumRows(rws.filter(r=>days.has(r.d))));
+  return {sp:sp, per:sp/days.size, ex:ex, sr:adSrOf(sp,ex)};
+}
+
 const DAY_COLS=["ex","v","pr","aov"];
 function drawDayKpi(){
   const el=document.getElementById("daykpi"); if(!el)return;
@@ -3878,11 +4078,18 @@ function drawDayKpi(){
     }
     return v;
   };
+  // 広告費の列。売上・来店・天気と同じ行に並べると、「入れた日に動いたか」が縦に読める。
+  const showAd=newPanelOn(id)&&adStoreHas(id);
+  const adDay=showAd?adSpendByDay(id):null;
+  const adCell=v=>(v==null||v<=0)?"—":YEN(Math.round(v))+"円";
   const avgRow=(label,day,cls)=>`<tr class="avgrow${cls||""}"><th>${label}<small style="display:block;font-weight:500;color:var(--ink2);font-size:9px">直近2週·日平均</small></th>`+
-    DAY_COLS.map(k=>{const v=avgVal(day,k);return `<th>${kpiCell(k,v)}</th>`;}).join("")+`</tr>`;
-  let h=`<thead><tr><th>日付</th>${DAY_COLS.map(k=>`<th>${M(k).name}</th>`).join("")}</tr>`+
+    DAY_COLS.map(k=>{const v=avgVal(day,k);return `<th>${kpiCell(k,v)}</th>`;}).join("")+
+    (showAd?`<th>${adCell(adDayAvg(id,w2,sd,day).per)}</th>`:"")+`</tr>`;
+  let h=`<thead><tr><th>日付</th>${DAY_COLS.map(k=>`<th>${M(k).name}</th>`).join("")}`+
+        (showAd?`<th>広告費</th>`:"")+`</tr>`+
         avgRow("平日平均","wd")+avgRow("休祝日平均","we"," we")+`</thead><tbody>`;
-  if(!dates.length){ el.innerHTML=h+`<tr><td colspan="${DAY_COLS.length+1}" class="sub">データがありません</td></tr></tbody>`; return; }
+  const NCOL=DAY_COLS.length+1+(showAd?1:0);
+  if(!dates.length){ el.innerHTML=h+`<tr><td colspan="${NCOL}" class="sub">データがありません</td></tr></tbody>`; return; }
   for(const d of dates){ const p=sumRows(byDate.get(d)); const we=isWeekendOrHoliday(d);
     const wk=WK[new Date(d+"T00:00:00Z").getUTCDay()];
     // 有人来店が未入力の日は、来店客数のセルに「未」を出して入力を促す（2レジ運用の店だけ）。
@@ -3890,8 +4097,11 @@ function drawDayKpi(){
     h+=`<tr${we?' class="we"':''}><td>${+d.slice(5,7)}/${+d.slice(8,10)}(${wk})<span class="wx" data-d="${d}"></span></td>`+
        DAY_COLS.map(k=>{const v=M(k).calc(p);
          const mk=(k==="v"&&miss)?'<span class="mk" title="有人時間の来店数が未入力です">未</span>':"";
-         return `<td>${kpiCell(k,v)}${mk}</td>`;}).join("")+`</tr>`; }
+         return `<td>${kpiCell(k,v)}${mk}</td>`;}).join("")+
+       (showAd?`<td>${adCell(adDay.get(d))}</td>`:"")+`</tr>`; }
   el.innerHTML=h+`</tbody>`;
+  const an=document.getElementById("dk-adnote");
+  if(an)an.innerHTML=showAd?'／広告費の<b>「—」</b>はその日は出稿なし':"";
   // thead が3行になったので、スクロールしても重ならないよう sticky の top を実測で積み上げる
   let top=0;
   el.querySelectorAll("thead tr").forEach(tr=>{
@@ -3968,6 +4178,50 @@ async function applyWeather(id){
     el.innerHTML=wxIcon(o)+t;
   });
 }
+// ---- 天気 × 売上（AIのまとめに渡す）----
+//   日別推移のアイコンは見た目だけで、集計には一度も使っていなかった。
+//   晴／くもり／雨 ごとの「1日あたり売上・来店」を出しておくと、
+//   落ちた日の理由づけを感覚ではなく実績で確かめられる。
+//   Open-Meteo が取れないときは null を返す（まとめ側では天気に触れない）。
+function wxClass(o){
+  const ic=wxIcon(o);
+  if(ic==="❄️")return "雪";
+  if(ic==="🌦️"||ic==="🌧️"||ic==="⛈️")return "雨";
+  if(ic==="☀️"||ic==="🌤️")return "晴";
+  return "くもり";
+}
+async function weatherStats(id,from,to){
+  let wx=null;
+  try{ wx=await loadWeather(id); }catch(_){}
+  if(!wx)return null;
+  const g=new Map();
+  for(const r of rowsIn(from,to,id)){
+    const o=wx[r.d]; if(!o)continue;
+    const c=wxClass(o);
+    let a=g.get(c); if(!a){a={cond:c,days:new Set(),ex:0,v:0,hasV:false};g.set(c,a);}
+    a.days.add(r.d);
+    if(r.ex!=null)a.ex+=r.ex;
+    if(r.v!=null){a.v+=r.v;a.hasV=true;}
+  }
+  const out=[...g.values()].filter(a=>a.days.size>0).map(a=>({
+    cond:a.cond, days:a.days.size,
+    exPerDay:Math.round(a.ex/a.days.size),
+    vPerDay:a.hasV?Math.round(a.v/a.days.size):null,
+  })).sort((x,y)=>y.days-x.days);
+  return out.length?out:null;
+}
+// 天気の差を1文にする（AIが使えないときの自動まとめ用）。
+// 日数が少ないと偶然で振れるので、両方3日以上あるときだけ触れる。
+function wxLine(wx){
+  if(!wx)return "";
+  const find=c=>wx.find(x=>x.cond===c);
+  const sunny=find("晴"), rainy=find("雨");
+  if(!sunny||!rainy||sunny.days<3||rainy.days<3||!sunny.exPerDay)return "";
+  const ch=(rainy.exPerDay-sunny.exPerDay)/sunny.exPerDay*100;
+  if(Math.abs(ch)<5)return `天気による売上の差はほとんどありません（晴${sunny.days}日 ${YEN(sunny.exPerDay)}円／雨${rainy.days}日 ${YEN(rainy.exPerDay)}円・1日あたり）。`;
+  return `雨の日は1日あたり売上が晴れの日より${Math.abs(Math.round(ch))}%${ch<0?"低く":"高く"}なっています（晴${sunny.days}日 ${YEN(sunny.exPerDay)}円／雨${rainy.days}日 ${YEN(rainy.exPerDay)}円）。`;
+}
+
 // 選択期間・下北沢除外での税抜売上トップN店（比較ベンチマーク用）
 function topStoresBy(ids,from,to,n){
   return ids.map(id=>({id,ex:M("ex").calc(sumRows(rowsIn(from,to,id)))||0}))
