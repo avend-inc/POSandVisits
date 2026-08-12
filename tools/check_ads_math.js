@@ -221,5 +221,106 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
       "読めないときはJSONに落ちる（黙って空にしない）");
 }
 
+
+// --- 店舗ページの広告（NEWPANEL_STORES 〜 DAY_COLS の実物を動かす）-------
+//   広告は「店舗×日×キャンペーン」で複数行あるので、日別の列や
+//   平日/土日祝の平均で足し方を間違えると、静かに水増しされる。
+{
+  const f2 = src.indexOf("const NEWPANEL_STORES=");
+  const t2 = src.indexOf("const DAY_COLS=");
+  if (f2 < 0 || t2 < 0 || t2 <= f2) {
+    console.log("  NG  店舗ページの広告まわりを取り出せませんでした"); ng++;
+  } else {
+    // 依存している関数は、この検算に必要なぶんだけ用意する（本体は触らない）
+    const ctx2 = { console, DATA: null };
+    vm.createContext(ctx2);
+    vm.runInContext(`
+      var DATA=null;
+      function storeMeta(id){ return (DATA.stores||[]).find(x=>x.id===id)||null; }
+      function rowsIn(from,to,id){ return (DATA.daily||[]).filter(r=>r.s===id&&r.d>=from&&r.d<=to); }
+      function dayClass(d){ const w=new Date(d+"T00:00:00Z").getUTCDay(); return (w===0||w===6)?"we":"wd"; }
+      function sumRows(rows){ let ex=0,hasEx=false; for(const r of rows){ if(r.ex!=null){ex+=r.ex;hasEx=true;} } return {ex,hasEx}; }
+      function M(k){ return {calc:p=>p.hasEx?p.ex:null}; }
+    ` + src.slice(f2, t2), ctx2);
+    const setMeta = (meta, daily, stores) => {
+      ctx2.DATA = { meta, daily, stores: stores || [{ id: 1, name: "いわき" }, { id: 2, name: "山形" }] };
+      vm.runInContext("AD_BYSID=null;", ctx2);
+    };
+
+    // 同じ日に3本のキャンペーンが走っている。日別の列は合算した1つの値になる。
+    setMeta([
+      { d: "2026-08-02", si: 1, sp: 1000, im: 100, rc: 50, ck: 5, c: "A" },   // 日曜
+      { d: "2026-08-02", si: 1, sp: 2000, im: 100, rc: 50, ck: 5, c: "B" },
+      { d: "2026-08-03", si: 1, sp: 3000, im: 200, rc: 80, ck: 4, c: "A" },   // 月曜
+      { d: "2026-08-03", si: 2, sp: 9000, im: 999, rc: 999, ck: 9, c: "C" },  // 別の店
+    ], [
+      { s: 1, d: "2026-08-02", ex: 100000, in: 110000, tx: 10 },
+      { s: 1, d: "2026-08-03", ex: 200000, in: 220000, tx: 20 },
+      { s: 2, d: "2026-08-03", ex: 500000, in: 550000, tx: 30 },
+    ]);
+
+    const day = ctx2.adSpendByDay(1);
+    eq("同じ日の複数キャンペーンは1つに合算", day.get("2026-08-02"), 3000);
+    eq("他店の広告費は混ざらない", day.get("2026-08-03"), 3000);
+
+    const p = ctx2.adStoreSum(1, "2026-08-02", "2026-08-03");
+    eq("期間の広告費", p.sp, 6000);
+    eq("表示回数も足す", p.im, 400);
+    eq("他店ぶんは入らない", p.ck, 14);
+    eq("期間外は入らない", ctx2.adStoreSum(1, "2026-08-03", "2026-08-03").sp, 3000);
+
+    // 売上比率は 実額÷実額。売上が取れない期間は 0 ではなく null
+    eq("売上比率＝6,000÷300,000", ctx2.adSrOf(6000, 300000), 2);
+    eq("売上が無ければ売上比率は出さない", ctx2.adSrOf(6000, 0), null);
+    eq("売上が取れなければ売上比率は出さない", ctx2.adSrOf(6000, null), null);
+
+    // 平日/土日祝の1日あたり。分母は「売上があった日数」＝すぐ上の売上の行と同じ
+    const wd = ctx2.adDayAvg(1, "2026-08-02", "2026-08-03", "wd");
+    eq("平日は8/3(月)だけ＝3,000円", wd.per, 3000);
+    eq("平日の売上比率＝3,000÷200,000", wd.sr, 1.5);
+    const we = ctx2.adDayAvg(1, "2026-08-02", "2026-08-03", "we");
+    eq("土日祝は8/2(日)だけ＝3,000円", we.per, 3000);
+    eq("土日祝の売上比率＝3,000÷100,000", we.sr, 3);
+
+    // 売上が立っていない日は分母に数えない（休業日で薄まらせない）
+    setMeta([
+      { d: "2026-08-03", si: 1, sp: 1000, c: "A" },
+      { d: "2026-08-04", si: 1, sp: 1000, c: "A" },
+    ], [
+      { s: 1, d: "2026-08-03", ex: 100000, in: 110000, tx: 10 },
+      { s: 1, d: "2026-08-04", ex: null, in: 0, tx: 0 },        // 休業
+    ]);
+    eq("休業日は1日あたりの分母に数えない", ctx2.adDayAvg(1, "2026-08-03", "2026-08-04", "wd").per, 1000);
+
+    // 広告を出していない店には列も段も出さない
+    setMeta([{ d: "2026-08-03", si: 1, sp: 1000, c: "A" }], []);
+    eq("広告のある店", ctx2.adStoreHas(1), true);
+    eq("広告の無い店", ctx2.adStoreHas(2), false);
+    eq("未紐付け(si=null)は店に付かない", ctx2.adStoreHas(null), false);
+
+    // 段階導入のスイッチ
+    eq("いわきには出す", ctx2.newPanelOn(1), true);
+    eq("ほかの店にはまだ出さない", ctx2.newPanelOn(2), false);
+  }
+}
+
+// --- 画面に組み込まれているか（つないだつもりで呼ばれていない事故を防ぐ）---
+{
+  const has = (re, label) => {
+    if (re.test(src)) console.log(`  OK  ${label}`);
+    else { console.log(`  NG  ${label}`); ng++; }
+  };
+  has(/drawDayKpi\(\); drawStoreAds\(\);/, "広告の段を描き直している");
+  has(/h\+=kpi2AdRows\(id,/, "KPIまとめに広告の行を足している");
+  has(/showAd\?`<th>広告費<\/th>`:""/, "日別推移に広告費の列を足している");
+  has(/AD_BYSID=null; AD_BYSTORE=null;/, "割り当てを変えたら索引を作り直す");
+  // 加盟店に広告を見せない（データ自体を配っていないが、二重に止める）
+  has(/if\(window\.FRANCHISEE\|\|!newPanelOn\(id\)\|\|!adStoreHas\(id\)\)return ""/,
+      "加盟店にはKPIまとめの広告行を出さない");
+  has(/wxStat=await weatherStats\(id,f,t\)/, "天気をAIのまとめに渡している");
+  has(/const auto=autoInsight\(wxStat\)/, "AIが使えないときも天気を使う");
+  has(/sunny\.days<3\|\|rainy\.days<3/, "日数が少ない天気には触れない");
+}
+
 console.log(ng ? `\n❌ ${ng}件ずれています。` : "\n✅ すべて期待どおりです。");
 process.exit(ng ? 1 : 0);
