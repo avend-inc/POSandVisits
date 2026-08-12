@@ -457,6 +457,26 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
   } else console.log("  OK  店舗ページの古いチップは消えている");
   has(/document\.querySelectorAll\("\.adcol"\)/, "全社の広告タブのチップは残っている（別の画面なので触らない）");
   has(/adHas\(m\.need\)\?\(m\.note\|\|""\):"元データがまだDBにありません"/, "値が出せない指標は理由をカードに書く");
+
+  // ---- 店舗ページでもカードをタップしてグラフに線を出せること ----
+  // 広告タブと同じ操作にそろえる。グラフは作り直さず同じ adChart を使う
+  // （別に作ると、正規化のしかたや軸の決め方がいつの間にか食い違う）
+  has(/function adChart\(days,byDay,cols,tot\)/, "グラフは項目と合計を外から受け取れる");
+  has(/function adWireTip\(days,byDay,cols,sel\)/, "吹き出しも項目と置き場所を外から受け取れる");
+  has(/adChart\(days,byDay,gcols,p\)/, "店舗ページも同じ adChart を使う（作り直していない）");
+  has(/adWireTip\(days,byDay,gcols,"#stad-trend"\)/, "店舗ページのグラフにも吹き出しが付く");
+  has(/<div id="stad-trend"/, "店舗ページにグラフの置き場所がある");
+  has(/class="card adcard\$\{off\?" goff":""\}" data-k="\$\{k\}"/, "店舗ページのカードはタップできる");
+  // 全社の画面と1店の画面で、消した線が飛び火すると分かりにくい
+  has(/"notime-stadgoff"/, "店舗ページの非表示は notime-stadgoff で覚える");
+  has(/"notime-adgoff"/, "広告タブの非表示は notime-adgoff のまま（別のキー）");
+  has(/let ST_AD_GOFF=/, "店舗ページの非表示は別に持つ");
+  // 全部消すとグラフが空の箱になる。何をすれば戻るかを書いておく
+  has(/グラフに出す項目がありません。上のカードをタップすると、その項目をグラフに出せます。/,
+    "全部消したときは戻し方を書く");
+  // 日ごとの売上は、その日その店の実額。店舗集合は使わない（店は1つに決まっている）
+  has(/a\.sids=null; a\.ex=M\("ex"\)\.calc\(sumRows\(rowsIn\(d,d,id\)\)\)\|\|0;/,
+    "日ごとの売上はその日・その店の実額で入れる");
   has(/\{k:"lkr", name:"いいね率"/, "いいね率がある");
   has(/\{k:"vt",  name:"平均視聴時間"/, "平均視聴時間がある");
   has(/calc:p=>p\.im>0\?p\.lk\/p\.im\*100:null/, "いいね率＝いいね数÷表示回数");
