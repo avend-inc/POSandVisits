@@ -185,10 +185,13 @@ def build_data(sb: Supabase) -> dict:
         # ex_u/ex_m=税抜売上の営業形態別内訳（u=無人営業時間・m=有人営業時間）。
         #   2レジ運用の店（下北沢＝SIPOS＋Airレジ）の内訳表示に使う。
         # v_staffed=有人営業時間の来店数（画面から手入力したぶん。visits.source='staffed'）
+        # kom_ex=小物の税抜売上。商品単価(税抜)の分子から差し引く用（分母の点数からも
+        #   小物を除いているので、分子・分母を揃える）。客単価には小物を残す（差し引かない）。
         return {"in": 0.0, "ex": 0.0, "ex_est": 0.0, "tx": 0, "it": 0.0, "v": None,
                 "ex_u": 0.0, "ex_m": 0.0, "v_staffed": None,
                 "bag_in": 0.0, "bag_ex": 0.0, "bag_q": 0.0, "reji_in": 0.0, "reji_ex": 0.0,
-                "coup_in": 0.0, "coup_q": 0.0}   # クーポン割引額・点数（レジ袋と分離）
+                "coup_in": 0.0, "coup_q": 0.0,   # クーポン割引額・点数（レジ袋と分離）
+                "kom_ex": 0.0}                   # 小物の税抜売上（商品単価の分子から除く用）
 
     def _num(v):
         try:
@@ -267,6 +270,12 @@ def build_data(sb: Supabase) -> dict:
         if c not in QTY_EXCLUDE and not r.get("is_parent"):
             rec["it"] += qty
 
+        # 小物の税抜売上を控える（商品単価の分子から差し引く用）。商品単価は分母(点数)から
+        # 小物を除いているので、分子(売上)からも除いて分子・分母を揃える。売上KPI・
+        # カテゴリ別・客単価には小物を残す（差し引かない）。
+        if c == "小物":
+            rec["kom_ex"] += amt
+
         # 明細なし（SIPOS取引照会）は 点数・売上KPI には含めるが、
         # カテゴリ別・価格帯別（→ランク帯）ランキングには入れない。
         if c in NOCAT:
@@ -340,6 +349,9 @@ def build_data(sb: Supabase) -> dict:
          "it": (None if (v["ex"] <= 0 and v["ex_est"] > 0) else round(v["it"])),
          "v": v["v"],
          "bag": round(v["reji_in"]), "bagEx": round(v["reji_ex"]), "bagq": round(v["bag_q"]),
+         # komEx=小物の税抜売上。商品単価(税抜)の分子から差し引く（分母の点数も小物を
+         #   除いているため）。客単価は小物を残すので差し引かない。
+         "komEx": round(v["kom_ex"]),
          # クーポン：利用数(点数)と割引額（値引はマイナス金額で入ることが多い）
          "coup": round(v["coup_q"]), "coupAmt": round(v["coup_in"]),
          # 無人／有人の売上内訳（exU/exM）と、有人来店の手入力（vm）。該当する店・日だけ付く。
@@ -728,6 +740,8 @@ def write_dash_tables(sb: Supabase, data: dict) -> None:
         "sales_in": r.get("in"), "sales_ex": r.get("ex"),
         "tx": r.get("tx"), "items": r.get("it"), "visitors": r.get("v"),
         "bag_in": r.get("bag"), "bag_ex": r.get("bagEx"), "bag_qty": r.get("bagq"),
+        # komono_ex=小物の税抜売上（商品単価の分子から差し引く用）。
+        "komono_ex": r.get("komEx"),
         "coupon_qty": r.get("coup"), "coupon_amount": r.get("coupAmt"),
         # exU/exM/vm は該当する店・日にしか付かない。無ければ null のまま。
         "sales_ex_unmanned": r.get("exU"), "sales_ex_manned": r.get("exM"),
