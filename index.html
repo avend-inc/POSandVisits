@@ -3814,22 +3814,53 @@ function drawStoreAds(){
 //   ・AIが【】で囲った「その行でいちばん大事なところ」を赤にする
 //   ・数字＋単位はひとかたまりで太字にする（「12」と「%」がばらけないように）
 // 赤は目立たせるための色で、「悪い」という意味ではない（増減の向きでは色を変えない）。
-function aiNum(seg){
-  return seg.replace(/([+\-−＋▲△]?\d[\d,]*(?:\.\d+)?)\s*(%|％|円|人|件|回|点|着|日|pt|ポイント|倍)/g,
-                     '<b class="ainum">$1$2</b>');
+// 単位。「22万円」を「22」＋「万」に切らないよう、長いものから先に並べる
+const AI_UNIT="万円|千円|億円|%|％|円|人|件|点|着|回|日|倍|pt|ポイント";
+const AI_NUM="[+\\-−＋▲△]?\\d[\\d,]*(?:\\.\\d+)?\\s*(?:"+AI_UNIT+")";
+// 差・増減の言い回し。読み手がいちばん知りたいのはここなので赤にする。
+// 赤＝悪い、ではない（「上回る」も赤になる）。あくまで目を留める場所の印。
+// 長い言い回しを先に置く（「増加」を「増」で切ってしまわないように）
+const AI_TREND="少ない|多い|低い|高い|上回っ|上回り|上回る|下回っ|下回り|下回る"
+  +"|増加|減少|伸び|落ち込|突出|強い|弱い|ゼロ|増|減";
+const AI_HIRE=new RegExp("("+AI_NUM+"[ぁ-ん・、]{0,4}(?:"+AI_TREND+"))","g");
+// 数字を全部太字にするのは試してやめた。1行に十数個あるので、全部目立たせると
+// 結局どれも目立たない。色を付けるのは「差・増減」だけにして、ただの実績値
+// （上位平均23.5%、商品単価3786円…）は本文のままにする。
+// すでに赤にしたところの中は触らない（二重に色を付けると要点がぼやけるため）。
+const aiSplitHi=(h,fn)=>h.split(/(<b class="aihi">[\s\S]*?<\/b>)/).map((s,i)=>i%2?s:fn(s)).join("");
+function aiMark(seg){ return seg.replace(AI_HIRE,'<b class="aihi">$1</b>'); }
+// 行に割る。
+//   AIには「1行1話題で」と頼んでいるが、実際にはひとつづきの段落で返してくることがある
+//   （実際そうなって読み飛ばされていた）。頼み方だけに頼らず、長い行はこちらで「。」で切る。
+function aiLines(text){
+  const out=[];
+  for(const ln of String(text||"").split(/\n+/).map(s=>s.trim()).filter(Boolean)){
+    if(ln.length<=60){ out.push(ln); continue; }
+    // 「。」の直後で切る（正規表現の後読みは古い端末で動かないので、素直に1文字ずつ見る）
+    const parts=[]; let buf="";
+    for(const ch of ln){ buf+=ch; if(ch==="。"){ parts.push(buf.trim()); buf=""; } }
+    if(buf.trim())parts.push(buf.trim());
+    const acc=[];
+    for(const p of parts){
+      // ごく短い文だけの行は作らない（「〜です。」だけの行は読みにくい）
+      if(acc.length&&(p.length<20||acc[acc.length-1].length<20))acc[acc.length-1]+=p;
+      else acc.push(p);
+    }
+    out.push(...acc);
+  }
+  return out;
 }
 function aiFormat(text){
-  const lines=String(text||"").split(/\n+/).map(s=>s.trim()).filter(Boolean);
+  const lines=aiLines(text);
   if(!lines.length)return "";
   return lines.map(s=>{
     let h=esc(s);
     // 先頭の見出し（「広告：」など）。全角・半角どちらのコロンでも拾う
     h=h.replace(/^([^：:【】]{1,10})([：:])/,'<span class="ailbl">$1$2</span>');
-    // 【…】＝AIが選んだ要点。赤にする
+    // 【…】＝AIが選んだ要点。指示どおり返ってきたときはこれを優先する
     h=h.replace(/【([^】]{1,60})】/g,'<b class="aihi">$1</b>');
-    // 数字の太字は、赤にした部分の外側だけに掛ける（色が二重にならないように）
-    h=h.split(/(<b class="aihi">[\s\S]*?<\/b>)/).map((seg,i)=>i%2?seg:aiNum(seg)).join("");
-    return `<p class="ailine">${h}</p>`;
+    // 【】が無くても、差・増減の言い回しは自前で赤にする（AI任せにしない）
+    return `<p class="ailine">${aiSplitHi(h,aiMark)}</p>`;
   }).join("");
 }
 // ---- AIのまとめ（ページ最下部のカード）----
@@ -3844,7 +3875,15 @@ async function aiWeeklyInsight(){
   // 古いキャッシュだけ昔の見た目のまま残る、ということが起きないようにするため。
   // （HTMLを入れていた頃のキー aiWeekly: とは別のキーにする）
   const wk=mondayOf(todayStr()), key="aiWeekly2:"+id+":"+wk;
-  try{ const c=localStorage.getItem(key); if(c){ out.innerHTML=aiFormat(c); return; } }catch(_){}
+  // 週1回しか作らないので、指示や見せ方を直しても次の月曜まで古いものが残る。
+  // その場で作り直せる逃げ道を必ず付けておく。
+  const redo=()=>{ try{localStorage.removeItem(key);}catch(_){} out.textContent="⏳ 分析中…"; aiWeeklyInsight(); };
+  const show=t=>{
+    out.innerHTML=aiFormat(t)+
+      `<div style="margin-top:9px"><button class="chip" id="ai-redo" style="padding:3px 9px;font-size:11px">今すぐ作り直す</button></div>`;
+    const b=document.getElementById("ai-redo"); if(b)b.onclick=redo;
+  };
+  try{ const c=localStorage.getItem(key); if(c){ show(c); return; } }catch(_){}
   let wxStat=null;      // 天気×売上。AIに繋がらなかったときの自動まとめでも使う
   let weeklyStat=null;  // 週次（売上・広告費・納品）。同上
   try{
@@ -3902,13 +3941,14 @@ async function aiWeeklyInsight(){
       +"（ただし日数が少ない天気は偶然で振れるので断定しないこと。天気で説明できる落ち込みと、そうでない落ち込みを分けて書いてください）。"
       // 出し方の指定。読み飛ばされないように、画面側で行に割って色を付けられる形で返してもらう
       +"書き方は次の形式を必ず守ってください。"
-      +"（1）1行につき話題は1つ。行と行は改行で区切る（全体で3〜4行）。"
+      +"（1）1行につき話題は1つ。行と行は必ず改行文字で区切る（全体で3〜4行）。"
+      +"1つの段落にまとめて書かないこと。1行はおおむね60文字以内。"
       +"（2）各行は「見出し：本文」の形にする。見出しは『広告』『来店』『売れ筋』のような6文字以内の語。"
       +"（3）各行のいちばん大事なところを1か所だけ【】で囲む（囲むのは20文字以内の語句。数字を含めてよい）。"
       +"（4）【】以外の記号・箇条書き・Markdown記法は使わない。数字は重要なものだけ添えてください。";
     const answer=await callAsk(q,digest);
     try{ localStorage.setItem(key,answer); }catch(_){}
-    out.innerHTML=aiFormat(answer);
+    show(answer);
   }catch(e){
     // AIに繋がらないときは、同じデータから自動集計でまとめを出す（中身が空にならないように）。
     // AI版ではないことが分かるよう明記し、原因も併記する。
