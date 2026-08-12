@@ -424,8 +424,38 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
   // 全社を見る広告タブと、1店を見る店舗ページとで、見たい項目は違う。別のキーで持つ
   has(/"notime-adcols"/, "広告タブは notime-adcols で覚える");
   has(/"notime-stadcols"/, "店舗ページは notime-stadcols で覚える（別のキー）");
-  has(/if\(i>=0\)\{ if\(ST_AD_COLS\.length<=1\)return;/, "最後の1つは消せない（空のカード列を作らない）");
+  has(/if\(i>=0\)\{ if\(ST_AD_COLS\.length<=1\)\{cb\.checked=true;return;\}/, "最後の1つは消せない（空のカード列を作らない）");
   has(/ST_AD_COLS=AD_METRICS\.map\(m=>m\.k\)\.filter/, "並びは指標の定義順にそろえる（押した順に散らばらせない）");
+}
+
+// --- 「表示する項目」はプルダウンで最大8つ ----------------------------
+// チップを全部横に並べると、指標が増えるほどスマホで何行にもなり、
+// 肝心のカードより目立ってしまう。畳んで、上限を決める。
+{
+  const has = (re, label) => {
+    if (re.test(src)) console.log(`  OK  ${label}`);
+    else { console.log(`  NG  ${label}`); ng++; }
+  };
+  has(/const ST_AD_MAX=8;/, "選べるのは最大8つ");
+  has(/function drawStoreAdPick\(\)/, "表示する項目はプルダウンで選ぶ");
+  has(/const lock=!on&&n>=ST_AD_MAX;/, "8つ選んだら、それ以上は押せない");
+  has(/if\(ST_AD_COLS\.length>=ST_AD_MAX\)\{cb\.checked=false;return;\}/, "上限を超えて増えない（チェックも戻す）");
+  has(/\.slice\(0,ST_AD_MAX\)/, "端末に残った古い設定も上限まで切り詰める");
+  has(/表示する項目（\$\{n\}\/\$\{ST_AD_MAX\}）/, "いま何個選んでいるかをボタンに出す");
+  has(/let stAdPickOpen=false;/, "開いているかどうかを覚える");
+  has(/drawStoreAds\(\);   \/\/ カードと注記を作り直す（プルダウンは開いたまま）/, "選び直してもプルダウンは開いたまま（続けて選べる）");
+  has(/list\.onclick=e=>e\.stopPropagation\(\);/, "プルダウンの中を押しても閉じない");
+  has(/document\.addEventListener\("click",\(\)=>\{ if\(stAdPickOpen\)/, "外側を押すと閉じる");
+  has(/e\.key==="Escape"&&stAdPickOpen/, "Escでも閉じる");
+  // 「横は4列のまま」が要件。カードの入れ物のクラスを勝手に変えていないこと
+  has(/<div class="dtop four" id="stad-cards">/, "広告カードは4列のまま（8つ選ぶと2行×4列）");
+  has(/\.dtop\.four\{grid-template-columns:repeat\(4,minmax\(0,1fr\)\)\}/, "4列の指定がCSSに残っている");
+  // 店舗ページのチップは撤去した。全社を見る広告タブのチップ（.adcol／notime-adcols）は
+  // そのまま残す＝ここで消えていてほしいのは #stad-pick の側だけ
+  if (/pick\.querySelectorAll\("\.adcol"\)/.test(src)) {
+    console.log("  NG  店舗ページに古いチップの並びが残っています"); ng++;
+  } else console.log("  OK  店舗ページの古いチップは消えている");
+  has(/document\.querySelectorAll\("\.adcol"\)/, "全社の広告タブのチップは残っている（別の画面なので触らない）");
   has(/adHas\(m\.need\)\?\(m\.note\|\|""\):"元データがまだDBにありません"/, "値が出せない指標は理由をカードに書く");
   has(/\{k:"lkr", name:"いいね率"/, "いいね率がある");
   has(/\{k:"vt",  name:"平均視聴時間"/, "平均視聴時間がある");
@@ -437,6 +467,69 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
   if (/p\.vw|e\.vw/.test(src)) {
     console.log("  NG  平均視聴時間に重み付けの計算が残っています"); ng++;
   } else console.log("  OK  平均視聴時間に余計な計算を入れていない");
+}
+
+// --- AIのまとめの見せ方 ------------------------------------------------
+// 実物の aiFormat / aiNum を取り出して動かす（正規表現の書き間違いは目で見ても分からない）。
+{
+  const f2 = src.indexOf("function aiNum(seg){");
+  const t2 = src.indexOf("// ---- AIのまとめ（ページ最下部のカード）----");
+  if (f2 < 0 || t2 <= f2) {
+    console.log("  NG  aiFormat を取り出せませんでした"); ng++;
+  } else {
+    const c2 = { console };
+    vm.createContext(c2);
+    // esc は画面側の実物と同じ振る舞い（HTMLの特殊文字を潰す）
+    vm.runInContext(
+      'function esc(s){return String(s==null?"":s)' +
+      '.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}\n' +
+      src.slice(f2, t2), c2);
+    const fmt = (s) => vm.runInContext("aiFormat(" + JSON.stringify(s) + ")", c2);
+    const ok = (label, cond) => {
+      console.log(`  ${cond ? "OK " : "NG "} ${label}`);
+      if (!cond) ng++;
+    };
+    ok("話題ごとに1行に割る（一かたまりで出さない）",
+      (fmt("広告：あ\n来店：い").match(/class="ailine"/g) || []).length === 2);
+    ok("空行は行として数えない",
+      (fmt("あ\n\n\nい").match(/class="ailine"/g) || []).length === 2);
+    ok("【】で囲まれたところが赤になる",
+      /<b class="aihi">CTRが12%低い<\/b>/.test(fmt("広告：【CTRが12%低い】です。")));
+    ok("【】は画面に残らない", !/[【】]/.test(fmt("広告：【CTRが12%低い】です。")));
+    ok("見出しは太字にする", /<span class="ailbl">広告：<\/span>/.test(fmt("広告：あ")));
+    ok("見出しが無い行でも壊れない",
+      /class="ailine">売上が伸びました/.test(fmt("売上が伸びました")));
+    // 「12」と「%」が別々に太字になると読みにくい。ひとかたまりで扱う
+    ok("数字と単位はひとかたまりで太字にする",
+      /<b class="ainum">12%<\/b>/.test(fmt("CTRは12%でした")));
+    ok("桁区切りの金額もひとかたまり",
+      /<b class="ainum">1,234,567円<\/b>/.test(fmt("広告費は1,234,567円です")));
+    ok("符号付きの増減も拾う", /<b class="ainum">\+15%<\/b>/.test(fmt("売上は+15%です")));
+    // 赤の中でさらに色を変えると、せっかくの「ここが大事」がぼやける
+    ok("赤にしたところの中では数字を別色にしない",
+      !/aihi">[^<]*<b class="ainum"/.test(fmt("【CTRが12%低い】")));
+    ok("赤の外の数字はちゃんと太字になる",
+      /<b class="ainum">34%<\/b>/.test(fmt("【CTRが12%低い】。来店は34%増でした")));
+    // AIの答えはそのままHTMLに入れる。タグを書かれても実行させない
+    ok("HTMLタグを書かれても素通ししない",
+      !/<img/.test(fmt("<img src=x onerror=alert(1)>")) &&
+      /&lt;img/.test(fmt("<img src=x onerror=alert(1)>")));
+    ok("空の答えなら何も出さない", fmt("") === "" && fmt(null) === "");
+  }
+  // キャッシュは答えの文章そのもの。HTMLを入れると、見せ方を直しても古い分だけ昔の形で残る
+  if (/localStorage\.setItem\(key,html\)/.test(src)) {
+    console.log("  NG  AIのまとめのキャッシュにHTMLを入れています"); ng++;
+  } else console.log("  OK  AIのまとめのキャッシュは文章そのものを持つ");
+  if (/localStorage\.setItem\(key,answer\)/.test(src) && /"aiWeekly2:"/.test(src)) {
+    console.log("  OK  見せ方を変えたのでキャッシュのキーも変えている");
+  } else { console.log("  NG  キャッシュのキーが古いままです"); ng++; }
+  // AIが繋がらない日だけ画面の印象が変わらないよう、自動集計版も同じ形で返す
+  if (/return out\.slice\(0,4\)\.join\("\\n"\);/.test(src)) {
+    console.log("  OK  自動集計版も1行1話題で返す");
+  } else { console.log("  NG  自動集計版が1かたまりのままです"); ng++; }
+  if (/out\.innerHTML=\(auto\?aiFormat\(auto\)/.test(src)) {
+    console.log("  OK  自動集計版も同じ見せ方に通している");
+  } else { console.log("  NG  自動集計版が昔の見せ方のままです"); ng++; }
 }
 
 console.log(ng ? `\n❌ ${ng}件ずれています。` : "\n✅ すべて期待どおりです。");
