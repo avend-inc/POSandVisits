@@ -147,7 +147,7 @@ async function loadTargets(){ if(TARGETS)return; if(window.__TARGETS__){TARGETS=
 //  → テーブルに問題があっても「今と同じ挙動」に自動で戻るので既存機能に影響しない。
 async function loadDaily(){
   const PAGE=1000, CONC=8;
-  const cols="date,store_id,sales_in,sales_ex,tx,items,visitors,bag_in,bag_ex,bag_qty,coupon_qty,coupon_amount,sales_ex_unmanned,sales_ex_manned,visitors_staffed";
+  const cols="date,store_id,sales_in,sales_ex,tx,items,visitors,bag_in,bag_ex,bag_qty,komono_ex,coupon_qty,coupon_amount,sales_ex_unmanned,sales_ex_manned,visitors_staffed";
   const out=[]; let page=0, done=false;
   while(!done){
     const jobs=[];
@@ -155,7 +155,7 @@ async function loadDaily(){
     const res=await Promise.all(jobs);
     for(const {data,error} of res){ if(error)throw new Error(error.message); out.push(...(data||[])); if(!data||data.length<PAGE)done=true; }
   }
-  return out.map(r=>{ const o={d:r.date,s:r.store_id,in:r.sales_in,ex:r.sales_ex,tx:r.tx,it:r.items,v:r.visitors,bag:r.bag_in,bagEx:r.bag_ex,bagq:r.bag_qty,coup:r.coupon_qty,coupAmt:r.coupon_amount};
+  return out.map(r=>{ const o={d:r.date,s:r.store_id,in:r.sales_in,ex:r.sales_ex,tx:r.tx,it:r.items,v:r.visitors,bag:r.bag_in,bagEx:r.bag_ex,bagq:r.bag_qty,komEx:r.komono_ex,coup:r.coupon_qty,coupAmt:r.coupon_amount};
     if(r.sales_ex_unmanned!=null)o.exU=r.sales_ex_unmanned; if(r.sales_ex_manned!=null)o.exM=r.sales_ex_manned; if(r.visitors_staffed!=null)o.vm=r.visitors_staffed; return o; });
 }
 async function loadDataFromTables(){
@@ -250,9 +250,9 @@ function syncAdminTab(){const ad=!!(ME&&ME.role==="admin");const t=document.getE
 function computeActual(store,ym){
   const ids=idsForScope(store);
   // in/ex/tx/it=売上系（全店）。txv=来店をKPIに使う店だけの取引（購入率の分子）、v=同店の来店（分母）。
-  const a={in:0,ex:0,tx:0,txv:0,it:0,v:0,bag:0,bagq:0,hasV:false};
+  const a={in:0,ex:0,tx:0,txv:0,it:0,v:0,bag:0,bagq:0,bagEx:0,komEx:0,hasV:false};
   for(const r of DATA.daily){ if(!ids.has(r.s))continue; if(r.d.slice(0,7)!==ym)continue;
-    a.in+=r.in||0;a.ex+=r.ex||0;a.tx+=r.tx||0;a.it+=r.it||0;a.bag+=r.bag||0;a.bagq+=r.bagq||0;
+    a.in+=r.in||0;a.ex+=r.ex||0;a.tx+=r.tx||0;a.it+=r.it||0;a.bag+=r.bag||0;a.bagq+=r.bagq||0;a.bagEx+=r.bagEx||0;a.komEx+=r.komEx||0;
     if(kvOf(r.s)){ a.txv+=r.tx||0; if(r.v!=null){a.v+=r.v;a.hasV=true;} } }
   if(!a.hasV)a.v=0; return a;
 }
@@ -267,7 +267,7 @@ const KPIS=[
   {k:"pr",   name:"購入率",             fmt:F1, u:"%", budget:true, av:a=>a.v?a.txv/a.v*100:null},
   {k:"aov",  name:"客単価（税込）",       fmt:YEN,u:"円",budget:true, av:a=>a.tx?a.in/a.tx:null},
   {k:"it",   name:"販売数",             fmt:NUM,u:"点",budget:true, av:a=>a.it},
-  {k:"aup",  name:"商品単価（税抜）",     fmt:YEN,u:"円",budget:true, av:a=>a.it?a.ex/a.it:null},
+  {k:"aup",  name:"商品単価（税抜）",     fmt:YEN,u:"円",budget:true, av:a=>a.it?(a.ex-(a.bagEx||0)-(a.komEx||0))/a.it:null},  /* 分子・分母ともレジ袋・小物を除く */
   {k:"upt",  name:"平均購入数",         fmt:F2, u:"点",budget:true, av:a=>a.tx?a.it/a.tx:null},
   {k:"bag",  name:"レジ袋売上",         fmt:YEN,u:"円",budget:false,av:a=>a.bag},
   {k:"bagq", name:"レジ袋・クーポン数", fmt:NUM,u:"点",budget:false,av:a=>a.bagq},
@@ -647,7 +647,7 @@ function fcBody(monthLabel,storeName){
     <div class="panel">
       <h2>KPI 着地見込み <span class="sub" style="font-weight:500">（KGI=売上／主要KPI=来店数・購入率・客単価）</span></h2>
       <div class="tblwrap"><table id="kpi"></table></div>
-      <p class="note">税抜売上＝税込×実績税率(${(AUTO.exRatio).toFixed(3)})。購入率＝取引数÷来店客数／客単価（税込）＝税込÷取引数／平均購入数＝点数÷取引数／平均商品単価（税抜）＝税抜÷点数。レジ袋・クーポンは除外済み。</p>
+      <p class="note">税抜売上＝税込×実績税率(${(AUTO.exRatio).toFixed(3)})。購入率＝取引数÷来店客数／客単価（税込）＝税込÷取引数／平均購入数＝点数÷取引数／平均商品単価（税抜）＝(税抜−レジ袋−小物)÷点数（分子・分母ともレジ袋・小物を除く）／客単価はレジ袋・小物を含む（客が払った額）。点数はレジ袋・クーポン・小物・セット割の器を除外。</p>
     </div>
     <div class="foot">「私の見込み」はデータから自動算出した初期値です（着地見込み＝①今月の経過実績＋②平日の直近10日平均×残平日＋③土日祝の直近10日平均×残土日祝。土日祝＝土日＋祝日）。ズレていれば数値を上書きして「更新」（サーバ保存＝全端末に反映）。「自動見込みに戻す」で初期値に戻せます。締日＝取り込み済みの最新日。</div>`;
 }

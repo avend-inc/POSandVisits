@@ -78,7 +78,7 @@ async function loadTargets(){ if(window.__TARGETS__){TARGETS=window.__TARGETS__;
 //  → テーブルに問題があっても「今と同じ挙動」に自動で戻るので既存機能に影響しない。
 async function loadDaily(){
   const PAGE=1000, CONC=8;
-  const cols="date,store_id,sales_in,sales_ex,tx,items,visitors,bag_in,bag_ex,bag_qty,coupon_qty,coupon_amount,sales_ex_unmanned,sales_ex_manned,visitors_staffed";
+  const cols="date,store_id,sales_in,sales_ex,tx,items,visitors,bag_in,bag_ex,bag_qty,komono_ex,coupon_qty,coupon_amount,sales_ex_unmanned,sales_ex_manned,visitors_staffed";
   const out=[]; let page=0, done=false;
   while(!done){
     const jobs=[];
@@ -86,7 +86,7 @@ async function loadDaily(){
     const res=await Promise.all(jobs);
     for(const {data,error} of res){ if(error)throw new Error(error.message); out.push(...(data||[])); if(!data||data.length<PAGE)done=true; }
   }
-  return out.map(r=>{ const o={d:r.date,s:r.store_id,in:r.sales_in,ex:r.sales_ex,tx:r.tx,it:r.items,v:r.visitors,bag:r.bag_in,bagEx:r.bag_ex,bagq:r.bag_qty,coup:r.coupon_qty,coupAmt:r.coupon_amount};
+  return out.map(r=>{ const o={d:r.date,s:r.store_id,in:r.sales_in,ex:r.sales_ex,tx:r.tx,it:r.items,v:r.visitors,bag:r.bag_in,bagEx:r.bag_ex,bagq:r.bag_qty,komEx:r.komono_ex,coup:r.coupon_qty,coupAmt:r.coupon_amount};
     if(r.sales_ex_unmanned!=null)o.exU=r.sales_ex_unmanned; if(r.sales_ex_manned!=null)o.exM=r.sales_ex_manned; if(r.visitors_staffed!=null)o.vm=r.visitors_staffed; return o; });
 }
 async function loadDataFromTables(){
@@ -108,8 +108,8 @@ function addMonths(ym,d){let[y,m]=ym.split("-").map(Number);m+=d;while(m<=0){m+=
 function ownOf(sid){const s=(DATA.stores||[]).find(x=>String(x.id)===String(sid));return (s&&s.own)?s.own:"直営";}
 function kvOf(sid){const s=(DATA.stores||[]).find(x=>String(x.id)===String(sid));return s?(s.kv!==false):true;}
 function usableStores(){const w=new Set(DATA.daily.map(r=>r.s));return DATA.stores.filter(s=>w.has(s.id)&&s.visible!==false);}
-function sumRows(rows){const p={in:0,ex:0,tx:0,txv:0,it:0,v:0,hasV:false};
-  for(const r of rows){p.in+=r.in||0;p.ex+=(r.ex!=null?r.ex:0);p.tx+=r.tx||0;p.it+=(r.it!=null?r.it:0);if(kvOf(r.s)){p.txv+=r.tx||0;if(r.v!=null){p.v+=r.v;p.hasV=true;}}}
+function sumRows(rows){const p={in:0,ex:0,tx:0,txv:0,it:0,v:0,bagEx:0,komEx:0,hasV:false};
+  for(const r of rows){p.in+=r.in||0;p.ex+=(r.ex!=null?r.ex:0);p.tx+=r.tx||0;p.it+=(r.it!=null?r.it:0);p.bagEx+=r.bagEx||0;p.komEx+=r.komEx||0;if(kvOf(r.s)){p.txv+=r.tx||0;if(r.v!=null){p.v+=r.v;p.hasV=true;}}}
   if(!p.hasV)p.v=0;return p;}
 function prep(){const ds=DATA.daily.map(r=>r.d).sort();DATA._min=ds[0];DATA._max=ds[ds.length-1];
   const sd=DATA.daily.filter(r=>(r.tx||0)>0||(r.in||0)>0).map(r=>r.d).sort();DATA._salesMax=sd.length?sd[sd.length-1]:DATA._max;}
@@ -289,9 +289,9 @@ async function renderKeiei(){
   const dids=new Set(dstores.map(s=>s.id));
   const aggPrev=sumIds(dids,pf,pt), aggSo=curEnd?sumIds(dids,cf,curEnd):sumIds(dids,cf,cf);
   const f=elapsed>0?daysIn/elapsed:0, gAll=grow(sumIds(dids,lcf,lct).ex||0,sumIds(dids,lnf,lnt).ex||0);
-  const scale=(a,m)=>({ex:(a.ex||0)*m,in:(a.in||0)*m,tx:(a.tx||0)*m,it:(a.it||0)*m,v:(a.hasV?a.v:0)*m,txv:(a.txv||0)*m,hasV:a.hasV});
+  const scale=(a,m)=>({ex:(a.ex||0)*m,in:(a.in||0)*m,tx:(a.tx||0)*m,it:(a.it||0)*m,v:(a.hasV?a.v:0)*m,txv:(a.txv||0)*m,bagEx:(a.bagEx||0)*m,komEx:(a.komEx||0)*m,hasV:a.hasV});
   const aggCur=scale(aggSo,f), aggNext=scale(aggCur,gAll);
-  const kOf=a=>({ex:Math.round(a.ex||0),aov:(a.tx>0?Math.round(a.in/a.tx):0),upt:(a.tx>0?+(a.it/a.tx).toFixed(2):0),aup:(a.it>0?Math.round(a.ex/a.it):0),v:Math.round(a.v||0),pr:(a.v>0?+(a.txv/a.v*100).toFixed(1):0)});
+  const kOf=a=>({ex:Math.round(a.ex||0),aov:(a.tx>0?Math.round(a.in/a.tx):0),upt:(a.tx>0?+(a.it/a.tx).toFixed(2):0),aup:(a.it>0?Math.round((a.ex-(a.bagEx||0)-(a.komEx||0))/a.it):0),  /* 商品単価＝(税抜−レジ袋−小物)÷点数。分母(点数)と揃える */v:Math.round(a.v||0),pr:(a.v>0?+(a.txv/a.v*100).toFixed(1):0)});
   const KPIS=[{k:"ex",n:"税抜売上"},{k:"aov",n:"客単価(税込)"},{k:"upt",n:"平均購入点数",u:"点"},{k:"aup",n:"商品単価(税抜)"},{k:"v",n:"来店客数",u:"人"},{k:"pr",n:"購入率",u:"%"}];
   const kpi={prev:kOf(aggPrev),cur:kOf(aggCur),next:kOf(aggNext)};
   // 直営全体の翌月 税抜売上は、各店の翌月着地（予算優先）の合計と一致させる。
@@ -314,6 +314,7 @@ async function renderKeiei(){
   let h='';
   h+=`<header><h1>🧮 経営レポート</h1><span class="sub">対象 <b>${cur}</b>（前月 ${ml(prev)}／当月 ${ml(cur)}／来月 ${ml(next)}）${elapsed?`　当月は ${elapsed}/${daysIn}日で日割り換算`:'　当月データなし'}</span><a class="navlink" href="index.html" style="margin-left:auto">← ダッシュボード</a></header>`;
   h+=`<div class="note">前月＝実績確定／当月＝<b>ダッシュボードと同じ着地見込み（①②③）</b>／翌月以降＝<b>予算（事業計画 bizplan）</b>を着地見込みに（予算が無い店のみ前年同月比で推定）。自動入力ですが編集できます（「保存する」で全員に共有）。</div>`;
+  h+=`<div class="note">■KPIの定義（ダッシュボードと共通）：<b>商品販売数</b>＝実際に売れた商品の点数（レジ袋・クーポン・小物・セット割の器「セール商品」は数えない）／<b>平均購入点数</b>＝商品販売数÷取引数／<b>商品単価(税抜)</b>＝(税抜売上−レジ袋−小物)÷商品販売数（分子・分母ともレジ袋・小物を除く）／<b>客単価</b>＝売上÷取引数（レジ袋・小物も客が払った額なので含む）。</div>`;
   // ■ 予算達成の見込み（目標 vs 着地）※月次予実Excelから取込んだ目標を店舗に紐付け
   const trows=Object.keys(T).map(tok=>{ const cand=usableStores().filter(s=>(s.name||"").indexOf(tok)>=0); return {tok,st:cand.find(s=>ownOf(s.id)==="直営")||cand[0]}; }).filter(x=>x.st&&T[x.tok][cur]);
   if(trows.length){
