@@ -173,9 +173,10 @@
   .kmat tr.we td{color:var(--accent)}
   /* 店舗詳細ページ：上部サマリーカード（横幅で数字を縮めてはみ出さない）・見出しアクセント */
   .dtop{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:10px 0 4px}
-  /* 直営店は「売上予算」を足して4枚。スマホ幅では3枚を横に並べると潰れるので2×2にする */
+  /* 直営店は「売上予算」を足して4枚 */
   .dtop.four{grid-template-columns:repeat(4,minmax(0,1fr))}
-  /* カードは常に横4列。スマホでは中身を詰めて4つ入るようにする */
+  /* 広告のカードは横4列のまま（項目を8つ選ぶと2行×4列になる）。
+     スマホでは中身を詰めて4つ入るようにする */
   @media(max-width:620px){
     .dtop.four{gap:5px}
     .dtop.four .card{padding:7px 7px}
@@ -183,7 +184,43 @@
     .dtop.four .card .val{font-size:clamp(11px,3.6vw,15px)}
     .dtop.four .card .val small{font-size:9px}
     .dtop.four .card .knote{font-size:8.5px;margin-top:2px}
+    /* 店舗ページ上部の4枚（前日・今月・着地見込み・売上予算）だけは2×2に折り返す。
+       金額の桁が大きく、1行4列だと「円」がはみ出し、達成見込みも切れてしまうため */
+    .dtop.headline.four{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+    .dtop.headline.four .card{padding:10px 11px}
+    .dtop.headline.four .card .k{font-size:11px;margin-bottom:5px}
+    .dtop.headline.four .card .val{font-size:clamp(15px,5vw,20px)}
+    .dtop.headline.four .card .val small{font-size:11px}
+    .dtop.headline.four .card .knote{font-size:9.5px;margin-top:4px}
   }
+  /* 表示する項目のプルダウン（広告カード用） */
+  .pickwrap{position:relative;display:inline-block}
+  .picklist{position:absolute;z-index:30;top:calc(100% + 4px);left:0;min-width:230px;max-height:62vh;
+    overflow:auto;background:var(--surface);border:1px solid var(--border);border-radius:12px;
+    box-shadow:0 8px 24px rgba(0,0,0,.18);padding:6px}
+  .picklist label{display:flex;align-items:center;gap:7px;padding:7px 8px;border-radius:8px;
+    font-size:12px;cursor:pointer;white-space:nowrap}
+  .picklist label:hover{background:var(--surface2)}
+  .picklist label.off{opacity:.45;cursor:not-allowed}
+  .picklist .nd{font-size:10px;color:var(--muted);margin-left:auto}
+  .picklist .dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .picklist input{margin:0;flex:none}
+  .picklist .foot{font-size:10px;color:var(--muted);padding:6px 8px 2px;border-top:1px solid var(--border);
+    margin-top:4px;white-space:normal;max-width:230px;line-height:1.6}
+  /* AIのまとめ。1かたまりの文章だと読み飛ばされるので、話題ごとに1行に割って出す。
+     ・見出し（「広告：」など）を先頭に立てる
+     ・いちばん大事なところを赤にする（AIが【】で囲ったところ）
+     ・数字は太字にして拾いやすくする
+     赤は「悪い」という意味ではない。増減の向きでは色を変えていない */
+  #ai-out .ailine{margin:0 0 8px;padding-left:1em;text-indent:-1em}
+  #ai-out .ailine:last-child{margin-bottom:0}
+  #ai-out .ailine::before{content:"・";color:var(--muted)}
+  #ai-out .ailbl{font-weight:700;color:var(--ink)}
+  #ai-out .ainum{font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
+  #ai-out .aihi{font-weight:700;color:#d9333f}
+  @media (prefers-color-scheme: dark){ #ai-out .aihi{color:#ff8f85} }
+  :root[data-theme="dark"] #ai-out .aihi{color:#ff8f85}
+  :root[data-theme="light"] #ai-out .aihi{color:#d9333f}
   /* カードはタップでグラフの表示/非表示。色は項目の線と同じ */
   .dtop .card.adcard{cursor:pointer;-webkit-tap-highlight-color:transparent}
   .dtop .card.adcard .k{display:flex;align-items:center;gap:4px}
@@ -195,7 +232,9 @@
   .dtop .card .rate{margin-top:4px;font-size:10px;font-weight:800;white-space:nowrap}
   .dtop .card{padding:11px 12px;border-radius:12px;border-top:3px solid var(--accent)}
   .dtop .card .k{font-size:11px;margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .dtop .card .val{font-size:clamp(14px,4.4vw,22px);white-space:nowrap;letter-spacing:-.02em}
+  .dtop .card{min-width:0;overflow:hidden}
+  .dtop .card .val{font-size:clamp(14px,4.4vw,22px);white-space:nowrap;letter-spacing:-.02em;
+    overflow:hidden;text-overflow:ellipsis}
   .dtop .card .val small{font-size:11px;font-weight:700;color:var(--ink2);margin-left:1px}
   .dtop .card .knote{font-size:9.5px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .dtop .card.land{background:linear-gradient(135deg,#1f2a44,#2b3c60);border-top-color:#b8860b;border-color:#2b3c60}
@@ -2022,7 +2061,7 @@ function renderDetail(){
       最新 売上<b style="color:var(--ink)">${mdShort(DATA._salesMax)}</b>・来店<b style="color:var(--ink)">${mdShort(DATA._visitMax)}</b>｜更新 ${genShort(DATA.generated_at)}
     </div>
     ${navrow}
-    <div class="dtop${budgetShown(state.detail)?" four":""}">
+    <div class="dtop headline${budgetShown(state.detail)?" four":""}">
       <div class="card"><div class="k">前日の売上</div><div class="val" id="dtop-prev">—</div><div class="knote">税抜 <span id="dtop-prev-note"></span></div><div class="ksplit" id="dtop-prev-split"></div></div>
       <div class="card"><div class="k">今月の売上</div><div class="val" id="dtop-cur">—</div><div class="knote">税抜 <span id="dtop-cur-note"></span></div><div class="ksplit" id="dtop-cur-split"></div></div>
       <div class="card land"><div class="k">着地見込み</div><div class="val" id="dtop-land">—</div><div class="knote">当月の月末予測</div><div class="ksplit" id="dtop-land-split"></div></div>
@@ -2106,8 +2145,7 @@ function renderDetail(){
         <span class="sub">〜</span>
         <input type="date" id="adto" min="${DATA._min}" max="${DATA._max}" value="${state.aTo}">
       </div>
-      <div class="sub" style="font-weight:700;margin:6px 0 4px">表示する項目</div>
-      <div id="stad-pick" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px"></div>
+      <div class="pickwrap" id="stad-pick" style="margin:6px 0 10px"></div>
       <div class="dtop four" id="stad-cards"></div>
       <p class="note" id="stad-note" style="margin:8px 0 0"></p>
       <h2 style="margin-top:16px">キャンペーン別</h2>
@@ -3593,42 +3631,94 @@ function drawKpi2Detail(el,ctx){
   h+=kpi2AdRows(id,{selCol,wdCol,weCol,top3,baked});
   el.innerHTML=h+`</tbody>`;
 }
-// KPIまとめの広告2行（広告費・売上比率）。
+// KPIまとめの広告2行（広告費・CPC）。
 //   単店の広告費だけを眺めても「使いすぎか足りないか」は判断できない。
 //   この表の値打ちは上位3店平均との差分なので、そこに並べて初めて意味が出る。
 //   ・広告費は実額。上位3店平均は「各店の広告費の平均」（他の行と同じ作り方）
-//   ・売上比率は 広告費÷税抜売上。自店は実額どうしを割り、
-//     上位3店平均は各店の比率の平均（＝店の平均であって、日の平均ではない）
+//   ・CPCは AVEND定義＝広告費÷プロフアクセス数。自店は実額どうしを割り、
+//     上位3店平均は各店のCPCの平均（＝店の平均であって、日の平均ではない）
 //   ・加盟店には広告データを配っていないので、この2行は出ない
 function kpi2AdRows(id,ctx){
   if(window.FRANCHISEE||!newPanelOn(id)||!adStoreHas(id))return "";
   const {selCol,wdCol,weCol,top3,baked}=ctx;
   const yen=v=>v==null?"—":YEN(Math.round(v))+"円";
-  const pct=v=>v==null?"—":F1(v)+"%";
   const spOf=(sid,c)=>adStoreHas(sid)?adStoreSum(sid,c.from,c.to).sp:null;
-  const srOf=(sid,c)=>{
-    if(!adStoreHas(sid))return null;
-    return adSrOf(adStoreSum(sid,c.from,c.to).sp, M("ex").calc(sumRows(rowsIn(c.from,c.to,sid))));
-  };
+  // CPC＝広告費÷プロフアクセス数。プロフアクセス数が無い店・期間は「—」（0にしない）
+  const cpcOf=(sid,c)=>adStoreHas(sid)?adVal("cpc",adStoreSum(sid,c.from,c.to)):null;
   const avg=vs=>{const a=vs.filter(v=>v!=null);return a.length?a.reduce((s,v)=>s+v,0)/a.length:null;};
   // 加盟店モード（baked）は他店を持たないので比較列を出さない
   const peerSp=baked?null:avg(top3.map(x=>spOf(x,selCol)));
-  const peerSr=baked?null:avg(top3.map(x=>srOf(x,selCol)));
+  const peerCpc=baked?null:avg(top3.map(x=>cpcOf(x,selCol)));
   const wdA=adDayAvg(id,wdCol.from,wdCol.to,wdCol.day);
   const weA=adDayAvg(id,weCol.from,weCol.to,weCol.day);
-  const curSp=spOf(id,selCol), curSr=srOf(id,selCol);
+  const curSp=spOf(id,selCol), curCpc=cpcOf(id,selCol);
   const dSp=(curSp!=null&&peerSp!=null)?curSp-peerSp:null;
-  const dSr=(curSr!=null&&peerSr!=null)?curSr-peerSr:null;
-  // 広告費は「多い＝良い」ではないので、差分に色を付けない（色は売上比率にも付けない）
+  const dCpc=(curCpc!=null&&peerCpc!=null)?curCpc-peerCpc:null;
+  // 広告費もCPCも「多い/少ない＝良い」が一概に言えないので、差分に色を付けない
+  //（CPCは安いほうが良いが、出稿量とのトレードオフがあるため色で断定しない）
   return `<tr><td>広告費 <span class="sub" style="font-weight:500;font-size:9.5px">Meta</span></td>
       <td>${yen(curSp)}</td><td class="peer">${yen(peerSp)}</td>
       <td>${dSp==null?"—":(dSp>=0?"+":"−")+YEN(Math.round(Math.abs(dSp)))+"円"}</td>
       <td>${yen(wdA.per)}</td><td>${yen(weA.per)}</td></tr>
-    <tr><td>売上比率 <span class="sub" style="font-weight:500;font-size:9.5px">広告費÷税抜売上</span></td>
-      <td>${pct(curSr)}</td><td class="peer">${pct(peerSr)}</td>
-      <td>${dSr==null?"—":(dSr>=0?"+":"−")+F1(Math.abs(dSr))+"%"}</td>
-      <td>${pct(wdA.sr)}</td><td>${pct(weA.sr)}</td></tr>`;
+    <tr><td>CPC <span class="sub" style="font-weight:500;font-size:9.5px">広告費÷プロフアクセス数</span></td>
+      <td>${yen(curCpc)}</td><td class="peer">${yen(peerCpc)}</td>
+      <td>${dCpc==null?"—":(dCpc>=0?"+":"−")+YEN(Math.round(Math.abs(dCpc)))+"円"}</td>
+      <td>${yen(adVal("cpc",wdA.p))}</td><td>${yen(adVal("cpc",weA.p))}</td></tr>`;
 }
+// ---- 広告カードの「表示する項目」プルダウン ----
+//   以前はチップを全部横に並べていたが、項目が11個に増えて、スマホでは3行になり
+//   カードより目立ってしまった。畳んでおいて、開いたときだけ選べるようにする。
+//   カードの横は4列のままなので、8つ選ぶと 2行×4列 になる。
+let stAdPickOpen=false;
+function drawStoreAdPick(){
+  const pick=document.getElementById("stad-pick"); if(!pick)return;
+  // スマホでは中身がスクロールする。作り直すたびに先頭へ戻ると、下のほうの項目を
+  // 続けて選べないので、いまの位置を覚えておいて戻す
+  const prev=document.getElementById("stad-picklist");
+  const sc=prev?prev.scrollTop:0;
+  const n=ST_AD_COLS.length;
+  const rows=AD_METRICS.map(m=>{
+    const c=AD_COLOR[m.k]||"var(--accent)";
+    const on=ST_AD_COLS.includes(m.k), ready=adHas(m.need);
+    // 上限まで選んだら、まだ選んでいない項目は押せない（どれかを外してから選ぶ）
+    const lock=!on&&n>=ST_AD_MAX;
+    const tip=(m.note||"")+(ready?"":(m.note?" / ":"")+`元データ（${m.src||"—"}）がDBに入ると値が出ます`)
+      +(lock?` / ${ST_AD_MAX}つまでです。どれかを外してから選んでください`:"");
+    return `<label class="${lock?"off":""}" title="${esc(tip)}">`+
+      `<input type="checkbox" data-k="${m.k}"${on?" checked":""}${lock?" disabled":""}>`+
+      `<i class="dot" style="background:${c}"></i>${esc(m.name)}`+
+      (ready?"":`<span class="nd">データ待ち</span>`)+`</label>`;
+  }).join("");
+  pick.innerHTML=
+    `<button class="chip" id="stad-pickbtn" aria-expanded="${stAdPickOpen}">`+
+      `表示する項目（${n}/${ST_AD_MAX}）<span style="margin-left:5px">${stAdPickOpen?"▴":"▾"}</span></button>`+
+    (stAdPickOpen
+      ? `<div class="picklist" id="stad-picklist">${rows}`+
+        `<div class="foot">最大${ST_AD_MAX}つまで選べます。横は4列なので、5つ以上選ぶと2行になります。</div></div>`
+      : "");
+  document.getElementById("stad-pickbtn").onclick=e=>{
+    e.stopPropagation(); stAdPickOpen=!stAdPickOpen; drawStoreAdPick();
+  };
+  const list=document.getElementById("stad-picklist");
+  if(list){
+    if(sc)list.scrollTop=sc;
+    list.onclick=e=>e.stopPropagation();   // 中を押しても閉じない（続けて選べるように）
+    list.querySelectorAll("input[type=checkbox]").forEach(cb=>cb.onchange=()=>{
+      const k=cb.dataset.k, i=ST_AD_COLS.indexOf(k);
+      // 0個になるとカードが消えて何も分からなくなるので、最後の1つは外せない
+      if(i>=0){ if(ST_AD_COLS.length<=1){cb.checked=true;return;} ST_AD_COLS.splice(i,1); }
+      else    { if(ST_AD_COLS.length>=ST_AD_MAX){cb.checked=false;return;} ST_AD_COLS.push(k); }
+      // 並びは AD_METRICS の順に整える（押した順に並ぶと毎回位置が変わって読みにくい）
+      ST_AD_COLS=AD_METRICS.map(m=>m.k).filter(k2=>ST_AD_COLS.includes(k2));
+      try{localStorage.setItem("notime-stadcols",JSON.stringify(ST_AD_COLS));}catch(e){}
+      drawStoreAds();   // カードと注記を作り直す（プルダウンは開いたまま）
+    });
+  }
+}
+// 外側をタップ／Esc で閉じる。開きっぱなしだとカードが隠れてしまう
+document.addEventListener("click",()=>{ if(stAdPickOpen){stAdPickOpen=false;drawStoreAdPick();} });
+document.addEventListener("keydown",e=>{ if(e.key==="Escape"&&stAdPickOpen){stAdPickOpen=false;drawStoreAdPick();} });
+
 // ---- 店舗ページの「広告（Meta）」の段 ----
 //   広告タブは全社を見る画面なので、店の人が自店の広告を見るには絞り込みが要る。
 //   ここは最初からこの店だけ。期間は上のKPIまとめと同じ（別々にすると
@@ -3657,26 +3747,8 @@ function drawStoreAds(){
     return card(m.name,txt,adHas(m.need)?(m.note||""):"元データがまだDBにありません");
   }).join("");
 
-  // 表示する項目のチップ。元データが無い指標は薄く出す（選べないのではなく「まだ値が無い」）
-  const pick=document.getElementById("stad-pick");
-  if(pick){
-    pick.innerHTML=AD_METRICS.map(m=>{
-      const c=AD_COLOR[m.k]||"var(--accent)";
-      const on=ST_AD_COLS.includes(m.k), ready=adHas(m.need);
-      const tip=(m.note||"")+(ready?"":(m.note?" / ":"")+`元データ（${m.src||"—"}）がDBに入ると値が出ます`);
-      return `<button class="chip adcol${on?" on":""}${ready?"":" nodata"}" data-k="${m.k}" title="${esc(tip)}"`+
-             ` style="${on?`background:${c};border-color:${c};color:#fff`:""}">`+
-             `<i class="dot" style="background:${c}"></i>${m.name}</button>`;
-    }).join("");
-    pick.querySelectorAll(".adcol").forEach(b=>b.onclick=()=>{
-      const k=b.dataset.k, i=ST_AD_COLS.indexOf(k);
-      if(i>=0){ if(ST_AD_COLS.length<=1)return; ST_AD_COLS.splice(i,1); } else ST_AD_COLS.push(k);
-      // 並びは AD_METRICS の順に整える（押した順に並ぶと毎回位置が変わって読みにくい）
-      ST_AD_COLS=AD_METRICS.map(m=>m.k).filter(k2=>ST_AD_COLS.includes(k2));
-      try{localStorage.setItem("notime-stadcols",JSON.stringify(ST_AD_COLS));}catch(e){}
-      drawStoreAds();
-    });
-  }
+  // 表示する項目はプルダウン（開いていればそのまま開いた状態で描き直す）
+  drawStoreAdPick();
 
   const note=document.getElementById("stad-note");
   const missing=AD_METRICS.filter(m=>ST_AD_COLS.includes(m.k)&&!adHas(m.need));
@@ -3734,6 +3806,32 @@ function drawStoreAds(){
     ((DATA.metaAds&&DATA.metaAds.length)?"":`<br>広告単位のデータがまだ入っていません（データ更新後に出ます）。`);
 }
 
+// ---- AIのまとめの見せ方 ----
+// これまでは返ってきた文章をそのまま流していた。3〜4行あっても改行だけで区切られた
+// 一かたまりに見えるので、店の人はだいたい読み飛ばしていた。整えて出す：
+//   ・話題ごとに1行（先頭に「・」）
+//   ・「広告：」のような見出しは太字にする
+//   ・AIが【】で囲った「その行でいちばん大事なところ」を赤にする
+//   ・数字＋単位はひとかたまりで太字にする（「12」と「%」がばらけないように）
+// 赤は目立たせるための色で、「悪い」という意味ではない（増減の向きでは色を変えない）。
+function aiNum(seg){
+  return seg.replace(/([+\-−＋▲△]?\d[\d,]*(?:\.\d+)?)\s*(%|％|円|人|件|回|点|着|日|pt|ポイント|倍)/g,
+                     '<b class="ainum">$1$2</b>');
+}
+function aiFormat(text){
+  const lines=String(text||"").split(/\n+/).map(s=>s.trim()).filter(Boolean);
+  if(!lines.length)return "";
+  return lines.map(s=>{
+    let h=esc(s);
+    // 先頭の見出し（「広告：」など）。全角・半角どちらのコロンでも拾う
+    h=h.replace(/^([^：:【】]{1,10})([：:])/,'<span class="ailbl">$1$2</span>');
+    // 【…】＝AIが選んだ要点。赤にする
+    h=h.replace(/【([^】]{1,60})】/g,'<b class="aihi">$1</b>');
+    // 数字の太字は、赤にした部分の外側だけに掛ける（色が二重にならないように）
+    h=h.split(/(<b class="aihi">[\s\S]*?<\/b>)/).map((seg,i)=>i%2?seg:aiNum(seg)).join("");
+    return `<p class="ailine">${h}</p>`;
+  }).join("");
+}
 // ---- AIのまとめ（ページ最下部のカード）----
 // 直近2週間の「同ブランド比較KPI・販売比率・週次推移」を Edge Function "ask"（Claude）に渡し、
 // 店舗運営に大事なポイントだけを3〜4行で自動生成する。週1回（毎週月曜に更新）だけAPIを呼び、
@@ -3742,8 +3840,11 @@ async function aiWeeklyInsight(){
   const out=document.getElementById("ai-out"); if(!out)return;
   const id=state.detail; if(id==null)return;
   if(!SB){ out.textContent="AIのまとめはログイン版でのみ表示されます。"; return; }
-  const wk=mondayOf(todayStr()), key="aiWeekly:"+id+":"+wk;
-  try{ const c=localStorage.getItem(key); if(c){ out.innerHTML=c; return; } }catch(_){}
+  // キャッシュはHTMLではなく答えの文章そのものを持つ。見せ方を直したときに
+  // 古いキャッシュだけ昔の見た目のまま残る、ということが起きないようにするため。
+  // （HTMLを入れていた頃のキー aiWeekly: とは別のキーにする）
+  const wk=mondayOf(todayStr()), key="aiWeekly2:"+id+":"+wk;
+  try{ const c=localStorage.getItem(key); if(c){ out.innerHTML=aiFormat(c); return; } }catch(_){}
   let wxStat=null;      // 天気×売上。AIに繋がらなかったときの自動まとめでも使う
   let weeklyStat=null;  // 週次（売上・広告費・納品）。同上
   try{
@@ -3799,17 +3900,22 @@ async function aiWeeklyInsight(){
       +"（因果と決めつけず、同じ週に起きていた事実として述べること）。"
       +"weather がある場合は、天気で売上がどれくらい変わるかにも触れてください"
       +"（ただし日数が少ない天気は偶然で振れるので断定しないこと。天気で説明できる落ち込みと、そうでない落ち込みを分けて書いてください）。"
-      +"見出し・箇条書き・Markdown記法は使わず、プレーンな文章のみ。数字は重要なものだけ添えてください。";
+      // 出し方の指定。読み飛ばされないように、画面側で行に割って色を付けられる形で返してもらう
+      +"書き方は次の形式を必ず守ってください。"
+      +"（1）1行につき話題は1つ。行と行は改行で区切る（全体で3〜4行）。"
+      +"（2）各行は「見出し：本文」の形にする。見出しは『広告』『来店』『売れ筋』のような6文字以内の語。"
+      +"（3）各行のいちばん大事なところを1か所だけ【】で囲む（囲むのは20文字以内の語句。数字を含めてよい）。"
+      +"（4）【】以外の記号・箇条書き・Markdown記法は使わない。数字は重要なものだけ添えてください。";
     const answer=await callAsk(q,digest);
-    const html=esc(answer).replace(/\n+/g,"<br>");
-    try{ localStorage.setItem(key,html); }catch(_){}
-    out.innerHTML=html;
+    try{ localStorage.setItem(key,answer); }catch(_){}
+    out.innerHTML=aiFormat(answer);
   }catch(e){
     // AIに繋がらないときは、同じデータから自動集計でまとめを出す（中身が空にならないように）。
     // AI版ではないことが分かるよう明記し、原因も併記する。
     const why=await askDiagnose((e&&e.message)||String(e));
     const auto=autoInsight(wxStat,weeklyStat);
-    out.innerHTML=(auto?esc(auto).replace(/\n+/g,"<br>"):`<span class="sub">まとめを作成できませんでした。</span>`)+
+    // 自動集計版も同じ見せ方に通す（【】は付かないので、赤は出ず数字だけ太字になる）
+    out.innerHTML=(auto?aiFormat(auto):`<span class="sub">まとめを作成できませんでした。</span>`)+
       `<div class="sub" style="margin-top:8px;font-size:11px">※ 自動集計版（AI未接続：${esc(why)}）`+
       `<button class="chip" id="ai-retry" style="margin-left:6px;padding:3px 8px">再試行</button></div>`;
     const rb=document.getElementById("ai-retry");
@@ -3846,14 +3952,16 @@ function autoInsight(wx,weekly){
     return (cur==null||av==null||!av)?null:{k,cur,av,rel:(cur-av)/Math.abs(av)*100};}).filter(Boolean);
   const weak=gaps.slice().sort((a,b)=>a.rel-b.rel)[0], strong=gaps.slice().sort((a,b)=>b.rel-a.rel)[0];
   const cmpName=(own==="直営"?"直営":b3)+"上位3店";
-  if(weak&&weak.rel<-3)out.push(`${cmpName}の平均と比べて${kpiLabel(weak.k)}が${Math.abs(Math.round(weak.rel))}%低く（自店${M(weak.k).fmt(weak.cur)}／平均${M(weak.k).fmt(weak.av)}）、ここが直近2週間で最も差がついている項目です。`);
-  if(strong&&strong.rel>3)out.push(`一方で${kpiLabel(strong.k)}は平均を${Math.round(strong.rel)}%上回っており（自店${M(strong.k).fmt(strong.cur)}）、この強みは維持したい点です。`);
+  // AI版と同じ見せ方（「見出し：本文」＋大事なところを【】）にそろえる。
+  // 自動集計版だけ体裁が違うと、AIが繋がらない日だけ画面の印象が変わってしまう
+  if(weak&&weak.rel<-3)out.push(`弱み：${cmpName}の平均と比べて【${kpiLabel(weak.k)}が${Math.abs(Math.round(weak.rel))}%低い】です（自店${M(weak.k).fmt(weak.cur)}／平均${M(weak.k).fmt(weak.av)}）。直近2週間で最も差がついている項目です。`);
+  if(strong&&strong.rel>3)out.push(`強み：${kpiLabel(strong.k)}は【平均を${Math.round(strong.rel)}%上回っています】（自店${M(strong.k).fmt(strong.cur)}）。ここは維持したい点です。`);
   // ② 週次トレンド（直近3週の売上の向き）
   const mon0=mondayOf(sd), wk=[];
   for(let i=2;i>=0;i--){const wf=addDays(mon0,-7*i);wk.push(M("ex").calc(sumRows(rowsIn(wf,addDays(wf,6),id)))||0);}
   if(wk[0]>0){ const ch=(wk[2]-wk[0])/wk[0]*100;
-    out.push(Math.abs(ch)<5?`売上は直近3週間ほぼ横ばいで推移しています。`
-      :`売上は直近3週間で${ch>0?"増加":"減少"}傾向にあります（${ch>0?"+":""}${Math.round(ch)}%）。`); }
+    out.push(Math.abs(ch)<5?`売上：直近3週間は【ほぼ横ばい】で推移しています。`
+      :`売上：直近3週間は【${ch>0?"増加":"減少"}傾向】です（${ch>0?"+":""}${Math.round(ch)}%）。`); }
   // ③ ブランド全体と比べて構成比の差が大きいマス
   const selfD=heatData(undefined,f,t);
   const bIds=new Set(usableStores().filter(x=>rptBrand3(x.id)===b3).map(x=>x.id));
@@ -3865,13 +3973,14 @@ function autoInsight(wx,weekly){
       const ss=((selfD.cells[g]&&selfD.cells[g][c]&&selfD.cells[g][c].q)||0)/selfD.gQ*100;
       if(bs>=5&&(!best||bs-ss>best.d))best={g,c,d:bs-ss,bs,ss};
     }
-    if(best&&best.d>=3)out.push(`販売構成では「ランク${best.g}×${best.c}」がブランド全体${F1(best.bs)}%に対し自店${F1(best.ss)}%と低く、品揃えの見直し余地があります。`);
+    if(best&&best.d>=3)out.push(`品揃え：「ランク${best.g}×${best.c}」がブランド全体${F1(best.bs)}%に対し【自店${F1(best.ss)}%】と低く、見直しの余地があります。`);
   }
   // ④ 広告・納品で説明できる動きがあれば1文（因果とは書かず、同じ週の事実として書く）
-  const al=adBuyLine(weekly); if(al)out.push(al);
+  const al=adBuyLine(weekly); if(al)out.push("広告・納品："+al);
   // ⑤ 天気による差（渡されたときだけ。日数が少ない天気には触れない）
-  const wl=wxLine(wx); if(wl)out.push(wl);
-  return out.slice(0,4).join("");
+  const wl=wxLine(wx); if(wl)out.push("天気："+wl);
+  // 1行1話題。改行で区切って返す（画面側がここで行に割って色を付ける）
+  return out.slice(0,4).join("\n");
 }
 // 直近3週の売上の動きに、広告費・納品が並走していたかを1文にする。
 // 「広告のせいで落ちた」とは書かない（同じ週に起きていた事実として並べるだけ）。
@@ -3891,7 +4000,7 @@ function adBuyLine(weekly){
   const noBuy=w.filter(x=>x.buy===0).length;
   if(noBuy>0)parts.push(`直近3週のうち${noBuy}週は納品がありません`);
   if(!parts.length)return "";
-  return `売上は直近3週で${exCh>0?"増加":"減少"}（${exCh>0?"+":""}${Math.round(exCh)}%）していますが、同じ期間に${parts.join("、")}。`;
+  return `売上が直近3週で【${exCh>0?"増加":"減少"}（${exCh>0?"+":""}${Math.round(exCh)}%）】していますが、同じ期間に${parts.join("、")}。`;
 }
 // Edge Function "ask"（分析AI）を呼ぶ。まず直接 fetch し、だめなら supabase-js 経由で再試行する。
 // 直接 fetch にすることで、失敗時に HTTP ステータスと本文が読めて原因が分かる。
@@ -4246,9 +4355,15 @@ function adStoreSum(id,from,to){
 // 店舗ページの広告カードに出す項目。端末ごとに覚える（広告タブとは別に持つ：
 // 全社を見る画面と、1店を見る画面とで、見たい項目が違うため）。
 const ST_AD_DEFAULT=["sp","sr","ctr","frq"];
+// 出せるのは最大8つ（横4列 × 2行）。これ以上はスクロールしないと読めず、
+// 「並べたのに見ていない」状態になるので上限を設ける。
+const ST_AD_MAX=8;
 let ST_AD_COLS=(function(){
   try{const s=JSON.parse(localStorage.getItem("notime-stadcols")||"null");
-    if(Array.isArray(s)&&s.length){const v=s.filter(k=>AD_METRICS.some(m=>m.k===k)); if(v.length)return v;}}catch(e){}
+    if(Array.isArray(s)&&s.length){
+      // 端末に古い設定（消した指標・上限より多い数）が残っていても直して使う
+      const v=AD_METRICS.map(m=>m.k).filter(k=>s.includes(k)).slice(0,ST_AD_MAX);
+      if(v.length)return v;}}catch(e){}
   return ST_AD_DEFAULT.slice();
 })();
 // 日付 → 広告費（日別推移の列と、平日/土日祝の平均に使う）
@@ -4261,19 +4376,23 @@ function adSpendByDay(id){
 function adStoreHas(id){ const a=adBySid().get(id); return !!(a&&a.length); }
 // 売上比率＝広告費÷税抜売上。売上が取れない期間は「—」（0にしない）
 function adSrOf(sp,ex){ return (ex!=null&&ex>0)?sp/ex*100:null; }
-// 平日／土日祝の「1日あたり広告費」。
-//   分母は税抜売上の平均行と同じ「売上があった日数」にそろえる。
-//   別の分母で割ると、すぐ上の行と並べて読めなくなる。
+// 平日／土日祝の集計。
+//   ・1日あたり広告費（per）… 分母は税抜売上の平均行と同じ「売上があった日数」にそろえる。
+//     別の分母で割ると、すぐ上の行と並べて読めなくなる。
+//   ・p … その日ぶんの広告の実額一式。CTRやCPCのような比率を、同じ日の集合から
+//     実額÷実額で出せるようにするため（比率を平均しないための持ち方）。
 function adDayAvg(id,from,to,day){
-  const spd=adSpendByDay(id);
   let rws=rowsIn(from,to,id);
   if(day)rws=rws.filter(r=>dayClass(r.d)===day);
   const days=new Set();
   for(const r of rws)if((r.in||0)>0||(r.tx||0)>0)days.add(r.d);
-  if(!days.size)return {sp:null,per:null,ex:null,sr:null};
-  let sp=0; days.forEach(d=>{sp+=spd.get(d)||0;});
+  if(!days.size)return {sp:null,per:null,ex:null,sr:null,p:adZero()};
+  const p=adZero();
+  for(const r of (adBySid().get(id)||[]))if(days.has(r.d))adAdd(p,r);
+  p.sids=null;
   const ex=M("ex").calc(sumRows(rws.filter(r=>days.has(r.d))));
-  return {sp:sp, per:sp/days.size, ex:ex, sr:adSrOf(sp,ex)};
+  p.ex=ex||0;
+  return {sp:p.sp, per:p.sp/days.size, ex:ex, sr:adSrOf(p.sp,ex), p:p};
 }
 
 const DAY_COLS=["ex","v","pr","aov"];
@@ -4434,8 +4553,8 @@ function wxLine(wx){
   const sunny=find("晴"), rainy=find("雨");
   if(!sunny||!rainy||sunny.days<3||rainy.days<3||!sunny.exPerDay)return "";
   const ch=(rainy.exPerDay-sunny.exPerDay)/sunny.exPerDay*100;
-  if(Math.abs(ch)<5)return `天気による売上の差はほとんどありません（晴${sunny.days}日 ${YEN(sunny.exPerDay)}円／雨${rainy.days}日 ${YEN(rainy.exPerDay)}円・1日あたり）。`;
-  return `雨の日は1日あたり売上が晴れの日より${Math.abs(Math.round(ch))}%${ch<0?"低く":"高く"}なっています（晴${sunny.days}日 ${YEN(sunny.exPerDay)}円／雨${rainy.days}日 ${YEN(rainy.exPerDay)}円）。`;
+  if(Math.abs(ch)<5)return `【天気による売上の差はほとんどありません】（晴${sunny.days}日 ${YEN(sunny.exPerDay)}円／雨${rainy.days}日 ${YEN(rainy.exPerDay)}円・1日あたり）。`;
+  return `雨の日は1日あたり売上が晴れの日より【${Math.abs(Math.round(ch))}%${ch<0?"低い":"高い"}】です（晴${sunny.days}日 ${YEN(sunny.exPerDay)}円／雨${rainy.days}日 ${YEN(rainy.exPerDay)}円）。`;
 }
 
 // 選択期間・下北沢除外での税抜売上トップN店（比較ベンチマーク用）
