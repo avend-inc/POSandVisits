@@ -170,6 +170,22 @@
   .daykpi tr.avgrow.we th{color:var(--accent)}
   .daywrap thead th{position:sticky;top:0;background:var(--surface);z-index:2}
   .daywrap thead th:first-child{z-index:3}
+  /* 広告の刻みごとの数値：日別推移と同じで、1週間ぶんの高さに収めて下スクロール。
+     全期間ぶん縦に伸ばすと、その下の注記・キャンペーン別・AIのまとめが遠くなる。
+     見出しと「期間の合計」はスクロールしても上に残す（見ている数字の基準が要る）。
+     ・高さは行の実寸から測って JS で入れる（文字サイズが変わってもズレないように）
+     ・sticky の行は背景を透かさない。透けると下の行と重なって読めなくなる */
+  /* 固定するのは見出しだけ。「期間の合計」も上に貼り付けようとしたが、
+     貼り付ける位置に見出しの高さ（JSで測った値）が要り、実際の見え方と数px ずれて、
+     すき間から下の行がのぞいた。同じ数字はすぐ上のカードに出ているので、
+     測った値に頼る作りはやめて、合計は普通にスクロールさせる。
+     z-index:7 … いちばん左の列は横スクロール用にすでに sticky(z-index:1)。
+     見出しをそれより大きくしないと、横に流れてきた列が見出しの上に重なる。 */
+  .adtblwrap{overflow:auto}
+  .adtblwrap thead th{position:sticky;top:0;background:var(--surface);z-index:7}
+  .adtblwrap thead th:first-child{z-index:8}
+  /* 合計の行は透かさない。透けると、下を流れる行と重なって読めなくなる */
+  .adtblwrap tbody tr.prow td{background:color-mix(in srgb,var(--accent) 8%,var(--surface))}
   .kmat tr.we td{color:var(--accent)}
   /* 店舗詳細ページ：上部サマリーカード（横幅で数字を縮めてはみ出さない）・見出しアクセント */
   .dtop{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:10px 0 4px}
@@ -2199,7 +2215,7 @@ function renderDetail(){
       <div class="dtop four" id="stad-cards"></div>
       <div id="stad-trend" style="margin-top:10px"></div>
       <p class="note" id="stad-grainwarn" style="margin:6px 0 0"></p>
-      <div class="tblwrap" style="margin-top:8px"><table class="kmat" id="stad-tbl"></table></div>
+      <div class="tblwrap adtblwrap" id="stad-tblwrap" style="margin-top:8px"><table class="kmat" id="stad-tbl"></table></div>
       <p class="note" id="stad-note" style="margin:8px 0 0"></p>
       <h2 style="margin-top:16px">キャンペーン別</h2>
       <div class="tblwrap"><table class="kmat" id="stad-camp"></table></div>
@@ -3905,6 +3921,22 @@ function drawStoreAds(){
       const body=days.slice().reverse().map(d2=>
         `<tr><td>${esc(fmtD(d2))}</td>${ST_AD_COLS.map(k=>cell(k,byB.get(d2))).join("")}</tr>`).join("");
       tb.innerHTML=days.length?head+`<tbody>${totRow}${body}</tbody>`:"";
+
+      // 1週間ぶん（＋合計）の高さで止めて、それより前は下スクロールで見る。
+      // 全期間ぶん縦に伸ばすと、下の注記・キャンペーン別・AIのまとめが遠くなる。
+      // 高さは実際に描かれた行の高さから測る（決め打ちの px は、文字サイズや
+      // 項目数が変わったときに半端な位置で切れる）。
+      const wrap=document.getElementById("stad-tblwrap");
+      if(wrap){
+        const trs=tb.querySelectorAll("tbody tr");
+        const SHOW=1+7;                       // 「期間の合計」＋7刻み
+        const hh=tb.tHead?tb.tHead.offsetHeight:0;
+        let h=hh;
+        for(let i=0;i<Math.min(SHOW,trs.length);i++)h+=trs[i].offsetHeight;
+        // 収まりきる短い期間では止めない。画面に出ていない間は測れない（0になる）ので、
+        // そのときも触らない＝表が消えたように見えるのを防ぐ
+        wrap.style.maxHeight=(trs.length>SHOW&&h>60)?Math.round(h)+"px":"";
+      }
     }
   }
 

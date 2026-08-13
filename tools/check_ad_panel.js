@@ -100,7 +100,7 @@ const STYLE = (/<style>[\s\S]*?<\/style>/.exec(src) || [""])[0];
 const page = (from, to, grain, cols, goff) => `<!doctype html><html><head><meta charset="utf-8">${STYLE}</head>
 <body style="padding:10px;width:393px;box-sizing:border-box;background:var(--bg)"><div class="panel">
 <div id="stad-trend"></div><p class="note" id="stad-grainwarn"></p>
-<div class="tblwrap" style="margin-top:8px"><table class="kmat" id="stad-tbl"></table></div>
+<div class="tblwrap adtblwrap" id="stad-tblwrap" style="margin-top:8px"><table class="kmat" id="stad-tbl"></table></div>
 </div><pre id="out" style="display:none"></pre>
 <script>
 ${stubs}
@@ -127,6 +127,70 @@ try{
     firstRow:[...(document.querySelectorAll("#stad-tbl tbody tr")[0]||{cells:[]}).cells||[]].map(e=>e.textContent),
     secondRow:[...(document.querySelectorAll("#stad-tbl tbody tr")[1]||{cells:[]}).cells||[]].map(e=>e.textContent),
     msg:document.querySelector("#stad-trend p.note")?document.querySelector("#stad-trend p.note").textContent:null,
+    // 表の高さと、スクロールするかどうか
+    tblMaxH:document.getElementById("stad-tblwrap").style.maxHeight,
+    tblClientH:document.getElementById("stad-tblwrap").clientHeight,
+    tblScrollH:document.getElementById("stad-tblwrap").scrollHeight,
+    headH:document.querySelector("#stad-tbl thead")?document.querySelector("#stad-tbl thead").offsetHeight:0,
+    rowH:document.querySelector("#stad-tbl tbody tr")?document.querySelector("#stad-tbl tbody tr").offsetHeight:0,
+    // 見出しと「期間の合計」が上に張り付いているか
+    headPos:document.querySelector("#stad-tbl thead th")
+      ?getComputedStyle(document.querySelector("#stad-tbl thead th")).position:null,
+    totPos:document.querySelector("#stad-tbl tbody tr.prow td")
+      ?getComputedStyle(document.querySelector("#stad-tbl tbody tr.prow td")).position:null,
+    totTop:document.querySelector("#stad-tbl tbody tr.prow td")
+      ?document.querySelector("#stad-tbl tbody tr.prow td").style.top:null,
+    totTopComputed:document.querySelector("#stad-tbl tbody tr.prow td")
+      ?getComputedStyle(document.querySelector("#stad-tbl tbody tr.prow td")).top:null,
+    // 下までスクロールした状態で、上に固定した行が「実際に一番手前に見えているか」。
+    // 位置だけ見ても分からない：いちばん左の列は横スクロール用にすでに sticky なので、
+    // z-index の付け方を間違えると、下の行が固定行の上に重なって二重に見える。
+    // elementFromPoint で、その座標に本当に見えている要素を拾う。
+    scrolled:(function(){
+      const w=document.getElementById("stad-tblwrap");
+      if(!w||w.scrollHeight<=w.clientHeight)return null;
+      w.scrollTop=150;
+      const th=document.querySelector("#stad-tbl thead");
+      const pr=document.querySelector("#stad-tbl tbody tr.prow");
+      // 位置は毎回その場で測り直す。スクロールさせた直後は、ページ側が動いていて
+      // 先に取っておいた座標とズレることがある（ズレたまま比べて誤判定した）
+      const box=()=>w.getBoundingClientRect();
+      const hh=th?th.getBoundingClientRect().height:0;
+      const at=(x,y)=>{const wr=box();
+        const e=document.elementFromPoint(wr.left+x,wr.top+y);
+        if(!e)return "なし";
+        const tr=e.closest("tr"); if(!tr)return "表の外";
+        if(tr.parentElement.tagName==="THEAD")return "見出し";
+        if(tr.classList.contains("prow"))return "合計";
+        return "データ行:"+tr.cells[0].textContent;};
+      const ph=pr.getBoundingClientRect().height;
+      // 見出しと合計の帯を1pxずつなめて、データ行が顔を出していないかを見る。
+      // 中央だけ見ても、数pxのすき間から下の行がのぞく壊れ方は見つからない
+      const leak=[];
+      // 下端ちょうど（境界）を踏むと、その先の行を拾ってしまう。手前まで見る
+      for(let y=0;y<Math.floor(hh);y++){
+        const a1=at(50,y+0.5), a2=at(box().width-50,y+0.5);
+        for(const a of [a1,a2])if(a.indexOf("データ行")===0)leak.push(y+":"+a);
+      }
+      const out={
+        leak:leak.slice(0,6), leakN:leak.length, hh:+hh.toFixed(1), ph:+ph.toFixed(1),
+        scroll:w.scrollTop,
+        // 見出しの帯・合計の帯それぞれで、左端の列と右寄りの列を見る
+        headLeft:at(40,hh/2), headRight:at(box().width-40,hh/2),
+        totLeft:at(40,hh+ph/2), totRight:at(box().width-40,hh+ph/2),
+      };
+      const wr=box();
+      out.thTop=+(th.getBoundingClientRect().top-wr.top).toFixed(1);
+      w.scrollTop=0;   // 測り終わったら戻す（AVEND_KEEP で残したページを普通の状態で見たい）
+      out.prTop=+(pr.getBoundingClientRect().top-wr.top).toFixed(1);
+      out.gap=+(pr.getBoundingClientRect().top-th.getBoundingClientRect().bottom).toFixed(1);
+      return out;
+    })(),
+    // sticky の行が透けていないか（透けると下の行と重なって読めない）
+    totBg:document.querySelector("#stad-tbl tbody tr.prow td")
+      ?getComputedStyle(document.querySelector("#stad-tbl tbody tr.prow td")).backgroundColor:null,
+    totBg1:document.querySelector("#stad-tbl tbody tr.prow td")
+      ?getComputedStyle(document.querySelectorAll("#stad-tbl tbody tr.prow td")[0]).backgroundColor:null,
   });
 }catch(e){ document.getElementById("out").textContent=JSON.stringify({error:String(e&&e.stack||e)}); }
 <\/script></body></html>`;
@@ -181,6 +245,60 @@ const COLS = ["sp", "sr", "ctr", "cpc"];
     /8\/12/.test((r.secondRow || [])[0] || ""), r.secondRow);
   ok("表の見出しはカードの項目とそろう",
     JSON.stringify(r.headers) === JSON.stringify(["日", "広告費", "売上比率", "CTR", "CPC"]), r.headers);
+
+  // ---- 縦に長すぎないこと ----
+  // 43日ぶんを全部縦に並べると、その下の注記・キャンペーン別・AIのまとめが遠くなる。
+  // 日別推移と同じで、1週間ぶんで止めて下スクロールにする。
+  ok(`表の高さを止めている（${r.tblMaxH}）`, /^\d+px$/.test(r.tblMaxH || ""), r.tblMaxH);
+  ok(`止めた高さより中身が長い＝スクロールする（${r.tblClientH}→${r.tblScrollH}）`,
+    r.tblScrollH > r.tblClientH + 20, r);
+  // 見出し + 「期間の合計」 + 7刻み ぶんの高さになっているか（行の実寸から出す）
+  {
+    const want = r.headH + r.rowH * 8;
+    ok(`見えるのは 合計+7刻み ぶん（${r.tblClientH}px / 想定${want}px）`,
+      Math.abs(r.tblClientH - want) <= r.rowH / 2, { got: r.tblClientH, want, rowH: r.rowH });
+    // 半端な高さで行が途中で切れていないか
+    ok("行が途中で切れていない", (r.tblClientH - r.headH) % r.rowH < 2 ||
+      Math.abs(((r.tblClientH - r.headH) % r.rowH) - r.rowH) < 2,
+      { rest: (r.tblClientH - r.headH) % r.rowH, rowH: r.rowH });
+  }
+  // スクロールしても、見出しと合計は上に残ってほしい
+  ok(`見出しは上に固定（${r.headPos}）`, r.headPos === "sticky", r.headPos);
+  // 合計まで貼り付けようとすると、貼る位置に見出しの高さ（測った値）が要る。
+  // その値が実際の見え方と数pxずれて、すき間から下の行がのぞいた。
+  // 同じ数字はすぐ上のカードにあるので、測った値に頼る作りはやめた。
+  // いちばん左の列は横スクロール用に sticky なので、position だけでは判定できない。
+  // 縦に貼り付けているかどうかは top で見る（auto＝縦には貼り付けていない）
+  ok(`「期間の合計」は縦に貼り付けない（top=${r.totTopComputed}）`,
+    r.totTopComputed === "auto", r.totTopComputed);
+  ok("貼り付け位置の計算も残っていない", !r.totTop, r.totTop);
+  // ---- 下までスクロールしたときに、固定した行が本当に見えているか ----
+  {
+    const sc = r.scrolled || {};
+    // 「座標がいくつか」ではなく「そこに何が見えているか」で確かめる。
+    // headless では scrollTop を変えた直後の getBoundingClientRect が
+    // 古い値を返すことがあり、座標だけ見ると誤判定する（実際に振り回された）。
+    // elementFromPoint は当たり判定なので、その場の実際の見え方が返る。
+    ok(`見出しの帯に見えているのは見出し（左:${sc.headLeft} / 右:${sc.headRight}）`,
+      sc.headLeft === "見出し" && sc.headRight === "見出し", sc);
+    // 見出しの帯を1pxずつなめて、下の行がのぞいていないかを見る。
+    // 中央だけ見ても、数pxのすき間からのぞく壊れ方は見つからない
+    ok(`見出しの帯（${sc.hh}px）からデータ行がのぞいていない`, sc.leakN === 0, sc.leak);
+  }
+  // 透けていると、スクロールで下の行と重なって読めなくなる
+  ok(`固定した行の背景が透けていない（${r.totBg}）`,
+    !!r.totBg && !/rgba\([^)]*,\s*0\)/.test(r.totBg), r.totBg);
+  ok(`いちばん左の列も透けていない（${r.totBg1}）`,
+    !!r.totBg1 && !/rgba\([^)]*,\s*0\)/.test(r.totBg1), r.totBg1);
+}
+
+// ---- 収まる短さのときは、わざわざ止めない ----------------------------
+//   7刻み以下しか無いのに高さを止めると、下に無駄な余白ができるだけ
+{
+  const r = run("2026-08-06", "2026-08-12", "day", COLS, []);
+  ok(`7日ぶん：行は 合計+7 = 8（${r.bodyRows}）`, r.bodyRows === 8, r);
+  ok("収まるので高さは止めない", r.tblMaxH === "", r.tblMaxH);
+  ok("スクロールもしない", r.tblScrollH <= r.tblClientH + 2, r);
 }
 
 // ---- ② 週次 ----------------------------------------------------------
