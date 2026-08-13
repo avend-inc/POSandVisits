@@ -48,17 +48,28 @@ const STORES = [
   { id: 2, name: "NTM所沢", own: "FC", kv: true, visible: true },
   { id: 3, name: "NTM区分なし", own: null, kv: true, visible: true },   // ownership 未設定
   { id: 4, name: "NTM来店なし", own: "直営", kv: false, visible: true }, // 来店をKPIに使わない
+  // 1店で2レジ（無人＝SIPOS／有人＝Airレジ）を使い分ける店＝下北沢。
+  // 内訳の段・有人来店の手入力・来店数の合算という、この店だけの作りがある。
+  // 広告を全店に広げたときに、そこが消えないことを見る
+  { id: 5, name: "SFG下北沢", own: "直営", kv: true, visible: true, mix: true },
 ];
+const SHIMO = 5;
 const daily = [];
 for (let i = 0; i < DAYS; i++) {
   for (const s of STORES) {
-    daily.push({
+    const r = {
       d: day(i), s: s.id,
       ex: (s.id === 4 && i % 7 === 0) ? null : 80000 + ((i * 37 + s.id * 11) % 40000),
       in: 90000, tx: 20 + (i % 9), it: 40 + (i % 5),
       v: s.kv ? 50 + (i % 20) : null,
       bag: 100, bagEx: 91, komEx: 500,
-    });
+    };
+    if (s.mix) {
+      r.exU = Math.round(r.ex * 0.6); r.exM = r.ex - r.exU;   // 無人／有人の売上内訳
+      // 有人ぶんの来店は手入力。まだ入れていない日もある（入力もれの印が出る側）
+      if (i % 9 !== 0) r.vm = 10 + (i % 7);
+    }
+    daily.push(r);
   }
 }
 const meta = [];
@@ -110,9 +121,15 @@ const VIEWS = [
   ["店舗一覧（FC）", "?g=fc"],
   ["店舗ページ", "?g=own&store=1"],
   ["店舗ページ（区分なしの店）", "?g=own&store=3"],
+  ["店舗ページ（FC店）", "?g=fc&store=2"],
+  ["店舗ページ（2レジの店）", "?g=own&store=5"],
   ["広告タブ（直営）", "?view=ads&g=own"],
   ["広告タブ（FC）", "?view=ads&g=fc"],
 ];
+// 店舗ページに広告の段が出るか。店名では決めず、その店に広告データがあるかで決まる。
+// 直営でもFCでも、2レジの店でも、同じように出ること。
+const ADPANEL = new Set(["店舗ページ", "店舗ページ（FC店）", "店舗ページ（2レジの店）",
+                         "店舗ページ（区分なしの店）"]);
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "avend-smoke-"));
 // __DATA__ を先に入れておくと、boot が通信せずそのまま描く
@@ -161,6 +178,21 @@ for (const [name, query] of VIEWS) {
   // 表が「該当なし」のまま通ると、検査したつもりで何も見ていないことになる。
   // クリエイティブ別があるのは広告タブだけ（CSSにも #adcrtbl が出てくるので、
   // 文字列の有無ではなく画面で判定する）
+  // 広告を全店へ広げた（店名の関門を外した）ので、直営・FC・2レジの店で同じように
+  // 出ることを見る。段だけでなく、日別推移の広告費列とKPIまとめの広告行も見る
+  //   ＝「段は出たが表の列は出ていない」という中途半端な状態を見逃さないため。
+  if (ADPANEL.has(name)) {
+    ok(`${name}：広告（Meta）の段が出ている`, /広告（Meta）/.test(body));
+    ok(`${name}：日別推移に広告費の列が出ている`, /<th>広告費<\/th>/.test(body));
+    const k2 = (/<table class="kmat" id="kpi2">([\s\S]*?)<\/table>/.exec(view) || [])[1] || "";
+    ok(`${name}：KPIまとめに広告費とCPCの行が出ている`,
+      /広告費/.test(k2) && /CPC/.test(k2), k2 ? "表はあるが広告の行が無い" : "kpi2 の表が無い");
+  }
+  // 2レジの店（下北沢）だけの作り。広告を足したせいで消えていないこと
+  if (name === "店舗ページ（2レジの店）") {
+    ok(`${name}：無人／有人の内訳の説明が残っている`, /無人営業（SIPOS）/.test(body));
+    ok(`${name}：「有人来店を入力」ボタンが残っている`, /id="stf-btn"/.test(body));
+  }
   if (name.startsWith("広告タブ")) {
     const t = /<table class="kmat" id="adcrtbl">([\s\S]*?)<\/table>/.exec(view);
     const rows = t ? (t[1].match(/<tr>/g) || []).length : 0;
