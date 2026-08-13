@@ -362,9 +362,10 @@ const KPI_ORDER=["ex","v","tx","qty","pr","aov","upt","aup"];
 // 比較ラベル：対象期間の長さに合わせて 前日比／前週比／前月比 を出し分ける。
 // 比較先は「直前の同じ長さの期間」（実際の日付はマウスオーバーで表示）。
 function deltaLabel(n){ if(n<=1)return"前日比"; if(n<=7)return"前週比"; if(n<=31)return"前月比"; return "前"+n+"日比"; }
-// 物件一覧（notime-property-scout）の日次HTMLレポートURL。とりあえず直営タブ右上から開く導線。
-//   ↓ URLが決まったらこの1行だけ差し替える（空のうちは「準備中」を表示するだけで遷移しない）。
-const BUKKEN_REPORT_URL="";
+// 物件レビューページ（直営タブ右上「物件一覧」ボタンの飛び先）。
+//   同じアプリ内の bukken.html（Supabase の bukken テーブルを読み、OK/NG＋理由を保存）。
+//   外部URL（別ホスティングのHTMLレポート等）にしたいときは絶対URLを入れれば別タブで開く。
+const BUKKEN_REPORT_URL="bukken.html";
 
 // 表示グループ（直営／FC）。URLの ?g=own / ?g=fc で切り替える。
 //   直営ページ … 直営店だけ。FCページ … FC店だけ。既定（無指定）は直営。
@@ -1878,8 +1879,10 @@ function wireCommon(){
 // 直営タブ右上「🏢 物件一覧」→ notime-property-scout の日次レポートを別タブで開く。
 // URL未設定のうちは準備中を知らせるだけ（誤って空リンクに飛ばさない）。
 function openBukken(){
-  if(BUKKEN_REPORT_URL){ window.open(BUKKEN_REPORT_URL,"_blank","noopener"); }
-  else{ alert("物件一覧レポートのURLは準備中です。"); }
+  if(!BUKKEN_REPORT_URL){ alert("物件レビューページは準備中です。"); return; }
+  // 同一アプリ内の相対パスは同タブ遷移、絶対URL(http…)は別タブで開く。
+  if(/^https?:/i.test(BUKKEN_REPORT_URL)){ window.open(BUKKEN_REPORT_URL,"_blank","noopener"); }
+  else{ location.href=BUKKEN_REPORT_URL; }
 }
 function renderMain(){
   syncAdminTab(); syncAdsTab();
