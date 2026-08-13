@@ -575,7 +575,9 @@ function prep(){
   state.hFrom=tf; state.hTo=tt; state.hKind="thismonth";  // 店舗ページ比率表の期間（独立）も既定＝今月
   // 広告の段の期間（独立）。既定は直近28日＝広告タブの既定とそろえる
   // （週の偏り〔週末に寄る出稿〕を均すのに4週ちょうどが読みやすいため）
-  {const[af,at]=presetRange("d28"); state.aFrom=af; state.aTo=at; state.aKind="d28";}
+  // 店舗ページの広告の段の期間。前に押したものがあればそれ、無ければ直近28日
+  {const r=adPeriodRestore("notime-stad-period")||presetRange("d28").concat("d28");
+   state.aFrom=r[0]; state.aTo=r[1]; state.aKind=r[2];}
   const sp=loadPeriodSS(); if(sp){state.from=sp.from;state.to=sp.to;state.kind=sp.kind;}       // タブ移動での引き継ぎ
   state.sel=loadSel();                                   // 既定＝全選択／タブ移動で引き継ぎ
   if(state.detail)state.sel=new Set([state.detail]);     // 店舗専用ページはその店だけ
@@ -1137,15 +1139,20 @@ function adTableCols(){ return AD_METRICS.map(m=>m.k); }
 const AD_COLOR={sp:"#2f6fd0",fl:"#d6336c",pv:"#e8590c",
   ctr:"#b8860b",cpc:"#c0392b",cpf:"#7048e8",frt:"#0ca678",cpv:"#e67700",cpm:"#495057",frq:"#845ef7",
   sr:"#1098ad",lkr:"#f06595",vt:"#37b24d"};
-const AD_DEFAULT=["sp","sr","ctr","cpc"];
+// グラフに最初から引く2本（広告費・プロフアクセス数）はカードにも必ず入れる。
+// カードに無いとグラフにも出せないため。
+const AD_DEFAULT=["sp","pv","sr","ctr","cpc"];
 // クリエイティブ別一覧：何位まで出すか／並び順／土俵に乗せる最低の広告費
 const AD_CR_TOP=5;
 const AD_CR_MINSPEND=1000;      // 1日あたりの広告費がこれ未満のものは外す
 let AD_CRSORT={k:"ctr",desc:true};
 // 割当画面で「割当済み」を開いているか
 let AD_MAPOPEN=false;
+// キーを adcols2 に変えている。既定にプロフアクセス数を足したので、古いキーのままだと
+// 一度でも開いた端末に古い4つが残り、グラフの既定（広告費＋プロフアクセス数）が
+// 1本しか出せなくなる。
 let AD_COLS=(function(){
-  try{const s=JSON.parse(localStorage.getItem("notime-adcols")||"null");
+  try{const s=JSON.parse(localStorage.getItem("notime-adcols2")||"null");
     if(Array.isArray(s)&&s.length){const v=s.filter(k=>AD_METRICS.some(m=>m.k===k)); if(v.length)return v;}}catch(e){}
   return AD_DEFAULT.slice();
 })();
@@ -1157,11 +1164,44 @@ let AD_HIDE=(function(){
 })();
 function adSaveHide(){ try{localStorage.setItem("notime-adhide",JSON.stringify([...AD_HIDE]));}catch(e){} }
 // カードをタップするとグラフから外せる（カード自体は残す）。線が多すぎるときに使う。
+// グラフに最初から出す項目。カードは全部出すが、線を全部引くと8本が重なって
+// どれがどれだか読めない（実際そうなっていた）。まずは「いくら使って、
+// どれだけプロフィールに来たか」の2本だけにして、あとは自分で足してもらう。
+const AD_GRAPH_DEFAULT=["sp","pv"];
+const adGoffDefault=()=>new Set(AD_METRICS.map(m=>m.k).filter(k=>!AD_GRAPH_DEFAULT.includes(k)));
+// キーを adgoff2 に変えている。既定を「全部出す」から変えたので、古いキーのままだと
+// 一度でも開いた端末に「全部出す」が保存されていて、既定を変えても効かない。
 let AD_GOFF=(function(){
-  try{const v=JSON.parse(localStorage.getItem("notime-adgoff")||"[]"); return new Set(Array.isArray(v)?v:[]);}
-  catch(e){return new Set();}
+  try{const v=JSON.parse(localStorage.getItem("notime-adgoff2")||"null");
+    if(Array.isArray(v))return new Set(v);}catch(e){}
+  return adGoffDefault();
 })();
-function adSaveGoff(){ try{localStorage.setItem("notime-adgoff",JSON.stringify([...AD_GOFF]));}catch(e){} }
+function adSaveGoff(){ try{localStorage.setItem("notime-adgoff2",JSON.stringify([...AD_GOFF]));}catch(e){} }
+// ---- 押した期間を画面ごとに覚える ------------------------------------
+//   広告タブと店舗ページの広告の段では、見たい期間が違う（全社は4週、
+//   1店は28日、など）。1つの値を共有すると片方を変えたらもう片方も変わるので、
+//   キーを分けて別々に覚える。
+//   覚えるのは「今月」などの意味のほう。次に開いたときはそのときの今月になる
+//   （日付をそのまま覚えると、翌月に開いても先月のままになってしまう）。
+//   日付欄を直接いじったとき(custom)だけ、その日付を覚える。
+function adPeriodSave(key,kind,from,to){
+  try{localStorage.setItem(key,JSON.stringify({kind:kind,from:from,to:to}));}catch(e){}
+}
+function adPeriodLoad(key){
+  try{const v=JSON.parse(localStorage.getItem(key)||"null");
+    if(v&&typeof v.kind==="string")return v;}catch(e){}
+  return null;
+}
+// 覚えた期間を [from,to,kind] に戻す。戻せなければ null（呼ぶ側が既定を使う）
+function adPeriodRestore(key){
+  const v=adPeriodLoad(key); if(!v)return null;
+  if(v.kind&&v.kind!=="custom"){
+    const r=presetRange(v.kind);
+    if(r&&r[0]&&r[1])return [r[0],r[1],v.kind];
+  }
+  if(v.from&&v.to)return [clampLo(v.from),clampHi(v.to),"custom"];
+  return null;
+}
 // 広告タブの既定期間＝直近4週（最新日を含む週の月曜から数えて4週ぶん）。
 // 店舗別一覧が月曜〜日曜の週で並ぶので、週がちょうど4本立つ範囲にそろえる。
 let AD_PERIOD_INIT=false;
@@ -1280,7 +1320,13 @@ function adVal(k,p){
   return m.calc?m.calc(p):p[k];
 }
 function renderAds(){
-  if(!AD_PERIOD_INIT){ adApply4w(); AD_PERIOD_INIT=true; }   // 初回は直近4週
+  // 初回だけ期間を決める。前に押した期間があればそれ、無ければ直近4週
+  if(!AD_PERIOD_INIT){
+    const r=adPeriodRestore("notime-adtab-period");
+    if(r){ state.from=r[0]; state.to=r[1]; state.kind=r[2]; savePeriod(); }
+    else adApply4w();
+    AD_PERIOD_INIT=true;
+  }
   // 区分を切り替えたとき、前の区分で選んでいた店の絞り込みが残っていると、
   // その区分に無い店で絞ることになって画面が丸ごと空になる（原因も分からない）。
   // 一覧に無くなった店は「すべての店舗」に戻す。
@@ -1381,11 +1427,11 @@ function renderAds(){
     if(i>=0){ if(AD_COLS.length<=1)return; AD_COLS.splice(i,1); } else AD_COLS.push(k);
     // 並びは AD_METRICS の順にそろえる（選んだ順ではなく決まった順で見せる）
     AD_COLS=AD_METRICS.map(m=>m.k).filter(k2=>AD_COLS.includes(k2));
-    try{localStorage.setItem("notime-adcols",JSON.stringify(AD_COLS));}catch(e){}
+    try{localStorage.setItem("notime-adcols2",JSON.stringify(AD_COLS));}catch(e){}
     renderAds(); return;                 // チップの色を含めて描き直す
   });
   const b4=document.getElementById("ad4w");
-  if(b4)b4.onclick=()=>{ adApply4w(); renderAds(); };
+  if(b4)b4.onclick=()=>{ adApply4w(); adPeriodSave("notime-adtab-period","custom",state.from,state.to); renderAds(); };
   const stSel=document.getElementById("adstore");
   if(stSel)stSel.onchange=()=>{
     AD_STORE=stSel.value;
@@ -1952,13 +1998,15 @@ function adDrawMapper(){
 }
 function wireCommon(){
   const on=(id,ev,fn)=>{const el=document.getElementById(id);if(el)el[ev]=fn;};
-  on("from","onchange",e=>{state.from=clampLo(e.target.value||DATA._min);if(state.from>state.to)state.to=state.from;state.kind="custom";syncDateInputs();savePeriod();draw();});
-  on("to","onchange",e=>{state.to=clampHi(e.target.value||DATA._max);if(state.to<state.from)state.from=state.to;state.kind="custom";syncDateInputs();savePeriod();draw();});
+  // 広告タブで期間を変えたときは、次に開いたときのために覚える（画面ごとに別のキー）
+  const adTabRemember=()=>{ if(VIEW==="ads")adPeriodSave("notime-adtab-period",state.kind,state.from,state.to); };
+  on("from","onchange",e=>{state.from=clampLo(e.target.value||DATA._min);if(state.from>state.to)state.to=state.from;state.kind="custom";syncDateInputs();savePeriod();adTabRemember();draw();});
+  on("to","onchange",e=>{state.to=clampHi(e.target.value||DATA._max);if(state.to<state.from)state.from=state.to;state.kind="custom";syncDateInputs();savePeriod();adTabRemember();draw();});
   document.querySelectorAll(".pchip").forEach(b=>b.onclick=()=>{
     const pk=b.dataset.preset; let f,t;
     const fb=window.FRANCHISEE&&window.FR_BENCH&&(window.FR_BENCH[state.detail]||{})[pk];   // 加盟店は焼込みレンジ
     if(fb){f=fb.from;t=fb.to;}else{[f,t]=presetRange(pk);}
-    state.from=f;state.to=t;state.kind=pk;syncDateInputs();savePeriod();draw();});
+    state.from=f;state.to=t;state.kind=pk;syncDateInputs();savePeriod();adTabRemember();draw();});
   document.querySelectorAll(".gchip[data-grain]").forEach(b=>b.onclick=()=>{state.grain=b.dataset.grain;state.trendEnd=trendLatestAnchor(state.grain);drawTrend2();});
   on("tr-prev","onclick",()=>{trendShift(-1);drawTrend2();});
   on("tr-next","onclick",()=>{trendShift(1);drawTrend2();});
@@ -1974,6 +2022,7 @@ function wireCommon(){
   document.querySelectorAll(".achip").forEach(b=>b.onclick=()=>{
     const[f,t]=presetRange(b.dataset.apreset);
     state.aKind=b.dataset.apreset; state.aFrom=f; state.aTo=t;
+    adPeriodSave("notime-stad-period",state.aKind,f,t);
     drawStoreAds();
   });
   // グラフの刻み（日次/週次/月次）。期間とは別もので、期間を変えても刻みは保つ
@@ -1985,12 +2034,16 @@ function wireCommon(){
   on("adfrom","onchange",e=>{
     state.aFrom=clampLo(e.target.value||DATA._min);
     if(state.aFrom>state.aTo)state.aTo=state.aFrom;
-    state.aKind="custom"; drawStoreAds();
+    state.aKind="custom";
+    adPeriodSave("notime-stad-period","custom",state.aFrom,state.aTo);
+    drawStoreAds();
   });
   on("adto","onchange",e=>{
     state.aTo=clampHi(e.target.value||DATA._max);
     if(state.aTo<state.aFrom)state.aFrom=state.aTo;
-    state.aKind="custom"; drawStoreAds();
+    state.aKind="custom";
+    adPeriodSave("notime-stad-period","custom",state.aFrom,state.aTo);
+    drawStoreAds();
   });
   // 比率表専用の期間チップ（KPIまとめの期間とは連動しない）
   document.querySelectorAll(".hchip").forEach(b=>b.onclick=()=>{
@@ -3855,7 +3908,7 @@ function drawStoreAds(){
   cards.querySelectorAll(".adcard").forEach(c2=>c2.onclick=()=>{
     const k=c2.dataset.k;
     if(ST_AD_GOFF.has(k))ST_AD_GOFF.delete(k); else ST_AD_GOFF.add(k);
-    try{localStorage.setItem("notime-stadgoff",JSON.stringify([...ST_AD_GOFF]));}catch(e){}
+    try{localStorage.setItem("notime-stadgoff2",JSON.stringify([...ST_AD_GOFF]));}catch(e){}
     drawStoreAds();
   });
 
@@ -4615,10 +4668,12 @@ let ST_AD_COLS=(function(){
 // カードをタップしてグラフから外した項目（端末ごとに覚える）。
 // 広告タブの AD_GOFF とは別に持つ：全社を見る画面と1店を見る画面で、
 // 出したい線が違ううえ、片方の操作がもう片方に飛び火すると分かりにくいため。
+// グラフに最初から出すのは 広告費＋プロフアクセス数 の2本だけ（広告タブと同じ）。
+// キーを stadgoff2 に変えているのも同じ理由（古い「全部出す」が残るため）。
 let ST_AD_GOFF=(function(){
-  try{const s=JSON.parse(localStorage.getItem("notime-stadgoff")||"null");
+  try{const s=JSON.parse(localStorage.getItem("notime-stadgoff2")||"null");
     if(Array.isArray(s))return new Set(s.filter(k=>AD_METRICS.some(m=>m.k===k)));}catch(e){}
-  return new Set();
+  return adGoffDefault();
 })();
 // 日付 → 広告費（日別推移の列と、平日/土日祝の平均に使う）
 function adSpendByDay(id){
