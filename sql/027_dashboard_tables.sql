@@ -42,6 +42,7 @@ create table if not exists public.dash_daily (
   bag_ex            numeric,        -- レジ袋等（税抜）
   bag_qty           numeric,        -- レジ袋等の点数
   komono_ex         numeric,        -- 小物の税抜売上（商品単価の分子から差し引く用）
+  nocat_ex          numeric,        -- 明細なし実売上の税抜（点数の無い売上／商品単価の分子から差し引く）
   coupon_qty        numeric,        -- クーポン利用数
   coupon_amount     numeric,        -- クーポン割引額
   sales_ex_unmanned numeric,        -- 無人営業時間の税抜売上（2レジ店のみ）
