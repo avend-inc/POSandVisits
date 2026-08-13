@@ -1134,13 +1134,6 @@ const AD_COLOR={sp:"#2f6fd0",fl:"#d6336c",pv:"#e8590c",
   ctr:"#b8860b",cpc:"#c0392b",cpf:"#7048e8",frt:"#0ca678",cpv:"#e67700",cpm:"#495057",frq:"#845ef7",
   sr:"#1098ad",lkr:"#f06595",vt:"#37b24d"};
 const AD_DEFAULT=["sp","sr","ctr","cpc"];
-// 散布図の縦軸。来店数＝集客に効いているか／税抜売上＝売上につながっているか。
-// 散布図の期間（"1w" / "4w"）。以前は縦軸の選択に使っていたキーなので、
-// 古い値が保存されていることがある。知らない値なら既定に戻す。
-let AD_SCY=(function(){
-  try{const v=localStorage.getItem("notime-adscy");
-    return (v==="1w"||v==="4w")?v:"4w";}catch(e){return "4w";}
-})();
 // クリエイティブ別一覧：何位まで出すか／並び順／土俵に乗せる最低の広告費
 const AD_CR_TOP=5;
 const AD_CR_MINSPEND=1000;      // 1日あたりの広告費がこれ未満のものは外す
@@ -1365,11 +1358,6 @@ function renderAds(){
       <h2>月次KPI <span class="sub" style="font-weight:500">（今月を含む3か月）</span></h2>
       <div class="tblwrap"><table class="kmat" id="admtbl"></table></div>
       <p class="note" id="admnote"></p>
-    </div>
-    <div class="panel">
-      <h2>広告費と来店数 <span class="sub" style="font-weight:500">（店舗ごと・選んだ期間の合計）</span></h2>
-      <div id="adscatter"></div>
-      <p class="note" id="adscnote"></p>
     </div>
     <div class="panel">
       <h2>クリエイティブ別 <span class="sub" style="font-weight:500">（${adSegLabel()}・1行＝1店の1広告）</span></h2>
@@ -1709,7 +1697,6 @@ function drawAds(){
     const sa=document.getElementById("adshowall");
     if(sa)sa.onclick=()=>{ AD_HIDE.clear(); adSaveHide(); drawAds(); };
   }
-  adDrawScatter(shortName);
   adDrawCreatives(shortName);
   adDrawMapper();
   // 未紐付け（店舗に紐づいていない）行は、区分が決まらないので adRowsAll() から外れる。
@@ -1729,134 +1716,6 @@ function drawAds(){
     (nomap.sp>0?`<br><b style="color:#b8860b">店舗に紐付いていない広告費が ${YEN(nomap.sp)}円あります。</b>区分が決まらないので、直営・FCどちらの集計にも入っていません（下の「未紐付けキャンペーン」で店舗に割り当てると入ります）。`:"");
 }
 
-// ============================================================
-// 広告費と来店数の散布図
-//   点＝店舗。横軸に期間の広告費、縦軸に同じ期間の来店数を取る。
-//   回帰直線と相関係数を添えて、線から上に外れている店（少ない広告費で
-//   来ている）と下に外れている店（出しているのに来ていない）を見つける。
-//   ※ネブラスカ未導入の店は来店数がそもそも取れないので、図には載せず
-//     名前を下に出す。0人として原点に置くと相関を見誤るため。
-// ============================================================
-// 散布図の期間。ページ上部の集計期間とは切り離す（相関は期間の長さで
-// 見え方が変わるので、1週間と4週間を並べて見比べられるほうが役に立つ）。
-const AD_SCRANGE=[["1w","直近1週間",7],["4w","直近4週間",28]];
-function adScPeriod(){
-  const last=(DATA.meta||[]).reduce((a,r)=>r.d>a?r.d:a,"")||DATA._salesMax||DATA._max;
-  const days=(AD_SCRANGE.find(x=>x[0]===AD_SCY)||AD_SCRANGE[1])[2];
-  return [addDays(last,-(days-1)), last];
-}
-function adDrawScatter(shortName){
-  const host=document.getElementById("adscatter"); if(!host)return;
-  const note=document.getElementById("adscnote");
-  const [from,to]=adScPeriod();
-  const toggle=`<div class="adperiod" style="margin-bottom:8px">`+
-    AD_SCRANGE.map(([k,n])=>
-      `<button class="chip adscy${AD_SCY===k?" on":""}" data-y="${k}">${n}</button>`).join("")+
-    `<span class="sub" style="align-self:center">で見る</span></div>`;
-  const wire=()=>host.querySelectorAll(".adscy").forEach(b=>b.onclick=()=>{
-    AD_SCY=b.dataset.y;
-    try{localStorage.setItem("notime-adscy",AD_SCY);}catch(e){}
-    drawAds();
-  });
-  const g=new Map();
-  // ここだけは自前の期間で集計する（上の集計期間には連動させない）
-  for(const r of (DATA.meta||[])){
-    if(r.si==null||r.d<from||r.d>to)continue;
-    if(AD_HIDE.has(r.st||UNMAPPED))continue;
-    if(!adSegOk(r))continue;                 // 点＝店舗なので、見ている区分だけにする
-    let e=g.get(r.si); if(!e){e={name:r.st,own:adOwnOf(r),acc:adZero()};g.set(r.si,e);}
-    adAdd(e.acc,r);
-  }
-  for(const [,e] of g)adSales(e.acc,from,to);
-  const pts=[],skip=[];
-  for(const [sid,e] of g){
-    if(e.acc.sp<=0)continue;
-    // 来店をKPIに使わない店（kpi_visitors=false）と、記録が1件も無い店は外す。
-    // 0人なのか取れないのかが区別できないため。
-    if(kvOf(sid)&&e.acc.vis>0)pts.push({x:e.acc.sp,y:e.acc.vis,n:shortName(e.name),own:e.own});
-    else skip.push(shortName(e.name));
-  }
-  if(pts.length<2){
-    host.innerHTML=toggle+`<p class="note">この期間に、広告費と来店数がそろっている店舗が足りません。</p>`;
-    wire();
-    if(note)note.textContent="";
-    return;
-  }
-  const NARROW=(window.innerWidth||760)<560;
-  const W=NARROW?380:760,H=NARROW?260:320,L=NARROW?44:58,R=14,T=12,B=NARROW?28:32;
-  const xs=pts.map(p=>p.x),ys=pts.map(p=>p.y);
-  const xM=Math.max(...xs)*1.08||1, yM=Math.max(...ys)*1.08||1;
-  const px=v=>L+v/xM*(W-L-R), py=v=>H-B-v/yM*(H-T-B);
-  // 最小二乗法の直線と相関係数
-  const n=pts.length, sx=xs.reduce((a,b)=>a+b,0), sy=ys.reduce((a,b)=>a+b,0);
-  const mx=sx/n, my=sy/n;
-  let sxy=0,sxx=0,syy=0;
-  for(const p of pts){sxy+=(p.x-mx)*(p.y-my);sxx+=(p.x-mx)**2;syy+=(p.y-my)**2;}
-  const slope=sxx>0?sxy/sxx:0, icpt=my-slope*mx;
-  const r=(sxx>0&&syy>0)?sxy/Math.sqrt(sxx*syy):null;
-  const FS=NARROW?8:9;
-  const tick=(m,f)=>[0,.5,1].map(t=>t*m).map(f);
-  const grid=tick(yM,v=>`<line x1="${L}" y1="${py(v)}" x2="${W-R}" y2="${py(v)}" stroke="var(--line)" stroke-width="1"/>`+
-      `<text x="${L-4}" y="${py(v)+3}" font-size="${FS}" text-anchor="end" fill="var(--sub)">${NUM(Math.round(v))}</text>`).join("")+
-    tick(xM,v=>`<text x="${px(v)}" y="${H-B+14}" font-size="${FS}" text-anchor="middle" fill="var(--sub)">${YEN(Math.round(v))}</text>`).join("");
-  const line=`<line x1="${px(0)}" y1="${py(Math.max(0,icpt))}" x2="${px(xM)}" y2="${py(Math.max(0,icpt+slope*xM))}" stroke="var(--sub)" stroke-dasharray="4 3" stroke-width="1.5"/>`;
-  // 名前は広告費の多い上位だけに出す（全部出すと重なって読めない）
-  const named=new Set([...pts].sort((a,b)=>b.x-a.x).slice(0,NARROW?4:8).map(p=>p.n));
-  // 点は押せる。押すと黒い吹き出しでその店の数字を出す（スマホでは
-  // カーソルを載せられないので、title頼みだと読めないため）。
-  const dots=pts.map((p,i)=>{
-    const c=p.own==="FC"?"#e8590c":"#2f6fd0";
-    return `<circle class="scdot" data-i="${i}" cx="${px(p.x)}" cy="${py(p.y)}" r="6" fill="${c}"`+
-      ` fill-opacity=".75" stroke="#fff" stroke-width="1" style="cursor:pointer"></circle>`+
-      (named.has(p.n)?`<text x="${px(p.x)+8}" y="${py(p.y)+3}" font-size="${FS}" fill="var(--ink)" style="pointer-events:none">${esc(p.n)}</text>`:"");
-  }).join("");
-  host.innerHTML=toggle+
-    `<div class="adlegend" style="margin-bottom:4px">`+
-      `<span><i style="background:#2f6fd0"></i>直営店</span><span><i style="background:#e8590c"></i>FC店</span>`+
-      `<span class="sub">縦＝来店数（人）／横＝広告費（円）</span></div>`+
-    `<div class="scwrap" style="position:relative">`+
-    `<svg id="adscsvg" viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="xMidYMid meet">`+
-    grid+line+dots+`</svg><div class="adtip" id="adsctip" hidden></div></div>`;
-  wire();
-  // 点を押したら黒い吹き出し。もう一度押すか、余白を押すと閉じる。
-  const svg=document.getElementById("adscsvg"), tip=document.getElementById("adsctip");
-  if(svg&&tip){
-    const wrap=svg.parentElement;
-    let open=-1;
-    const hide=()=>{ tip.hidden=true; open=-1; };
-    svg.querySelectorAll(".scdot").forEach(el=>el.addEventListener("click",ev=>{
-      ev.stopPropagation();
-      const i=+el.dataset.i;
-      if(open===i){ hide(); return; }
-      open=i;
-      const p=pts[i];
-      const cpv=p.y>0?p.x/p.y:null;
-      tip.innerHTML=`<b>${esc(p.n)}</b>`+
-        `<div class="l"><i style="background:${p.own==="FC"?"#e8590c":"#2f6fd0"}"></i>広告費<b>${YEN(p.x)}円</b></div>`+
-        `<div class="l"><i style="background:#0ca678"></i>来店数<b>${NUM(p.y)}人</b></div>`+
-        `<div class="l"><i style="background:#b8860b"></i>来店1人あたり<b>${cpv==null?"—":YEN(Math.round(cpv))+"円"}</b></div>`;
-      tip.hidden=false;
-      // SVGの座標を画面の座標に直して、点の右上に置く
-      const box=svg.getBoundingClientRect(), sx2=box.width/W, sy2=box.height/H;
-      let x=px(p.x)*sx2+10, y=py(p.y)*sy2-10;
-      const tw=tip.offsetWidth||150, th=tip.offsetHeight||70;
-      if(x+tw>box.width)x=Math.max(0,px(p.x)*sx2-tw-10);
-      if(y+th>box.height)y=Math.max(0,box.height-th);
-      if(y<0)y=0;
-      tip.style.left=x+"px"; tip.style.top=y+"px";
-    }));
-    if(wrap)wrap.addEventListener("click",hide);
-  }
-  if(note){
-    const strength=r==null?"":(Math.abs(r)>=.7?"強い":Math.abs(r)>=.4?"ゆるやかな":"ほとんど無い");
-    note.innerHTML=
-      (r==null?"":`相関係数 <b>${F2(r)}</b>（${strength}相関）。点線は最小二乗法の直線で、`+
-        `線より上＝同じ広告費で来店が多い店、下＝出しているわりに来ていない店です。`)+
-      `<br>点を押すと、その店の数字が出ます。`+
-      `<br>期間: ${from}〜${to}（上の集計期間には連動しません）／${pts.length}店舗`+
-      (skip.length?`<br><b style="color:#b8860b">対象外 ${skip.length}店</b>（${skip.map(esc).join("・")}）：ネブラスカ未導入のため来店数が取れません。`:"");
-  }
-}
 
 // ============================================================
 // クリエイティブ別（広告＝ad単位）
