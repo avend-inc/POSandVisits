@@ -3803,8 +3803,11 @@ function drawStoreAds(){
   // ---- キャンペーン別 ----
   const g=new Map();
   for(const r of adRowsOfStore(id,f,t)){
-    let e=g.get(r.c); if(!e){e={sp:0,im:0,ck:0,rc:0,days:new Set()};g.set(r.c,e);}
+    let e=g.get(r.c); if(!e){e={sp:0,im:0,ck:0,rc:0,pv:0,pvn:0,days:new Set()};g.set(r.c,e);}
     e.sp+=r.sp||0;e.im+=r.im||0;e.ck+=r.ck||0;e.rc+=r.rc||0;e.days.add(r.d);
+    // プロフアクセス数は取り込み待ちの日がある。値がある行だけ数え、
+    // 1行も無ければ「—」にする（0を足すと「本当に0回だった」と読めてしまう）
+    if(r.pv!=null){ e.pv+=r.pv||0; e.pvn++; }
   }
   const camps=[...g.entries()].sort((a,b)=>b[1].sp-a[1].sp);
   const ct=document.getElementById("stad-camp");
@@ -3813,8 +3816,9 @@ function drawStoreAds(){
       `<div class="sub" style="font-weight:500">${e.days.size}日／1日 ${YEN(Math.round(e.days.size?e.sp/e.days.size:0))}円</div></td>`+
       `<td>${YEN(Math.round(e.sp))}円</td><td>${NUM(e.im)}</td><td>${NUM(e.ck)}</td>`+
       `<td>${e.im>0?F1(e.ck/e.im*100)+"%":"—"}</td>`+
-      `<td>${e.ck>0?YEN(Math.round(e.sp/e.ck))+"円":"—"}</td></tr>`;
-    ct.innerHTML=`<thead><tr><th>キャンペーン</th><th>広告費</th><th>表示回数</th><th>クリック数</th><th>CTR</th><th>クリック単価</th></tr></thead>`+
+      // CPC＝広告費÷プロフアクセス数。画面のどこでもこの意味にそろえてある
+      `<td>${(e.pvn&&e.pv>0)?YEN(Math.round(e.sp/e.pv))+"円":"—"}</td></tr>`;
+    ct.innerHTML=`<thead><tr><th>キャンペーン</th><th>広告費</th><th>表示回数</th><th>クリック数</th><th>CTR</th><th>CPC</th></tr></thead>`+
       `<tbody>${camps.length?camps.map(row).join(""):`<tr><td colspan="6" class="sub">この期間の広告はありません</td></tr>`}</tbody>`;
   }
 
@@ -3825,8 +3829,9 @@ function drawStoreAds(){
   const cg=new Map();
   for(const r of (DATA.metaAds||[])){
     if(r.si!==id||r.d<f||r.d>t)continue;
-    let e=cg.get(r.an); if(!e){e={sp:0,im:0,ck:0,rc:0,days:new Set()};cg.set(r.an,e);}
+    let e=cg.get(r.an); if(!e){e={sp:0,im:0,ck:0,rc:0,pv:0,pvn:0,days:new Set()};cg.set(r.an,e);}
     e.sp+=r.sp||0;e.im+=r.im||0;e.ck+=r.ck||0;e.rc+=r.rc||0;e.days.add(r.d);
+    if(r.pv!=null){ e.pv+=r.pv||0; e.pvn++; }
   }
   const crs=[...cg.entries()].sort((a,b)=>b[1].sp-a[1].sp);
   const top=crs.slice(0,5);
@@ -3836,15 +3841,19 @@ function drawStoreAds(){
       `<div class="sub" style="font-weight:500">${e.days.size}日／1日 ${YEN(Math.round(e.days.size?e.sp/e.days.size:0))}円</div></td>`+
       `<td>${YEN(Math.round(e.sp))}円</td><td>${NUM(e.im)}</td><td>${NUM(e.ck)}</td>`+
       `<td>${e.im>0?F1(e.ck/e.im*100)+"%":"—"}</td>`+
-      `<td>${e.ck>0?YEN(Math.round(e.sp/e.ck))+"円":"—"}</td>`+
+      // ここも CPC＝広告費÷プロフアクセス数。広告単位のプロフアクセス数は
+      // まだDBに無いので、いまは「—」（取り込みが入ると自動で出る）
+      `<td>${(e.pvn&&e.pv>0)?YEN(Math.round(e.sp/e.pv))+"円":"—"}</td>`+
       `<td>${e.rc>0?F2(e.im/e.rc)+"回":"—"}</td></tr>`;
-    crt.innerHTML=`<thead><tr><th>広告</th><th>広告費</th><th>表示回数</th><th>クリック数</th><th>CTR</th><th>クリック単価</th><th>FQ</th></tr></thead>`+
+    crt.innerHTML=`<thead><tr><th>広告</th><th>広告費</th><th>表示回数</th><th>クリック数</th><th>CTR</th><th>CPC</th><th>FQ</th></tr></thead>`+
       `<tbody>${top.length?top.map(row).join(""):`<tr><td colspan="7" class="sub">この期間のクリエイティブ別データがありません</td></tr>`}</tbody>`;
   }
   const cn=document.getElementById("stad-crnote");
   if(cn)cn.innerHTML=
     (crs.length>top.length?`対象 ${crs.length}種のうち上位5件。`:"")+
-    `<b>クリック単価</b>は1クリックあたりの広告費で、AVENDで言うCPC（＝1プロフアクセスあたり）とは別物です。`+
+    `<b>CPC</b>はこの画面のどこでも<b>広告費÷プロフアクセス数</b>です（上のカード・キャンペーン別とそろえてあります）。`+
+    `<br>広告ごとのCPCは、<b>広告単位のプロフアクセス数がまだDBに無いため「—」</b>です`+
+    `（Meta APIから広告単位で取り込むと自動で出ます）。`+
     ((DATA.metaAds&&DATA.metaAds.length)?"":`<br>広告単位のデータがまだ入っていません（データ更新後に出ます）。`);
 }
 
