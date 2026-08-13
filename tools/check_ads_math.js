@@ -757,26 +757,31 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
   // URL が分かれた別ページであること（共有・再読み込みで同じ場所に戻る）
   has(/href="index\.html\?view=ads&g=own"/, "直営は別URL");
   has(/href="index\.html\?view=ads&g=fc"/, "FCは別URL");
-  has(/href="index\.html\?view=ads&g=all"/, "全社は別URL");
   has(/id="tab-ads"/, "広告タブがある");
-  // クリエイティブと未紐付けは全社にしか出さない
-  has(/\$\{adSeg\(\)!=="all"\?`/, "区分ページではクリエイティブ別を出さない");
-  has(/<h2>クリエイティブ別 <span class="sub"[^>]*>（全社・区分では割れません）/,
-    "全社側は「区分では割れない」と見出しに書く");
-  has(/1本の広告が複数の店に配信されるので、直営／FCで割ると/, "区分ページに理由と行き先を書く");
-  // クリエイティブの集計そのものは区分で絞らない（絞ると全社の合計と合わなくなる）
+  // 広告は店舗のキャンペーンの中で走るので、1本の広告は必ず1店に属する。
+  // だからクリエイティブも区分で割れる＝全社だけのページは要らない
+  has(/<h2>クリエイティブ別 <span class="sub"[^>]*>（\$\{adSegLabel\(\)\}・1行＝1店の1広告）/,
+    "クリエイティブ別も区分ごとに出す");
   {
     const fn = src.slice(src.indexOf("function adDrawCreatives(shortName)"),
                          src.indexOf("// 未紐付けキャンペーンの割り当て"));
-    if (/adSegOk/.test(fn)) {
-      console.log("  NG  クリエイティブ別を区分で絞っています（1本が複数店にまたがるので割れません）");
-      ng++;
-    } else console.log("  OK  クリエイティブ別は区分で絞っていない（全社のまま）");
+    if (!/adSegOk\(r\)/.test(fn)) {
+      console.log("  NG  クリエイティブ別に区分の絞り込みが掛かっていません"); ng++;
+    } else console.log("  OK  クリエイティブ別も区分で絞る");
+    // まとめる単位は「店舗 × 広告名」。広告名だけでまとめると、別々の店の
+    // 同じ名前の広告が1行に合算され、広告費もCTRも店をまたいで混ざる
+    if (/let e=g\.get\(r\.an\)/.test(fn)) {
+      console.log("  NG  広告名だけでまとめています（別の店の同名広告が合算されます）"); ng++;
+    } else console.log("  OK  広告名だけではまとめていない");
+    if (/const key=\(r\.si==null\?"\?":r\.si\)\+"\\u001f"\+r\.an;/.test(fn)) {
+      console.log("  OK  まとめる単位は 店舗 × 広告名（区切りはエスケープで書く）");
+    } else { console.log("  NG  まとめる単位が 店舗 × 広告名 になっていません"); ng++; }
+    if (/他\$\{sts\.length-1\}店/.test(fn)) {
+      console.log("  NG  「他◯店」の表示が残っています（1行＝1店のはず）"); ng++;
+    } else console.log("  OK  「他◯店」は出ない（1行＝1店の1広告）");
   }
-  // 区分が決まらないものは全社にしか置けない
-  has(/if\(s==="all"\)return true;/, "全社ではすべて通す");
-  has(/return s==="own" \? ow==="直営" : ow==="FC";/,
-    "区分なし（判定できない行）は直営にもFCにも入れない");
+  has(/return adSeg\(\)==="own" \? ow==="直営" : ow==="FC";/,
+    "区分が決まらない行は直営にもFCにも入れない");
   // 区分が未設定の店は黙って直営に入れず、名前を出して直せるようにする
   has(/区分（直営／FC）が未設定の店が/, "区分が未設定の店を画面で知らせる");
   has(/店舗マスタの ownership を入れると/, "どう直せばよいかを書く");
@@ -796,6 +801,8 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
       { re: /reduce\(\(a,r\)=>r\.d>a\?r\.d:a/, why: "いちばん新しい日付を探すだけ" },
       { re: /if\(r\.d<state\.from\|\|r\.d>state\.to\|\|!\(r\.sp>0\)\)continue;/,
         why: "区分が未設定の店を探す（全区分を見るのが目的）" },
+      { re: /const nomap=adSum\(/,
+        why: "未紐付けの広告費を数える（区分に入らないものを出すのが目的）" },
     ];
     const lines = src.slice(f5, t5).split("\n");
     const bad = [];
@@ -823,6 +830,20 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
   // 区分を切り替えたとき、前の区分で選んでいた店の絞り込みが残ると、画面が丸ごと空になる
   has(/if\(AD_STORE&&!adStoreList\(\)\.includes\(AD_STORE\)\)\{/,
     "区分に無い店の絞り込みは「すべての店舗」に戻す");
+  // 全社のページを消したので、区分に入らないもの（未紐付け）の広告費が
+  // どこにも出なくなる恐れがある。消えていないことを見張る
+  if (/const nomap=adSum\(adRowsAll\(\)/.test(src)) {
+    console.log("  NG  未紐付けの広告費を adRowsAll から数えています（必ず0になります）"); ng++;
+  } else console.log("  OK  未紐付けの広告費は区分を通さずに数える（0にならない）");
+  has(/const nomap=adSum\(\(DATA\.meta\|\|\[\]\)\.filter\(r=>r\.d>=state\.from/,
+    "未紐付けの広告費は生の行から数える");
+  has(/直営・FCどちらの集計にも入っていません（下の「未紐付けキャンペーン」で店舗に割り当てると入ります）/,
+    "入っていないことと、直し方を書く");
+  // 未紐付けの割り当てパネルは、全社を消した以上どちらのページにも要る
+  has(/<div class="panel" id="admappanel"/, "未紐付けキャンペーンのパネルがある");
+  if (/\$\{adSeg\(\)!=="all"\?/.test(src)) {
+    console.log("  NG  全社だけに出す分岐が残っています"); ng++;
+  } else console.log("  OK  全社だけに出す分岐は残っていない");
 }
 
 // --- 区分の判定を実際に動かす ------------------------------------------
@@ -857,16 +878,16 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
     // ownership が空の店。黙って直営に入れない
     okc("区分が空の店は直営にもFCにも入らない",
       seg("own", { si: 3 }) === false && seg("fc", { si: 3 }) === false);
-    okc("区分が空の店も全社には出る（広告費が消えない）", seg("all", { si: 3 }) === true);
+    // 区分が空の店・未紐付けは、どちらの集計にも入れない（決められないため）。
+    // 消えたことが分からないと困るので、画面で名指しして知らせる作りにしてある
     // 店舗に紐づいていない行（未紐付け）
     okc("未紐付けは直営にもFCにも入らない",
       seg("own", { si: null, ow: null }) === false && seg("fc", { si: null, ow: null }) === false);
-    okc("未紐付けも全社には出る", seg("all", { si: null, ow: null }) === true);
+
     // どの区分でも、行がどこかに必ず1回は出る（＝合計が消えない・二重にならない）
     const rows = [{ si: 1 }, { si: 2 }, { si: 3 }, { si: null }];
     const n = rows.filter((r) => seg("own", r)).length + rows.filter((r) => seg("fc", r)).length;
     okc(`直営とFCで二重に数えない（${n}件／全4件のうち区分がつくのは2件）`, n === 2);
-    okc("全社ではぜんぶ出る", rows.filter((r) => seg("all", r)).length === rows.length);
   }
 }
 
