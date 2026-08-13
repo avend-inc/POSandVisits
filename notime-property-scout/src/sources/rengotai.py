@@ -22,40 +22,37 @@ from bs4 import BeautifulSoup
 
 from ..models import RawListing
 
-LIST_BASE = "https://fudosanlist.cbiz.ne.jp/tenant/result"   # PROVISIONAL パス
-DETAIL_HOST = "fudosan.cbiz.ne.jp"                            # 個別物件ドメイン（§5.1.1）
+LIST_BASE = "https://fudosanlist.cbiz.ne.jp/list/rent/"  # 実パス（WebSearchで実URL構造を確認）
+DETAIL_HOST = "fudosan.cbiz.ne.jp"                        # 個別物件ドメイン（§5.1.1）
 
 DOMAIN = "fudosanlist.cbiz.ne.jp"
 
-# §6.1 検索条件プリセット → §5.1.1 の連合隊フィルタへの対応（PROVISIONAL キー名）。
-# 実際のキー名は実ページのフォームを見て確定する。意図をコードに残すのが目的。
-PROVISIONAL_PARAMS = {
-    "prop": "2",          # テナント（§5.1.1）
-    "tsubo_min": "25",    # 面積25坪以上（G1 / §6.1）
-    "floor_1f": "1",      # 1階（§6.1）
-    "floor_2f": "1",      # 2階（§6.1・2階は要目視で許容）
-    "parking_min": "2",   # 駐車場2台以上（G3 / §6.1）
-    "roadside": "1",      # 路面店（§5.1.1 チェックボックス）
-    "along_trunk": "1",   # 幹線道路沿い（§5.1.1・MVPのG4暫定判定に対応）
-    "tsubo_unit_max": "12000",  # 坪単価上限1万2千（G5。§11は1万で例示だがゲートは12,000）
-    "sort": "area_desc",  # 面積が広い順（§6.1「広い順」・おすすめ順は使わない）
-}
+# 実在が確認できたパラメータ（例: /list/rent/?prop=2&area=oita&a2=44201）:
+#   prop = 2      テナント（貸店舗・事務所・倉庫）
+#   area = 県名ローマ字（fukushima / akita / shizuoka / oita / miyazaki / nagasaki）
+#   a2   = JIS5桁の市区町村コード（cities.yaml の jis）
+CONFIRMED_PARAMS = {"prop": "2"}
+
+# 面積25坪以上/駐車2台/1-2階/路面/幹線/坪単価上限/広い順 のURL絞り込みキー名は
+# 実フォーム未確認（この環境から取得できずソースを読めていない）。誤ったキーを付けると
+# 逆に空振り/エラーになりうるため、URLでは絞らず §2 ゲートで確実に絞る方針にする。
+# 実ページのフォームを確認できたら、ここに面積下限・駐車・階・路面・並び順を追加する。
 
 
 def list_urls(city: dict, max_pages: int = 1) -> list[str]:
-    """対象市の一覧URLを組む（§5.1.1）。area は県名ローマ字（§5.1.1: area={県名ローマ字}）。
+    """対象市のテナント一覧URLを組む。実URL構造 /list/rent/?prop=2&area={県ローマ字}&a2={JIS}。
 
-    MVPは1市1ページから。ページングは実ページのパラメータ確認後に有効化する。
+    MVPは1市1ページから。ページングのキー名は実ページ確認後に有効化する。
+    面積/駐車/階/路面のURL絞り込みは未確認のため付けない（§2ゲートで絞る）。
     """
-    params = dict(PROVISIONAL_PARAMS)
+    params = dict(CONFIRMED_PARAMS)
     params["area"] = city["pref_roma"]
-    # 市の絞り込みは JISコード（cities.yaml の jis）で行える想定。キー名は要確認。
-    params["city_jis"] = city["jis"]
+    params["a2"] = city["jis"]
     urls = []
     for page in range(1, max_pages + 1):
         p = dict(params)
         if page > 1:
-            p["page"] = str(page)
+            p["page"] = str(page)   # ページングのキー名は要確認（PROVISIONAL）
         urls.append(f"{LIST_BASE}?{urlencode(p)}")
     return urls
 
