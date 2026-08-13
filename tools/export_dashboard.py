@@ -77,7 +77,10 @@ def build_data(sb: Supabase) -> dict:
     stores = [s for s in sb.select("stores", {"select": "*", "order": "id"})
               if s.get("id") is not None]
     name_by_id = {s["id"]: s["name"] for s in stores}
-    own_by_id = {s["id"]: (s.get("ownership") or "直営") for s in stores}
+    # 直営/FC。空欄を「直営」で埋めない。埋めると、区分が未設定なだけの店が
+    # 直営として集計され、広告の直営ページにFC店が出る（実際に起きた）。
+    # 未設定は未設定のまま渡して、画面側で「区分が未設定」と分かるようにする。
+    own_by_id = {s["id"]: (s.get("ownership") or None) for s in stores}
     # KPIに来店数を使うか（列が未追加でも既定 True）。False の店は来店・購入率をKPIから外す。
     kv_by_id = {s["id"]: bool(s.get("kpi_visitors", True)) for s in stores}
     # ダッシュボードに表示するか（列が未追加でも既定 True）。False の店は各画面の一覧・合計から外す。
@@ -602,7 +605,7 @@ def build_data(sb: Supabase) -> dict:
         "metaDests": dests,
         "metaSync": meta_sync,
         "stores": [{"id": s["id"], "name": name_by_id.get(s["id"], str(s["id"])),
-                    "own": own_by_id.get(s["id"], "直営"),
+                    "own": own_by_id.get(s["id"]),      # null＝区分が未設定
                     "kv": kv_by_id.get(s["id"], True),
                     "visible": vis_by_id.get(s["id"], True)}
                    for s in stores],
