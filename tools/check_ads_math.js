@@ -234,17 +234,18 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
 }
 
 
-// --- 店舗ページの広告（NEWPANEL_STORES 〜 DAY_COLS の実物を動かす）-------
+// --- 店舗ページの広告（AD_BYSID 〜 DAY_COLS の実物を動かす）-------------
 //   広告は「店舗×日×キャンペーン」で複数行あるので、日別の列や
 //   平日/土日祝の平均で足し方を間違えると、静かに水増しされる。
 {
-  const f2 = src.indexOf("const NEWPANEL_STORES=");
+  const f2 = src.indexOf("let AD_BYSID=null;");
   const t2 = src.indexOf("const DAY_COLS=");
   if (f2 < 0 || t2 < 0 || t2 <= f2) {
     console.log("  NG  店舗ページの広告まわりを取り出せませんでした"); ng++;
   } else {
     // 依存している関数は、この検算に必要なぶんだけ用意する（本体は触らない）
-    const ctx2 = { console, DATA: null };
+    // window は加盟店ログインの判定（window.FRANCHISEE）で使う
+    const ctx2 = { console, DATA: null, window: { FRANCHISEE: false } };
     vm.createContext(ctx2);
     vm.runInContext(`
       var DATA=null;
@@ -347,9 +348,15 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
     eq("広告の無い店", ctx2.adStoreHas(2), false);
     eq("未紐付け(si=null)は店に付かない", ctx2.adStoreHas(null), false);
 
-    // 段階導入のスイッチ
-    eq("いわきには出す", ctx2.newPanelOn(1), true);
-    eq("ほかの店にはまだ出さない", ctx2.newPanelOn(2), false);
+    // 出す／出さないは店名ではなく「その店に広告データがあるか」で決まる。
+    // 直営・FC・店名を問わず、同じ判定になること
+    eq("広告のある店には出す", ctx2.adShown(1), true);
+    eq("広告の無い店には出さない", ctx2.adShown(2), false);
+    // 加盟店ログイン（社外）には、広告データがあっても出さない
+    ctx2.window.FRANCHISEE = true;
+    eq("加盟店には出さない", ctx2.adShown(1), false);
+    ctx2.window.FRANCHISEE = false;
+    eq("社内に戻せばまた出る", ctx2.adShown(1), true);
   }
 }
 
@@ -364,7 +371,7 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
   has(/showAd\?`<th>広告費<\/th>`:""/, "日別推移に広告費の列を足している");
   has(/AD_BYSID=null; AD_BYSTORE=null;/, "割り当てを変えたら索引を作り直す");
   // 加盟店に広告を見せない（データ自体を配っていないが、二重に止める）
-  has(/if\(window\.FRANCHISEE\|\|!newPanelOn\(id\)\|\|!adStoreHas\(id\)\)return ""/,
+  has(/function kpi2AdRows\(id,ctx\)\{\s*if\(!adShown\(id\)\)return ""/,
       "加盟店にはKPIまとめの広告行を出さない");
   has(/wxStat=await weatherStats\(id,f,t\)/, "天気をAIのまとめに渡している");
   has(/const auto=autoInsight\(wxStat,weeklyStat\)/, "AIが使えないときも天気・広告・納品を使う");
@@ -969,6 +976,40 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
     console.log("      " + dead.join(", "));
     ng++;
   } else console.log("  OK  どこからも呼ばれていない関数は無い");
+}
+
+// --- 店舗ページの広告は、社外（加盟店）には出さない --------------------
+//   加盟店は社外なので、他店の数字が混ざるものは出せない。KPIまとめの広告行は
+//   上位3店平均との比較なので、まさにそれに当たる。
+//   出す／出さないの判定は adShown() 1か所に集めてあるので、
+//   ①adShown が加盟店を弾いていること ②広告を出す側が adShown を迂回していないこと
+//   の2つを見る。「加盟店にはデータを配っていないから出ない」には頼らない
+//   （配り方を変えた日に、黙って出てしまう）。
+{
+  const shown = /function adShown\(id\)\{([^}]*)\}/.exec(src);
+  if (!shown) { console.log("  NG  adShown() が見つかりません"); ng++; }
+  else {
+    const b = shown[1];
+    if (!/window\.FRANCHISEE/.test(b)) {
+      console.log("  NG  adShown() が加盟店ログインを弾いていません"); ng++;
+    } else if (!/adStoreHas\(id\)/.test(b)) {
+      console.log("  NG  adShown() が「その店に広告データがあるか」を見ていません"); ng++;
+    } else console.log("  OK  広告を出す判定は adShown() の1か所（加盟店を弾いている）");
+    // adStoreHas を直に見てよいのは、定義そのものと adShown の中だけ。
+    // それ以外から呼ばれていたら、加盟店の判定を飛ばして出している疑いがある
+    const all = (src.match(/(?<![.\w$])adStoreHas\(/g) || []).length;
+    const inShown = (b.match(/adStoreHas\(/g) || []).length;
+    const defs = (src.match(/function adStoreHas\(/g) || []).length;
+    const bypass = all - inShown - defs;
+    if (bypass > 0) {
+      console.log(`  NG  adShown を通さずに adStoreHas を直接見ている所が ${bypass}か所あります`);
+      ng++;
+    } else console.log("  OK  adStoreHas を直接見ている所は無い（判定を迂回していない）");
+  }
+  // 店名で出し分ける関門を作り直していないか（全店に広げたので、名前では決めない）
+  if (/NEWPANEL_STORES|newPanelOn/.test(src)) {
+    console.log("  NG  店名で広告を出し分ける関門（NEWPANEL_STORES）が戻っています"); ng++;
+  } else console.log("  OK  店名で広告を出し分けてはいない（直営・FCとも同じ作り）");
 }
 
 console.log(ng ? `\n❌ ${ng}件ずれています。` : "\n✅ すべて期待どおりです。");
