@@ -541,12 +541,17 @@ def build_data(sb: Supabase) -> dict:
         since = (datetime.now(JST).date() - timedelta(days=META_AD_DAYS)).isoformat()
         ADBASE = ("date,ad_name,campaign_name,destination_id,"
                   "spend,impressions,reach,clicks")
-        try:
-            src = _select_all(sb, "meta_insights_daily_ad", ADBASE + ",video_avg_seconds",
-                              order="date", extra={"date": f"gte.{since}"})
-        except Exception:
-            src = _select_all(sb, "meta_insights_daily_ad", ADBASE,
-                              order="date", extra={"date": f"gte.{since}"})
+        # profile_visits はクリエイティブ別のCPC（＝広告費÷プロフアクセス数）に要る。
+        # 列がまだ無い環境でも動くよう、多いほうから順に取り直す（増えたら自動で拾う）。
+        src = []
+        for extra_cols in (",video_avg_seconds,profile_visits,follows,likes",
+                           ",video_avg_seconds", ""):
+            try:
+                src = _select_all(sb, "meta_insights_daily_ad", ADBASE + extra_cols,
+                                  order="date", extra={"date": f"gte.{since}"})
+                break
+            except Exception:
+                continue
         for r in src:
             did = r.get("destination_id")
             meta_ads.append({
@@ -562,6 +567,13 @@ def build_data(sb: Supabase) -> dict:
             })
             if r.get("video_avg_seconds") is not None:
                 meta_ads[-1]["vt"] = float(r["video_avg_seconds"] or 0)
+            # 未取得の日は付けない（付けないと画面で「—」になる。0にはしない）
+            if r.get("profile_visits") is not None:
+                meta_ads[-1]["pv"] = int(r["profile_visits"] or 0)
+            if r.get("follows") is not None:
+                meta_ads[-1]["fl"] = int(r["follows"] or 0)
+            if r.get("likes") is not None:
+                meta_ads[-1]["lk"] = int(r["likes"] or 0)
         if meta_ads:
             names = len({r["an"] for r in meta_ads})
             print(f"  Meta広告(クリエイティブ): {len(meta_ads)}行 / {names}種"
