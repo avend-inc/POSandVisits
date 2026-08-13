@@ -450,9 +450,6 @@ const METRICS=[
 ];
 const M=k=>METRICS.find(m=>m.key===k);
 const KPI_ORDER=["ex","v","tx","qty","pr","aov","upt","aup"];
-// 比較ラベル：対象期間の長さに合わせて 前日比／前週比／前月比 を出し分ける。
-// 比較先は「直前の同じ長さの期間」（実際の日付はマウスオーバーで表示）。
-function deltaLabel(n){ if(n<=1)return"前日比"; if(n<=7)return"前週比"; if(n<=31)return"前月比"; return "前"+n+"日比"; }
 // 表示グループ（直営／FC）。URLの ?g=own / ?g=fc で切り替える。
 //   直営ページ … 直営店だけ。FCページ … FC店だけ。既定（無指定）は直営。
 // ?store=<id> があれば「店舗専用ページ」を表示（一覧の店名タップで遷移＝ブラウザ戻るで一覧へ）
@@ -917,20 +914,6 @@ function rptBrand3(sid){const s=storeMeta(sid);const n=(s&&s.name)||"";
   if(n.indexOf("NOTIME")>=0)return "NOTIME";
   return "その他";}
 function visibleOf(sid){const s=storeMeta(sid);return s?(s.visible!==false):true;}
-// いま表示できる合計スコープの一覧（該当店がある合計だけ出す）
-function aggScopeList(){
-  // 店舗セレクタの先頭に出す「まとめ」の一覧。表示グループ（直営／FC）に合わせて出し分ける。
-  //   直営ページ … 直営店
-  //   FCページ   … 合計（FC）／ SELFURUGI（FC）／ NOTIME（FC）（該当店があるものだけ）
-  const us=usableStores();
-  if(GROUP==="fc"){
-    const out=[{id:"fc",name:SCOPE_LABEL.fc}];
-    if(us.some(s=>brandOf(s.id)==="SELFURUGI"&&ownOf(s.id)==="FC"))out.push({id:"sf",name:SCOPE_LABEL.sf});
-    if(us.some(s=>brandOf(s.id)==="NOTIME"&&ownOf(s.id)==="FC"))out.push({id:"nt",name:SCOPE_LABEL.nt});
-    return out;
-  }
-  return [{id:"own",name:SCOPE_LABEL.own}];
-}
 // 管理タブは管理者のときだけ出す（認証モードでロール確定後に呼ぶ）
 function syncAdsTab(){
   // 広告は加盟店(社外)には見せない。data.jsonごと配っていないので画面も出さない。
@@ -946,12 +929,6 @@ function syncGroupTab(){
 }
 // ---- 分類（店舗の所属）：直営 / SELFURUGI FC / NOTIME FC ----
 function classOf(sid){ return ownOf(sid)==="直営" ? "直営" : (brandOf(sid)+" FC"); }
-function classesInData(){
-  const order=["直営","SELFURUGI FC","NOTIME FC","その他 FC"];
-  const present=new Set(usableStores().map(s=>classOf(s.id)));
-  return [...order.filter(c=>present.has(c)), ...[...present].filter(c=>!order.includes(c))];
-}
-function classMembers(cls){ return usableStores().filter(s=>classOf(s.id)===cls); }
 function sumRowsForIds(from,to,idset){ return sumRows(DATA.daily.filter(r=>idset.has(r.s)&&r.d>=from&&r.d<=to)); }
 // 対象期間が「その月の1日始まり＆同じ月内」なら着地見込みを出す（今月・前月など）。
 // 今月は末日がデータ最新日にクランプされる（例 7/31→7/29）ので、末日一致は要求しない。
@@ -966,60 +943,15 @@ function gradeOf(category, price){
   for(const b of bands){ if(price>=b.lo)return b.grade; }
   return null;                                               // 最小の下限未満
 }
-function gradeAgg(from,to,store){
-  const g={}; let ta=0,tq=0;
-  for(const r of (DATA.catp||[])){
-    if(!storeMatch(r.s,store))continue; if(r.d<from||r.d>to)continue;
-    const gr=gradeOf(r.c,r.p); if(!gr)continue;
-    const x=g[gr]||(g[gr]={a:0,q:0}); x.a+=r.a||0; x.q+=r.q||0; ta+=r.a||0; tq+=r.q||0;
-  }
-  return {g,ta,tq};
-}
 function hasGrades(){ return !!(DATA.gradeBands&&DATA.gradeBands.length&&DATA.catSeason&&DATA.catp&&DATA.catp.length); }
-function drawGrade(from,to,store){
-  const panel=document.getElementById("grade-panel"); if(!panel)return;
-  if(!hasGrades()){ panel.style.display="none"; return; }
-  const {g,ta,tq}=gradeAgg(from,to,store); const keys=Object.keys(g);
-  if(!keys.length){ panel.style.display="none"; return; }
-  panel.style.display="";
-  const bySales=keys.slice().sort((x,y)=>g[y].a-g[x].a).slice(0,3);
-  const byQty=keys.slice().sort((x,y)=>g[y].q-g[x].q).slice(0,3);
-  const rows=(arr,val,tot,fmt)=>arr.map((k,i)=>
-    `<tr><td>${i+1}</td><td>ランク ${esc(k)}</td><td>${fmt(g[k][val])}</td><td>${tot>0?F1(g[k][val]/tot*100)+"%":"—"}</td></tr>`).join("")
-    ||`<tr><td colspan="4" class="sub">対象データなし</td></tr>`;
-  document.getElementById("grade-sales").innerHTML=`<thead><tr><th>#</th><th>ランク</th><th>売上</th><th>比率</th></tr></thead><tbody>${rows(bySales,"a",ta,v=>YEN(v)+"円")}</tbody>`;
-  document.getElementById("grade-qty").innerHTML=`<thead><tr><th>#</th><th>ランク</th><th>販売数</th><th>比率</th></tr></thead><tbody>${rows(byQty,"q",tq,v=>NUM(v)+"点")}</tbody>`;
-  document.getElementById("grade-note").textContent=`比率＝ランク対象（SS/AW）の合計に対する割合（その他カテゴリは除く）`;
-}
 // 指定範囲・指定店舗の日次行
 function rowsIn(from,to,storeId){
   return DATA.daily.filter(r=>storeMatch(r.s,storeId)&&r.d>=from&&r.d<=to);
-}
-// 表示期間を grain で刻んだ推移用
-function periods(from,to,g,storeId){
-  const map=new Map();
-  for(const r of rowsIn(from,to,storeId)){const k=pKey(r.d,g);if(!map.has(k))map.set(k,[]);map.get(k).push(r);}
-  return [...map.entries()].sort((a,b)=>a[0]<b[0]?-1:1).map(([k,rows])=>{const p=sumRows(rows);p.key=k;p.label=pLabel(k,g);return p;});
-}
-function catIn(from,to,storeId){
-  const map=new Map();
-  for(const r of DATA.cat){if(!storeMatch(r.s,storeId))continue;if(r.d<from||r.d>to)continue;if(isDropCat(r.c))continue; // セール（バンドル割引）は売上・販売数ランキングに入れない
-    let c=map.get(r.c);if(!c){c={c:r.c,a:0,q:0};map.set(r.c,c);}c.a+=r.a||0;c.q+=r.q||0;}
-  return [...map.values()];
-}
-// カテゴリを1つ選び、対象期間・店舗でしぼって価格帯（単価）別に集計。売上降順。
-function catPriceIn(from,to,storeId,category){
-  if(!DATA.catp)return null;
-  const map=new Map();
-  for(const r of DATA.catp){if(r.c!==category)continue;if(!storeMatch(r.s,storeId))continue;if(r.d<from||r.d>to)continue;
-    let e=map.get(r.p);if(!e){e={p:r.p,a:0,q:0};map.set(r.p,e);}e.a+=r.a||0;e.q+=r.q||0;}
-  return [...map.values()].sort((a,b)=>b.a-a.a);
 }
 function usableStores(){const w=new Set(DATA.daily.map(r=>r.s));return DATA.stores.filter(s=>w.has(s.id)&&s.visible!==false);}
 function storeMeta(sid){return (DATA.stores||[]).find(x=>String(x.id)===String(sid))||null;}
 function ownOf(sid){const s=storeMeta(sid);return (s&&s.own)?s.own:"直営";}          // 直営 / FC
 function kvOf(sid){const s=storeMeta(sid);return s?(s.kv!==false):true;}             // 来店数をKPIに使うか
-function hasFCStores(){return usableStores().some(s=>ownOf(s.id)!=="直営");}
 function periodSpan(key,g){
   if(g==="day")return[key,key];
   if(g==="week")return[key,addDays(key,6)];
@@ -1813,9 +1745,11 @@ function adDrawCreatives(shortName){
     // 区切りはエスケープで書く（生の制御文字を混ぜない）。区切りが無いと
     // 店1の広告「23」と店12の広告「3」が同じキーになってしまう
     const key=(r.si==null?"?":r.si)+"\u001f"+r.an;
-    let e=g.get(key); if(!e){e={nm:r.an,sp:0,im:0,ck:0,rc:0,vt:0,vn:0,vw:0,vp:0,st:r.st||null,days:new Set(),ids:new Set(),acc:null};g.set(key,e);}
+    let e=g.get(key); if(!e){e={nm:r.an,sp:0,im:0,ck:0,rc:0,pv:0,lp:0,dnn:0,vt:0,vn:0,vw:0,vp:0,st:r.st||null,days:new Set(),ids:new Set(),acc:null};g.set(key,e);}
     if(r.ai)e.ids.add(r.ai); if(r.ac)e.acc=r.ac;
     e.sp+=r.sp||0;e.im+=r.im||0;e.ck+=r.ck||0;e.rc+=r.rc||0;
+    // CPCの分母。取り込めた日だけ数える（0で薄めない＝未取得と実績0を混ぜない）
+    if(r.pv!=null||r.lp!=null){ e.pv+=r.pv||0; e.lp+=r.lp||0; e.dnn++; }
     e.days.add(r.d);
     // 平均視聴時間は1再生あたりの秒数。再生数で重み付けして平均する
     //（再生数が来ていない行しか無いときだけ、行の単純平均に落とす）
@@ -1836,6 +1770,10 @@ function adDrawCreatives(shortName){
     {k:"im", name:"表示回数",   val:e=>e.im, fmt:v=>NUM(v)},
     {k:"ck", name:"クリック数", val:e=>e.ck, fmt:v=>NUM(v)},
     {k:"ctr",name:"CTR",       val:e=>e.im>0?e.ck/e.im*100:null, fmt:v=>F1(v)+"%", best:"高い"},
+    // CPC＝広告費÷（プロフアクセス数＋リンク遷移数）。画面のどこでもこの定義。
+    // すぐ隣の「クリック単価」は 広告費÷クリック数 で、別の指標（名前で分けてある）。
+    {k:"cpcv",name:"CPC",       val:e=>(e.dnn&&(e.pv+e.lp)>0)?e.sp/(e.pv+e.lp):null,
+     fmt:v=>YEN(Math.round(v))+"円", best:"安い", asc:true, need:{any:["pv","lp"]}},
     {k:"cpc",name:"クリック単価",val:e=>e.ck>0?e.sp/e.ck:null,   fmt:v=>YEN(Math.round(v))+"円", best:"安い", asc:true},
     // 平均視聴時間は Meta から取れる（video_avg_time_watched_actions）が、
     // いまDBに列が無いので「—」になる。列だけ先に出しておく。
@@ -1843,9 +1781,17 @@ function adDrawCreatives(shortName){
      need:"vt", src:"video_avg_time_watched_actions"},
     {k:"frq",name:"FQ",        val:e=>e.rc>0?e.im/e.rc:null,    fmt:v=>F2(v)+"回"},
   ];
-  // 元データがまだ無い列は、値ではなく理由が分かるように「—」にする
-  const hasVT=(DATA.metaAds||[]).some(r=>r.vt!=null);
-  const ready=c=>c.need!=="vt"||hasVT;
+  // 元データがまだ無い列は、値ではなく理由が分かるように「—」にする。
+  // 見るのは広告単位のデータ（キャンペーン単位を見る adHas とは別もの）。
+  // {any:[...]} はどちらか一方が来ていれば出せる（CPCの分母が pv か lp のどちらか）
+  const adsHas=need=>{
+    if(!need)return true;
+    const some=k=>(DATA.metaAds||[]).some(r=>r[k]!=null);
+    if(need.any)return need.any.some(some);
+    return (Array.isArray(need)?need:[need]).every(some);
+  };
+  const ready=c=>adsHas(c.need);
+  const hasVT=adsHas("vt");
   const sc=COLS.find(c=>c.k===AD_CRSORT.k&&ready(c))||COLS.find(c=>c.k==="ctr");
   // 「良い順」は項目で向きが違う。クリック単価だけは安いほうが良い。
   const desc=AD_CRSORT.k===sc.k?AD_CRSORT.desc:!sc.asc;
@@ -1899,9 +1845,10 @@ function adDrawCreatives(shortName){
     `<br>1日あたりの広告費が <b>${YEN(AD_CR_MINSPEND)}円未満</b> のものは外しています`+
     (weak.length?`（${weak.length}種）`:"")+
     `。少額の広告はクリックが数回しかなく、CTRやクリック単価が偶然で大きく振れるためです。`+
-    `<br><b>クリック単価</b>は1クリックあたりの広告費で、`+
-    `AVENDで言うCPC（＝広告費÷（プロフアクセス数＋リンク遷移数））とは別物です`+
-    `（ここは広告どうしの見比べが目的なので、目標に左右されないクリック基準でそろえています）。`+
+    `<br><b>CPC</b>は 広告費÷（プロフアクセス数＋リンク遷移数）で、この画面のどこでも同じ定義です。`+
+    `隣の<b>クリック単価</b>は 広告費÷クリック数 で、<b>別の指標</b>です`+
+    `（キャンペーンの最適化目標に左右されないので、広告どうしの見比べにはこちらが使えます）。`+
+    `<br>CPCは、その広告の分母が取り込めた日のぶんで出します（まだの広告は「—」。0にはしません）。`+
     // 列は sql/030 で足したので「列が無い」ではない。値がまだ来ていないだけ
     (hasVT?"":`<br><b>平均視聴時間</b>は Meta から取れます（<code>video_avg_time_watched_actions</code>）。`+
       `DBの列は用意済みで、取り込みが走ると値が入ります（いまは「—」）。`)+
@@ -2326,7 +2273,6 @@ function renderDetail(){
 //  好事例・販促・VMD等の読み物は手入力のため対象外。
 // ============================================================
 function prevYm(ym){let[y,m]=ym.split("-").map(Number);m--;if(m===0){m=12;y--;}return y+"-"+String(m).padStart(2,"0");}
-function storeMonthlyIn(ym){const m=new Map();for(const r of DATA.daily){if((r.d||"").slice(0,7)!==ym)continue;m.set(r.s,(m.get(r.s)||0)+(r.in||0));}return m;}
 function loadPptxLib(){
   return new Promise((res,rej)=>{
     if(window.PptxGenJS)return res();
@@ -2920,16 +2866,6 @@ async function makeReport(ymArg){
   }catch(e){ alert("レポート出力に失敗しました：\n"+((e&&e.message)||e)); }
   finally{ if(btn){btn.disabled=false;btn.textContent=old;} }
 }
-// グループ（分類）ごとの当月/前月集計を返す。ids は所属店舗idの集合。
-function rptGroupRows(cf,ct,pf,pt){
-  return classesInData().map(cls=>{
-    const members=usableStores().filter(s=>classOf(s.id)===cls);
-    const ids=new Set(members.map(s=>s.id));
-    const c=sumRowsForIds(cf,ct,ids), p=sumRowsForIds(pf,pt,ids);
-    const n=members.filter(s=>{const x=sumRows(rowsIn(cf,ct,s.id));return x.in>0;}).length;
-    return {cls,ids,members,n,c,p};
-  });
-}
 // 売上規模で S/A/B/C の4階層に分ける（同数に近い分位＋レンジ表示）
 function rptTiers(rows){
   const defs=[{label:"S（大型）",color:"B8860B"},{label:"A（中大）",color:"2E5AAC"},{label:"B（中小）",color:"5B8C5A"},{label:"C（小型）",color:"6B7280"}];
@@ -2942,28 +2878,7 @@ function rptTiers(rows){
     const hi=t.rows[0].c.in, lo=t.rows[t.rows.length-1].c.in;
     return {...t,range:(Math.round(lo/10000).toLocaleString("ja-JP"))+"〜"+(Math.round(hi/10000).toLocaleString("ja-JP"))+"万円"}; });
 }
-// 上位店の示唆（強みKPIから成功要因を推定）
-function rptStoreInsight(r,kAll,cf,ct){
-  const k=rptKpi(r.c); const parts=[];
-  const rel=(v,b)=>v==null||b==null||b===0?null:(v/b-1)*100;
-  const rAov=rel(k.aov,kAll.aov), rUpt=rel(k.upt,kAll.upt), rAup=rel(k.aup,kAll.aup), rPr=k.pr!=null&&kAll.pr!=null?(k.pr-kAll.pr):null;
-  const cand=[];
-  if(rAup!=null&&rAup>=6)cand.push(["商品単価が全店比 "+(rAup>=0?"+":"")+rAup.toFixed(0)+"%","高単価・良質な品揃え（グレードの高い商材）が客単価を押し上げ"]);
-  if(rUpt!=null&&rUpt>=6)cand.push(["購入点数が全店比 "+(rUpt>=0?"+":"")+rUpt.toFixed(0)+"%","セット・複数買いの提案力（関連販売）が効いている"]);
-  if(rPr!=null&&rPr>=1.5)cand.push(["購入率が全店比 +"+rPr.toFixed(1)+"pt","入店客の購買転換が高い（接客・動線・品揃えの鮮度）"]);
-  if(rAov!=null&&rAov>=6&&!cand.length)cand.push(["客単価が全店比 "+(rAov>=0?"+":"")+rAov.toFixed(0)+"%","1点単価と買上点数のバランスが良い"]);
-  // 強みが平均並みでも、規模が大きい店は集客ドライバーとして評価
-  if(!cand.length&&rUpt!=null&&rUpt>=3)cand.push(["購入点数が全店比 +"+rUpt.toFixed(0)+"%","複数買いの提案が寄与"]);
-  // カテゴリの強み
-  let catTxt="";
-  const cats=rptCatAgg(cf,ct,sid=>String(sid)===String(r.id)).sort((a,b)=>b.a-a.a);
-  if(cats.length){const tot=cats.reduce((x,c)=>x+c.a,0)||1;catTxt="主力は「"+cats[0].c+"」（"+(cats[0].a/tot*100).toFixed(0)+"%）。";}
-  const lead=cand.length?cand[0][0]+" → "+cand[0][1]+"。":"売上規模・取引数（集客）で牽引。";
-  return r.name+"（"+man_(r.c.in)+"）：" + lead + catTxt;
-}
 function man_(v){return Math.round(v/10000).toLocaleString("ja-JP")+"万円";}
-// 月の加算（YYYY-MM, deltaヶ月）
-function rptAddMonths(ym,delta){let[y,m]=ym.split("-").map(Number);m+=delta;while(m<=0){m+=12;y--;}while(m>12){m-=12;y++;}return y+"-"+String(m).padStart(2,"0");}
 // ブランド別グループ（直営は分けずブランド＝SELFURUGI／NOTIME／その他 に合算）
 function rptBrandGroups(cf,ct,pf,pt){
   const seen=new Set(); usableStores().forEach(s=>seen.add(brandOf(s.id)));
@@ -4333,14 +4248,6 @@ async function callAsk(question,digest){
   }
 }
 
-// 比較対象（同ブランド平均）の店舗ID：直営店→直営全店 / FC店→同ブランド（直営含む）。いずれも来店計測(デジテール)導入店のみ。
-function peerIds(detailId){
-  const vs=DATA._visitStores||new Set(), own=ownOf(detailId), br=brandOf(detailId);
-  return usableStores().filter(s=>{
-    if(!vs.has(s.id))return false;
-    return own==="直営" ? ownOf(s.id)==="直営" : brandOf(s.id)===br;
-  }).map(s=>s.id);
-}
 // 各店KPIの単純平均（値が取れる店だけで平均）
 function peerAvg(k,from,to,ids){
   const vs=ids.map(id=>M(k).calc(sumRows(rowsIn(from,to,id)))).filter(v=>v!=null);
@@ -5246,146 +5153,10 @@ function drillCell(g,cat,metric){
     const e=m.get(r.p)||{label:"¥"+NUM(r.p),q:0,a:0}; e.q+=r.q||0; e.a+=r.a||0; m.set(r.p,e); tq+=r.q||0; ta+=r.a||0;}
   showModal(`ランク${g}×${cat}｜売れている価格 トップ5`,rankTable([...m.values()],metric,metric==="q"?tq:ta));
 }
-function drawCatRank(cats){
-  const byA=cats.slice().sort((a,b)=>b.a-a.a), byQ=cats.slice().sort((a,b)=>b.q-a.q);
-  const totA=cats.reduce((s,c)=>s+(c.a||0),0), totQ=cats.reduce((s,c)=>s+(c.q||0),0);
-  const hasP=!!(DATA.catp&&DATA.catp.length);
-  const mk=(arr,val,tot,fmt)=>arr.slice(0,5).map((c,i)=>
-    `<tr class="catrow${hasP?" clk":""}" data-cat="${esc(c.c)}"><td>${i+1}</td><td>${hasP?'<span class="caret">▸</span>':''}${esc(c.c)}</td><td>${fmt(val(c))}</td><td>${tot>0?F1(val(c)/tot*100)+"%":"—"}</td></tr>`
-    +`<tr class="catdetail" style="display:none"><td colspan="4"></td></tr>`).join("")
-    ||`<tr><td colspan="4" class="sub">データがありません</td></tr>`;
-  document.getElementById("cat-sales").innerHTML=
-    `<thead><tr><th>#</th><th>カテゴリ</th><th>売上</th><th>割合</th></tr></thead><tbody>${mk(byA,c=>c.a,totA,v=>YEN(v)+"円")}</tbody>`;
-  document.getElementById("cat-qty").innerHTML=
-    `<thead><tr><th>#</th><th>カテゴリ</th><th>販売数</th><th>割合</th></tr></thead><tbody>${mk(byQ,c=>c.q,totQ,v=>NUM(v)+"点")}</tbody>`;
-  if(hasP) bindCatExpand();
-}
-function bindCatExpand(){
-  document.querySelectorAll("#cat-sales tr.catrow.clk, #cat-qty tr.catrow.clk").forEach(tr=>tr.onclick=()=>{
-    const det=tr.nextElementSibling, caret=tr.querySelector(".caret"); if(!det)return;
-    if(det.style.display!=="none"){det.style.display="none";if(caret)caret.textContent="▸";return;}
-    const rows=(catPriceIn(state.from,state.to,state.store,tr.dataset.cat)||[]);
-    const cell=det.firstElementChild;
-    if(!rows.length){cell.innerHTML=`<div class="sub" style="padding:8px 26px">価格帯データがありません（次回の集計更新後に表示されます）。</div>`;}
-    else{const tot=rows.reduce((s,r)=>s+r.a,0);
-      cell.innerHTML=`<table class="subtbl"><thead><tr><th>順位</th><th>価格帯(税抜)</th><th>売上</th><th>販売数</th><th>比率</th></tr></thead><tbody>`+
-        rows.map((r,i)=>`<tr><td>${i+1}</td><td>${YEN(r.p)}円</td><td>${YEN(r.a)}円</td><td>${NUM(r.q)}点</td><td>${tot>0?F1(r.a/tot*100)+"%":"—"}</td></tr>`).join("")+
-        `</tbody></table>`;}
-    det.style.display="";if(caret)caret.textContent="▾";
-  });
-}
 
-// 着地見込み（自動・税込）：対象月の残日数×平日/土日祝の平均で月末を予測（店舗比較用）。
-//  過去の月は残日数0＝実績と一致。当月は予測になる。月次予実の見込みと同じ算出方法。
-function fIsWeekend(d){const g=new Date(d+"T00:00:00Z").getUTCDay();return g===0||g===6;}
 function fMonthEnd(ym){const[y,m]=ym.split("-").map(Number);const last=new Date(Date.UTC(y,m,0)).getUTCDate();return `${ym}-${String(last).padStart(2,"0")}`;}
-function computeAutoLandingIn(store,ym){
-  return computeAutoLandingForIds(new Set(usableStores().filter(s=>storeMatch(s.id,store)).map(s=>s.id)),ym);
-}
-function computeAutoLandingForIds(ids,ym){ return landingForIds(ids,ym); }
-function drawCompare(rows,showLand){
-  const cols=KPI_CARDS.map(M);
-  const landHead=showLand?`<th>着地見込み<br><span class="sub" style="font-weight:500">税抜</span></th>`:"";
-  const head=`<thead><tr><th>店舗</th>${landHead}${cols.map(c=>`<th>${c.name}</th>`).join("")}</tr></thead>`;
-  const body=rows.map(p=>{
-    const st=p._agg?' style="font-weight:750"':(p._sel?' style="font-weight:700;background:var(--surface2)"':'');
-    const land=showLand?`<td>${p._land!=null?YEN(p._land)+"円":"—"}</td>`:"";
-    return `<tr${st}><td>${esc(p._name)}</td>${land}${cols.map(c=>{const v=c.calc(p);return `<td>${v==null?"—":c.fmt(v)}</td>`;}).join("")}</tr>`;
-  }).join("");
-  document.getElementById("cmp").innerHTML=head+"<tbody>"+body+"</tbody>";
-}
-function drawCatTable(cats){
-  const hasP=!!(DATA.catp&&DATA.catp.length);
-  const head=`<thead><tr><th>カテゴリ</th><th>売上</th><th>販売数</th><th>点あたり</th></tr></thead>`;
-  const body=cats.map(c=>{
-    const main=`<tr class="catrow${hasP?" clk":""}" data-cat="${esc(c.c)}">`+
-      `<td>${hasP?'<span class="caret">▸</span>':''}${esc(c.c)}</td>`+
-      `<td>${YEN(c.a)}円</td><td>${NUM(c.q)}点</td><td>${c.q>0?YEN(c.a/c.q)+"円":"—"}</td></tr>`;
-    const detail=`<tr class="catdetail" style="display:none"><td colspan="4"></td></tr>`;
-    return main+detail;
-  }).join("");
-  const ta=cats.reduce((s,c)=>s+c.a,0),tq=cats.reduce((s,c)=>s+c.q,0);
-  const t=document.getElementById("cat-t");
-  t.innerHTML=head+"<tbody>"+body+"</tbody>"+
-    `<tfoot><tr><td>合計</td><td>${YEN(ta)}円</td><td>${NUM(tq)}点</td><td>${tq>0?YEN(ta/tq)+"円":"—"}</td></tr></tfoot>`;
-  if(!hasP)return;
-  t.querySelectorAll("tr.catrow.clk").forEach(tr=>tr.onclick=()=>{
-    const det=tr.nextElementSibling, caret=tr.querySelector(".caret");
-    if(!det)return;
-    if(det.style.display!=="none"){det.style.display="none";if(caret)caret.textContent="▸";return;}
-    const rows=catPriceIn(state.from,state.to,state.store,tr.dataset.cat)||[];
-    const cell=det.firstElementChild;
-    if(!rows.length){cell.innerHTML=`<div class="sub" style="padding:8px 26px">価格帯データはありません（次回の集計更新後に表示されます）。</div>`;}
-    else{const tot=rows.reduce((s,r)=>s+r.a,0);
-      cell.innerHTML=`<table class="subtbl"><thead><tr><th>価格帯</th><th>売上</th><th>販売数</th><th>構成比</th></tr></thead><tbody>`+
-        rows.map(r=>`<tr><td>${YEN(r.p)}円</td><td>${YEN(r.a)}円</td><td>${NUM(r.q)}点</td><td>${tot>0?F1(r.a/tot*100)+"%":"—"}</td></tr>`).join("")+
-        `</tbody></table>`;}
-    det.style.display="";if(caret)caret.textContent="▾";
-  });
-}
-function drawTable(ps){
-  const cols=KPI_ORDER.map(M);
-  const head=`<thead><tr><th>期間</th>${cols.map(c=>`<th>${c.name}</th>`).join("")}</tr></thead>`;
-  const body=ps.slice().reverse().map(p=>`<tr data-k="${p.key}" style="cursor:pointer"><td>${p.label}</td>${cols.map(c=>{const v=c.calc(p);return `<td>${v==null?"—":c.fmt(v)}</td>`;}).join("")}</tr>`).join("");
-  const t=document.getElementById("tbl");t.innerHTML=head+"<tbody>"+body+"</tbody>";
-  t.querySelectorAll("tbody tr").forEach(tr=>tr.onclick=()=>{
-    const[f,to]=periodSpan(tr.dataset.k,state.grain);
-    state.from=clampLo(f);state.to=clampHi(to);render();
-    window.scrollTo({top:0,behavior:"smooth"});});
-}
 
-function drawTrend(ps){
-  const box=document.getElementById("trend");box.innerHTML="";
-  const m=M(state.metric),vals=ps.map(p=>({label:p.label,v:m.calc(p)}));
-  if(!vals.length){box.innerHTML='<div class="sub" style="padding:8px 0">データなし</div>';return;}
-  const W=Math.max(box.clientWidth||680,320),H=250,PADL=58,PADR=14,PADT=14,PADB=40;
-  const xs=i=>PADL+(W-PADL-PADR)*(vals.length<=1?0.5:i/(vals.length-1));
-  const nums=vals.map(d=>d.v).filter(v=>v!=null);const maxV=Math.max(1,...nums),minV=Math.min(0,...nums);
-  const ys=v=>PADT+(H-PADT-PADB)*(1-(v-minV)/((maxV-minV)||1));
-  const gy=[];for(let i=0;i<=4;i++){const val=minV+(maxV-minV)*i/4;gy.push({y:ys(val),val});}
-  const pts=vals.map((d,i)=>d.v==null?null:[xs(i),ys(d.v)]);
-  const path=pts.map((p,i)=>p?`${i&&pts[i-1]?"L":"M"}${p[0].toFixed(1)} ${p[1].toFixed(1)}`:"").join(" ");
-  box.innerHTML=`<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${m.name}の推移">
-    ${gy.map(g=>`<line x1="${PADL}" y1="${g.y.toFixed(1)}" x2="${W-PADR}" y2="${g.y.toFixed(1)}" stroke="var(--border)" stroke-width="1"/><text x="${PADL-8}" y="${g.y+3}" text-anchor="end" font-size="10" fill="var(--muted)">${shortNum(g.val)}</text>`).join("")}
-    <path d="${path}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-    ${pts.map(p=>p?`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3.2" fill="var(--surface)" stroke="var(--accent)" stroke-width="2"/>`:"").join("")}
-    ${vals.map((d,i)=>(vals.length<=14||i%Math.ceil(vals.length/12)===0||i===vals.length-1)?`<text x="${xs(i).toFixed(1)}" y="${H-PADB+16}" text-anchor="middle" font-size="9.5" fill="var(--muted)">${d.label}</text>`:"").join("")}
-    <rect id="hit" x="${PADL}" y="${PADT}" width="${W-PADL-PADR}" height="${H-PADT-PADB}" fill="transparent"/>
-    <line id="cross" x1="0" y1="${PADT}" x2="0" y2="${H-PADB}" stroke="var(--accent)" stroke-width="1" opacity="0"/>
-  </svg><div class="tip" id="ttip"></div>`;
-  const tip=box.querySelector("#ttip"),cross=box.querySelector("#cross"),hit=box.querySelector("#hit"),svgEl=box.querySelector("svg");
-  function move(ev){const r=svgEl.getBoundingClientRect();const px=((ev.touches?ev.touches[0].clientX:ev.clientX)-r.left)/r.width*W;
-    let i=Math.round((px-PADL)/((W-PADL-PADR)/Math.max(1,vals.length-1)));i=Math.max(0,Math.min(vals.length-1,i));
-    const d=vals[i];if(d.v==null){tip.style.opacity=0;cross.setAttribute("opacity","0");return;}
-    const cx=xs(i);cross.setAttribute("x1",cx);cross.setAttribute("x2",cx);cross.setAttribute("opacity",".5");
-    tip.style.opacity=1;tip.style.left=(cx/W*r.width)+"px";tip.style.top=(ys(d.v)/H*r.height)+"px";
-    tip.innerHTML=`<b>${d.label}</b><br>${m.name}: ${m.fmt(d.v)}`;}
-  const hide=()=>{tip.style.opacity=0;cross.setAttribute("opacity","0");};
-  hit.addEventListener("mousemove",move);
-  hit.addEventListener("mouseleave",hide);
-  // タッチは横方向のなぞりだけ反応。縦スクロールでは何もしない（カクつき防止）。
-  let sx=0,sy=0,lock=null;
-  hit.addEventListener("touchstart",ev=>{sx=ev.touches[0].clientX;sy=ev.touches[0].clientY;lock=null;},{passive:true});
-  hit.addEventListener("touchmove",ev=>{
-    if(lock==="v")return;
-    const dx=ev.touches[0].clientX-sx, dy=ev.touches[0].clientY-sy;
-    if(lock===null&&(Math.abs(dx)>6||Math.abs(dy)>6))lock=Math.abs(dy)>Math.abs(dx)?"v":"h";
-    if(lock==="v"){hide();return;}
-    move(ev);
-  },{passive:true});
-  hit.addEventListener("touchend",hide);
-}
 function shortNum(v){if(Math.abs(v)>=1e8)return(v/1e8).toFixed(1)+"億";if(Math.abs(v)>=1e4)return(v/1e4).toFixed(v>=1e5?0:1)+"万";return Math.round(v).toLocaleString("ja-JP");}
-function drawBars(id,rows,getV,fmt){
-  const box=document.getElementById(id);box.innerHTML="";rows=rows.slice(0,10);
-  if(!rows.length){box.innerHTML='<div class="sub" style="padding:8px 0">データなし</div>';return;}
-  const max=Math.max(1,...rows.map(getV)),rowH=30,W=Math.max(box.clientWidth||420,300),PADR=12,LBL=96,H=rows.length*rowH+8,bx=LBL+8,bw=W-bx-PADR;
-  box.innerHTML=`<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${rows.map((r,i)=>{const y=i*rowH+4,w=Math.max(2,bw*getV(r)/max);
-    return `<g><text x="${LBL}" y="${y+rowH/2}" text-anchor="end" dominant-baseline="middle" font-size="11" fill="var(--ink2)">${esc(r.c).slice(0,7)}</text>
-      <rect x="${bx}" y="${y+5}" width="${bw}" height="${rowH-14}" rx="4" fill="var(--surface2)"/>
-      <rect x="${bx}" y="${y+5}" width="${w.toFixed(1)}" height="${rowH-14}" rx="4" fill="var(--accent)"/>
-      <text x="${bx+w+6}" y="${y+rowH/2}" dominant-baseline="middle" font-size="10.5" fill="var(--muted)">${fmt(r)}</text></g>`;}).join("")}</svg>`;
-}
 function esc(s){return String(s).replace(/[&<>]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[m]));}
 function toggleTheme(){const root=document.documentElement;
   const cur=root.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");
