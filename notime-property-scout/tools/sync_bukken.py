@@ -43,6 +43,17 @@ def load_feed(path: Path = FEED) -> list[dict]:
     return rows
 
 
+def existing_ids(url: str, key: str) -> set[str]:
+    """bukken の既存id一覧を取得（新規判定用）。"""
+    endpoint = url.rstrip("/") + "/rest/v1/bukken?select=id"
+    req = urllib.request.Request(endpoint, headers={
+        "apikey": key, "Authorization": f"Bearer {key}",
+        "Accept": "application/json",
+    })
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        return {r["id"] for r in json.loads(resp.read().decode("utf-8"))}
+
+
 def upsert(rows: list[dict], url: str, key: str) -> None:
     endpoint = url.rstrip("/") + "/rest/v1/bukken?on_conflict=id"
     body = json.dumps(rows, ensure_ascii=False).encode("utf-8")
@@ -58,6 +69,20 @@ def upsert(rows: list[dict], url: str, key: str) -> None:
             raise RuntimeError(f"upsert失敗 HTTP {resp.status}: {resp.read()[:300]!r}")
 
 
+def _emit_output(new: list[dict], total: int) -> None:
+    """GitHub Actions 用の出力（new_count / names / summary）を書き出す。"""
+    gh = os.environ.get("GITHUB_OUTPUT")
+    if not gh:
+        return
+    names = " / ".join(f"{r.get('city','')}{r.get('name','')}" for r in new[:8])
+    summary = (f"{total}件同期（うち新規{len(new)}件）"
+               + (f"：{names}" if new else ""))
+    with open(gh, "a", encoding="utf-8") as f:
+        f.write(f"new_count={len(new)}\n")
+        f.write(f"names={names}\n")
+        f.write(f"summary={summary}\n")
+
+
 def main() -> int:
     url = os.environ.get("SUPABASE_URL")
     key = os.environ.get("SUPABASE_SERVICE_KEY")
@@ -67,9 +92,15 @@ def main() -> int:
     rows = load_feed()
     if not rows:
         print("feed が空です。何もしません。")
+        _emit_output([], 0)
         return 0
+    before = existing_ids(url, key)
+    new = [r for r in rows if r["id"] not in before]
     upsert(rows, url, key)
-    print(f"bukken に {len(rows)} 件 upsert しました（verdict/reason は保持）。")
+    print(f"bukken に {len(rows)} 件 upsert（新規 {len(new)} 件、verdict/reason は保持）。")
+    for r in new:
+        print(f"  + {r.get('city','')} {r.get('name','')}")
+    _emit_output(new, len(rows))
     return 0
 
 

@@ -35,22 +35,25 @@ jobs:
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      # sales_fc_店舗開発_開業支援 チャンネル用の Incoming Webhook。無ければ既存 SLACK_WEBHOOK に落とす。
+      SLACK_WEBHOOK_BUKKEN: ${{ secrets.SLACK_WEBHOOK_BUKKEN }}
       SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Supabaseへ upsert
+      - name: Supabaseへ upsert（新規判定つき）
         id: sync
-        run: |
-          out="$(python notime-property-scout/tools/sync_bukken.py)"
-          echo "$out"
-          echo "summary=$out" >> "$GITHUB_OUTPUT"
-      - name: Slack通知（任意）
-        if: ${{ env.SLACK_WEBHOOK != '' }}
+        run: python notime-property-scout/tools/sync_bukken.py
+      # 新規物件があった時だけ、店舗開発チャンネルへ通知する
+      - name: Slack通知（新規のみ）
+        if: ${{ steps.sync.outputs.new_count != '0' && steps.sync.outputs.new_count != '' }}
         env:
-          SUMMARY: ${{ steps.sync.outputs.summary }}
+          NEW_COUNT: ${{ steps.sync.outputs.new_count }}
+          NAMES: ${{ steps.sync.outputs.names }}
         run: |
-          payload="$(python -c 'import json,os; print(json.dumps({"text":"🏢 物件フィード同期: "+os.environ.get("SUMMARY","")}))')"
-          curl -sS -X POST -H 'content-type: application/json' --data "$payload" "$SLACK_WEBHOOK" || true
+          hook="${SLACK_WEBHOOK_BUKKEN:-$SLACK_WEBHOOK}"
+          if [ -z "$hook" ]; then echo "Slack webhook未設定。通知スキップ"; exit 0; fi
+          payload=$(python3 -c 'import json,os; print(json.dumps({"text":"🏢 新しい物件が "+os.environ["NEW_COUNT"]+" 件あります\n"+os.environ.get("NAMES","")+"\n▶ レビュー: https://avend-inc.github.io/POSandVisits/bukken.html"}))')
+          curl -sS -X POST -H 'content-type: application/json' --data "$payload" "$hook" || true
