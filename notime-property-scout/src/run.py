@@ -139,8 +139,9 @@ def run(cities_filter: list[str] | None = None,
     today = date.today()
     cities = load_cities()
     registry = load_registry()
-    src_cfg = next((s for s in registry["sources"] if s.get("parser") == "rengotai"), {})
-    selectors = src_cfg.get("selectors", {})
+    src_cfg = next((s for s in registry.get("portals_nationwide", [])
+                    if s.get("parser") == "rengotai"), {})
+    selectors = src_cfg.get("selectors", {})   # 未確定なら空。パーサは本文正規表現で拾う
     hint = selectors.get("area_unit_hint")
 
     if cities_filter:

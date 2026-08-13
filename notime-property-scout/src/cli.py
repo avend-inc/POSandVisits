@@ -34,7 +34,8 @@ def _find_city(name: str) -> dict:
 
 def _selectors() -> dict:
     reg = load_registry()
-    cfg = next((s for s in reg["sources"] if s.get("parser") == "rengotai"), {})
+    cfg = next((s for s in reg.get("portals_nationwide", [])
+                if s.get("parser") == "rengotai"), {})
     return cfg.get("selectors", {})
 
 
