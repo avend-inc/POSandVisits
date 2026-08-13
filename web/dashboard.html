@@ -1270,6 +1270,12 @@ function adVal(k,p){
 }
 function renderAds(){
   if(!AD_PERIOD_INIT){ adApply4w(); AD_PERIOD_INIT=true; }   // 初回は直近4週
+  // 区分を切り替えたとき、前の区分で選んでいた店の絞り込みが残っていると、
+  // その区分に無い店で絞ることになって画面が丸ごと空になる（原因も分からない）。
+  // 一覧に無くなった店は「すべての店舗」に戻す。
+  if(AD_STORE&&!adStoreList().includes(AD_STORE)){
+    AD_STORE=""; try{localStorage.setItem("notime-adstore","");}catch(e){}
+  }
   const sync=DATA.metaSync||{};
   const last=(DATA.meta||[]).reduce((a,r)=>r.d>a?r.d:a,"");
   document.getElementById("app").innerHTML=`
@@ -1664,7 +1670,11 @@ function drawAds(){
     const last=(DATA.meta||[]).reduce((a,r)=>r.d>a?r.d:a,"")||state.to;
     const yms=[2,1,0].map(i=>{let[y,m]=last.slice(0,7).split("-").map(Number);m-=i;while(m<1){m+=12;y--;}
       return y+"-"+String(m).padStart(2,"0");});
-    const mrows=(DATA.meta||[]).filter(r=>yms.includes(r.d.slice(0,7))&&!AD_HIDE.has(r.st||UNMAPPED));
+    // 月次だけは上の集計期間に連動せず、自前で直近3か月を集める。
+    // そのぶん adRowsAll() を通らないので、区分の絞り込みをここで掛け忘れないこと
+    // （実際に忘れて、直営の月次KPIにFC店が出ていた）。
+    const mrows=(DATA.meta||[]).filter(r=>yms.includes(r.d.slice(0,7))
+      &&!AD_HIDE.has(r.st||UNMAPPED)&&adSegOk(r));
     // 月の範囲はその月まるごと。ただし今月は、売上が入っている最終日まで
     // （先の日まで含めても売上は0で、比率が実態より高く出るだけなので）。
     const salesMax=DATA._salesMax||DATA._max||last;

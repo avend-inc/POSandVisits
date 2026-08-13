@@ -782,6 +782,49 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
   has(/店舗マスタの ownership を入れると/, "どう直せばよいかを書く");
 }
 
+// --- 広告画面で、区分の絞り込みを掛け忘れている箇所が無いか --------------
+//   月次KPIだけ adRowsAll() を通らず DATA.meta を直に読んでいて、絞り込みを
+//   掛け忘れていた（直営の月次KPIにFC店が出た）。同じ抜け方を二度としないよう、
+//   広告画面の中の「生の DATA.meta 読み」を1つずつ数え上げて確かめる。
+{
+  const f5 = src.indexOf("function renderAds()");
+  const t5 = src.indexOf("// 未紐付けキャンペーンの割り当て");
+  if (f5 < 0 || t5 <= f5) { console.log("  NG  広告画面を取り出せませんでした"); ng++; }
+  else {
+    // 絞り込みが要らないもの＝数字ではないもの。ここに挙げた形だけを許す
+    const OKAY = [
+      { re: /reduce\(\(a,r\)=>r\.d>a\?r\.d:a/, why: "いちばん新しい日付を探すだけ" },
+      { re: /if\(r\.d<state\.from\|\|r\.d>state\.to\|\|!\(r\.sp>0\)\)continue;/,
+        why: "区分が未設定の店を探す（全区分を見るのが目的）" },
+    ];
+    const lines = src.slice(f5, t5).split("\n");
+    const bad = [];
+    lines.forEach((l, i) => {
+      if (!/\(DATA\.meta\|\|\[\]\)/.test(l)) return;
+      const near = lines.slice(i, i + 4).join("\n");
+      if (/adSegOk\(/.test(near)) return;                 // 絞り込み済み
+      if (OKAY.some((o) => o.re.test(near))) return;      // 数字ではない
+      bad.push((i + 1) + ": " + l.trim().slice(0, 70));
+    });
+    if (bad.length) {
+      console.log(`  NG  区分の絞り込みが掛かっていない DATA.meta 読みが ${bad.length}箇所あります`);
+      bad.forEach((b) => console.log("      " + b));
+      ng++;
+    } else console.log("  OK  広告画面の DATA.meta 読みは、すべて絞り込み済みか数字ではない");
+  }
+  // 月次KPIは自前で3か月ぶんを集めるので、いちばん抜けやすい。名指しで見張る
+  const has = (re, label) => {
+    if (re.test(src)) console.log(`  OK  ${label}`);
+    else { console.log(`  NG  ${label}`); ng++; }
+  };
+  has(/const mrows=\(DATA\.meta\|\|\[\]\)\.filter\(r=>yms\.includes\(r\.d\.slice\(0,7\)\)[\s\S]{0,80}?adSegOk\(r\)\)/,
+    "月次KPIも区分で絞る");
+  has(/adBuildTable\(document\.getElementById\("adtbl"\), adRowsAll\(\)/, "週次KPIは adRowsAll を通る");
+  // 区分を切り替えたとき、前の区分で選んでいた店の絞り込みが残ると、画面が丸ごと空になる
+  has(/if\(AD_STORE&&!adStoreList\(\)\.includes\(AD_STORE\)\)\{/,
+    "区分に無い店の絞り込みは「すべての店舗」に戻す");
+}
+
 // --- 区分の判定を実際に動かす ------------------------------------------
 //   ここは「直営にFC店が出る／その逆」で一度やらかした。焼き付けの r.ow ではなく
 //   店舗マスタを見ること、空欄を直営に潰さないことを、実物を動かして確かめる。
