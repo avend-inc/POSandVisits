@@ -51,7 +51,7 @@
   .seg{display:inline-flex;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:3px;gap:2px;}
   .seg button{border:0;background:transparent;color:var(--ink2);font-size:13px;padding:7px 13px;border-radius:8px;cursor:pointer;font-weight:600;}
   .seg button.on{background:var(--surface);color:var(--ink);box-shadow:var(--shadow);}
-  /* 広告の「直営／FC／全社」。別ページ（別URL）なのでボタンではなくリンクにしてある
+  /* 広告の「直営／FC」。別ページ（別URL）なのでボタンではなくリンクにしてある
      ＝そのまま共有でき、再読み込みしても同じ場所に戻る */
   .seg a{text-decoration:none;color:var(--ink2);font-size:13px;padding:7px 14px;border-radius:8px;
     font-weight:700;white-space:nowrap;}
@@ -457,12 +457,8 @@ let GROUP="own", GROUP_LABEL="直営店", DETAIL_ID=null, VIEW="";
 function readRoute(){
   const q=new URLSearchParams(location.search);
   GROUP=(q.get("g")||"").toLowerCase();
-  // 広告の画面だけは "all"（全社）も取る。クリエイティブは1本の広告が複数店に
-  // またがるので、直営/FCで割ると二重に数えるか按分が要る＝壊れる。
-  // 割れないものを置く場所として、全社のページが要る。
-  const ADALL=((q.get("view")||"").toLowerCase()==="ads"&&GROUP==="all");
-  if(GROUP!=="own"&&GROUP!=="fc"&&!ADALL)GROUP="own";
-  GROUP_LABEL=(GROUP==="fc")?"FC店":(GROUP==="all")?"全社":"直営店";
+  if(GROUP!=="own"&&GROUP!=="fc")GROUP="own";
+  GROUP_LABEL=(GROUP==="fc")?"FC店":"直営店";
   const v=q.get("store");
   DETAIL_ID=(v&&/^\d+$/.test(v))?+v:null;
   VIEW=(q.get("view")||"").toLowerCase();
@@ -1169,12 +1165,15 @@ function adApply4w(){
   state.from=f; state.to=t; state.kind="custom"; savePeriod();
 }
 let AD_STORE=(function(){try{return localStorage.getItem("notime-adstore")||"";}catch(e){return "";}})();
-// ---- 広告画面の区分（直営／FC／全社）----------------------------------
-//   店舗に紐づく数字（広告費・売上比率・CPC・来店）は区分で割れる。
-//   クリエイティブは1本の広告が複数店にまたがるので割れない＝全社のページに置く。
-//   区分が決まらないもの（未紐付け・POS店舗に紐づいていない配信先）も全社にしか置けない。
-function adSeg(){ return GROUP==="fc"?"fc":GROUP==="all"?"all":"own"; }
-function adSegLabel(){ return adSeg()==="fc"?"FC店":adSeg()==="all"?"全社":"直営店"; }
+// ---- 広告画面の区分（直営／FC）------------------------------------------
+//   広告は店舗のキャンペーンの中で走らせるので、1本の広告は必ず1店に属する。
+//   だから広告費もクリエイティブも、店舗の区分でそのまま割れる。
+//   区分が決まらないもの（未紐付けキャンペーン、区分が未設定の店）だけは
+//   どちらにも入れられないので、集計には混ぜずに、画面で名指しして知らせる。
+// 広告は店舗のキャンペーンの中で走らせるので、1本の広告は必ず1店に属する。
+// つまりクリエイティブも区分で割れる＝全社だけのページは要らない。
+function adSeg(){ return GROUP==="fc"?"fc":"own"; }
+function adSegLabel(){ return adSeg()==="fc"?"FC店":"直営店"; }
 // 広告の行の区分を出す。
 //   店舗が紐づいていれば店舗マスタ（ownOf）を正とする。直営/FCタブや店舗一覧と
 //   同じ判定にそろえるため。
@@ -1191,12 +1190,10 @@ function adOwnOf(r){
   if(s)return s.own?(s.own==="直営"?"直営":"FC"):null;
   return r.ow||null;                       // マスタに無い／店舗に紐づいていない
 }
-// その行が、いま見ている区分に入るか。区分が決まらない行は全社にだけ出す
+// その行が、いま見ている区分に入るか。区分が決まらない行はどちらにも入れない
 function adSegOk(r){
-  const s=adSeg();
-  if(s==="all")return true;
   const ow=adOwnOf(r);
-  return s==="own" ? ow==="直営" : ow==="FC";
+  return adSeg()==="own" ? ow==="直営" : ow==="FC";
 }
 // 期間内に広告費が動いた店舗（＋未紐付け）をプルダウンの選択肢にする。
 // 直営／FCのページでは、その区分の店だけを出す（選べても中身が空になるだけなので）
@@ -1290,16 +1287,13 @@ function renderAds(){
       ${sync.unmapped?`｜<b style="color:#b8860b">未紐付け ${NUM(sync.unmapped)}件</b>`:""}
     </div>
     <!-- 広告の下の階層。URLが分かれた別ページなので、そのまま共有・再読み込みできる。
-         「全社」は、直営/FCで割れないもの（クリエイティブ・未紐付け）の置き場所 -->
+         広告は店舗のキャンペーンの中で走るので、クリエイティブもこの区分で割れる -->
     <div class="segrow">
       <div class="seg adseg">
         <a href="index.html?view=ads&g=own"${adSeg()==="own"?' class="on"':""}>直営</a>
         <a href="index.html?view=ads&g=fc"${adSeg()==="fc"?' class="on"':""}>FC</a>
-        <a href="index.html?view=ads&g=all"${adSeg()==="all"?' class="on"':""}>全社</a>
       </div>
-      <span class="sub segnote">${adSeg()==="all"
-        ? "クリエイティブ別・未紐付けは、区分で割れないのでここだけに出ます"
-        : `${adSegLabel()}のぶんだけを集計しています`}</span>
+      <span class="sub segnote">${adSegLabel()}のぶんだけを集計しています</span>
     </div>
     <p class="note" id="adsegwarn" style="margin:0 2px 10px"></p>
     <div class="panel">
@@ -1360,14 +1354,8 @@ function renderAds(){
       <div id="adscatter"></div>
       <p class="note" id="adscnote"></p>
     </div>
-    ${adSeg()!=="all"?`
-    <p class="note" style="margin:10px 2px 0">
-      <b>クリエイティブ別</b>は<a href="index.html?view=ads&g=all">全社</a>にあります。
-      1本の広告が複数の店に配信されるので、直営／FCで割ると同じ広告が両方に出るか、
-      広告費を按分することになって CTR・CPCが実額÷実額でなくなります。
-    </p>`:`
     <div class="panel">
-      <h2>クリエイティブ別 <span class="sub" style="font-weight:500">（全社・区分では割れません）</span></h2>
+      <h2>クリエイティブ別 <span class="sub" style="font-weight:500">（${adSegLabel()}・1行＝1店の1広告）</span></h2>
       <div id="adcrbtns"></div>
       <div class="tblwrap"><table class="kmat" id="adcrtbl"></table></div>
       <p class="note" id="adcrnote"></p>
@@ -1375,8 +1363,9 @@ function renderAds(){
     <div class="panel" id="admappanel" style="display:none">
       <h2>未紐付けキャンペーン</h2>
       <div id="admap"></div>
-      <p class="note">ここで割り当てた内容は、取り込みが上書きしても消えません（取り込みの値の上からかぶせています）。</p>
-    </div>`}`;
+      <p class="note">ここで割り当てた内容は、取り込みが上書きしても消えません（取り込みの値の上からかぶせています）。<br>
+        店舗に割り当てるまでは、直営・FCどちらの集計にも入りません（区分が決まらないため）。</p>
+    </div>`;
   wireCommon();
   document.querySelectorAll(".adcol").forEach(b=>b.onclick=()=>{
     const k=b.dataset.k, i=AD_COLS.indexOf(k);
@@ -1511,14 +1500,14 @@ function drawAds(){
     const nog=new Map();
     for(const r of (DATA.meta||[])){
       if(r.d<state.from||r.d>state.to||!(r.sp>0))continue;
-      if(r.si==null)continue;                       // 未紐付けは別の話（全社に出る）
+      if(r.si==null)continue;                       // 未紐付けは下のパネルで直す
       const s=storeMeta(r.si); if(!s||s.own)continue;
       nog.set(r.si,(nog.get(r.si)||0)+(r.sp||0));
     }
     sw.innerHTML=nog.size
       ? `<b style="color:#b8860b">区分（直営／FC）が未設定の店が ${nog.size}店あります。</b>`+
         `どの区分にも入らないので、この期間の広告費 ${YEN([...nog.values()].reduce((a,b)=>a+b,0))}円は`+
-        `<a href="index.html?view=ads&g=all">全社</a>にだけ出ています。`+
+        `直営・FCどちらの集計にも入っていません。`+
         `<br>対象：${[...nog.keys()].map(id=>esc((storeMeta(id)||{}).name||("店舗"+id))).join("・")}`+
         `　→ 店舗マスタの ownership を入れると、直営／FCに振り分けられます。`
       : "";
@@ -1706,7 +1695,11 @@ function drawAds(){
   adDrawScatter(shortName);
   adDrawCreatives(shortName);
   adDrawMapper();
-  const nomap=adSum(adRowsAll().filter(r=>!r.st));
+  // 未紐付け（店舗に紐づいていない）行は、区分が決まらないので adRowsAll() から外れる。
+  // ここでそれを使うと必ず0になり、「紐付いていない広告費」が画面から消える。
+  // 区分を通さずに数える＝どちらのページでも同じ額が出る（消えないことが大事）。
+  const nomap=adSum((DATA.meta||[]).filter(r=>r.d>=state.from&&r.d<=state.to
+    &&!AD_HIDE.has(r.st||UNMAPPED)&&!r.st));
   const note=document.getElementById("adnote");
   if(note)note.innerHTML=
     `CTR＝クリック÷表示回数、CPC＝広告費÷クリック、FQ＝表示回数÷リーチ、売上比率＝広告費÷税抜売上`+
@@ -1716,7 +1709,7 @@ function drawAds(){
     `（広告を止めていた日も含むので、店舗ページ・予実タブの売上と一致します）。`+
     `期間をまたぐときも実額どうしで割り直しています（比率の平均はしていません）。`+
     exNote(wEx)+
-    (nomap.sp>0?`<br><b style="color:#b8860b">店舗に紐付いていない広告費が ${YEN(nomap.sp)}円あります。</b>店舗別の数字はそのぶん少なく出ます。`:"");
+    (nomap.sp>0?`<br><b style="color:#b8860b">店舗に紐付いていない広告費が ${YEN(nomap.sp)}円あります。</b>区分が決まらないので、直営・FCどちらの集計にも入っていません（下の「未紐付けキャンペーン」で店舗に割り当てると入ります）。`:"");
 }
 
 // ============================================================
@@ -1857,19 +1850,26 @@ function adDrawScatter(shortName){
 function adDrawCreatives(shortName){
   const el=document.getElementById("adcrtbl"); if(!el)return;
   const note=document.getElementById("adcrnote");
-  // 店舗の絞り込みには連動させない（常に全店）。週次/月次KPIと同じ扱いで、
-  // どのクリエイティブが全社で効いているかを見るための一覧のため。
+  // 広告は店舗のキャンペーンの中で走らせるので、1本の広告は必ず1店に属する。
+  // なのでまとめる単位は「店舗 × 広告名」。
+  //   以前は広告名だけでまとめていた。広告名は店をまたいで使い回されるので
+  //   （どの店にも「詰め放題（リール）」がある）、別々の店の広告が1行に合算され、
+  //   広告費もCTRもクリック単価も店をまたいで混ざっていた。
+  //   画面には「NTM所沢 他1店」と出るので、1本が複数店に配信されているように見えていた。
+  // 店舗の絞り込み（プルダウン）には連動させない＝その区分の全店を並べる。
   // 非表示にした店だけは、明示的な操作なのでここからも外す。
   const src=(DATA.metaAds||[]).filter(r=>r.d>=state.from&&r.d<=state.to
-    &&!AD_HIDE.has(r.st||UNMAPPED));
+    &&!AD_HIDE.has(r.st||UNMAPPED)&&adSegOk(r));
   const g=new Map();
   for(const r of src){
-    let e=g.get(r.an); if(!e){e={sp:0,im:0,ck:0,rc:0,vt:0,vn:0,st:new Set(),days:new Set()};g.set(r.an,e);}
+    // 区切りはエスケープで書く（生の制御文字を混ぜない）。区切りが無いと
+    // 店1の広告「23」と店12の広告「3」が同じキーになってしまう
+    const key=(r.si==null?"?":r.si)+"\u001f"+r.an;
+    let e=g.get(key); if(!e){e={nm:r.an,sp:0,im:0,ck:0,rc:0,vt:0,vn:0,st:r.st||null,days:new Set()};g.set(key,e);}
     e.sp+=r.sp||0;e.im+=r.im||0;e.ck+=r.ck||0;e.rc+=r.rc||0;
     e.days.add(r.d);
     // 平均視聴時間はMetaが返す秒数がそのまま入っている。値がある行だけを数えて平均する
     if(r.vt!=null){ e.vt+=r.vt||0; e.vn++; }
-    if(r.st)e.st.add(shortName(r.st));
   }
   // 1日あたりの広告費が少ないものは外す。数百円しか使っていない広告は
   // クリックが数回しかなく、CTRやクリック単価が偶然で大きく振れる。
@@ -1907,10 +1907,10 @@ function adDrawCreatives(shortName){
     return desc?y-x:x-y;
   });
   const top=all.slice(0,AD_CR_TOP);
-  const body=top.length?top.map(([nm,e],i)=>{
-    const sts=[...e.st];
-    const where=sts.length?(sts.length===1?esc(sts[0]):`${esc(sts[0])} 他${sts.length-1}店`):`<span style="color:#b8860b">未紐付け</span>`;
-    return `<tr><td style="text-align:left"><div class="adname" title="${esc(nm)}"><b>${i+1}.</b> ${esc(nm)}</div>`+
+  const body=top.length?top.map(([,e],i)=>{
+    // 1行＝1店の1広告。店は1つに決まるので「他◯店」は出ない
+    const where=e.st?esc(shortName(e.st)):`<span style="color:#b8860b">未紐付け</span>`;
+    return `<tr><td style="text-align:left"><div class="adname" title="${esc(e.nm)}"><b>${i+1}.</b> ${esc(e.nm)}</div>`+
       `<div class="sub" style="font-weight:500">${where}／1日 ${YEN(Math.round(e.spd))}円</div></td>`+
       COLS.map(c=>`<td>${ready(c)?F(c.val(e),c.fmt):"—"}</td>`).join("")+`</tr>`;
   }).join(""):`<tr><td colspan="${COLS.length+1}" class="sub">この条件に合うクリエイティブがありません</td></tr>`;
@@ -1955,8 +1955,8 @@ function adDrawCreatives(shortName){
     // 列は sql/030 で足したので「列が無い」ではない。値がまだ来ていないだけ
     (hasVT?"":`<br><b>平均視聴時間</b>は Meta から取れます（<code>video_avg_time_watched_actions</code>）。`+
       `DBの列は用意済みで、取り込みが走ると値が入ります（いまは「—」）。`)+
-    `<br>この表は<b>全社</b>です。店舗の絞り込みにも、直営／FCの区分にも連動しません`+
-    `（1本の広告が複数の店に配信されるため、区分では割れません）。`+
+    `<br>1行＝<b>1店の1広告</b>です（広告は店舗のキャンペーンの中で走るため）。`+
+    `店舗の絞り込みには連動しませんが、直営／FCの区分では絞られます。`+
     (DATA.metaAds&&DATA.metaAds.length?"":`<br>広告単位のデータが data.json に入っていません（データ更新後に出ます）。`);
 }
 
