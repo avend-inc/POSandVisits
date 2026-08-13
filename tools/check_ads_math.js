@@ -731,5 +731,54 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
   } else { console.log("  NG  自動集計版が昔の見せ方のままです"); ng++; }
 }
 
+// --- 広告ページの階層（直営／FC／全社）--------------------------------
+//   店舗に紐づく数字は区分で割れる。クリエイティブは1本の広告が複数店に
+//   またがるので割れない（割ると二重に数えるか、広告費の按分が要る）。
+//   割れないものは全社のページにしか置かない、という切り分けを見張る。
+{
+  const has = (re, label) => {
+    if (re.test(src)) console.log(`  OK  ${label}`);
+    else { console.log(`  NG  ${label}`); ng++; }
+  };
+  has(/function adSeg\(\)/, "見ている区分を1か所で決めている");
+  has(/function adSegOk\(ow\)/, "行がその区分に入るかの判定が1か所にある");
+  has(/!AD_HIDE\.has\(r\.st\|\|UNMAPPED\)&&adSegOk\(r\.ow\)/, "集計の元が区分で絞られる");
+  has(/if\(!adSegOk\(r\.ow\)\)continue;\s+\/\/ 点＝店舗/, "散布図も区分で絞る（点＝店舗なので）");
+  has(/for\(const r of \(DATA\.meta\|\|\[\]\)\)if\(adSegOk\(r\.ow\)\)set\.add/,
+    "店舗プルダウンもその区分の店だけ");
+  // URL が分かれた別ページであること（共有・再読み込みで同じ場所に戻る）
+  has(/href="index\.html\?view=ads&g=own"/, "直営は別URL");
+  has(/href="index\.html\?view=ads&g=fc"/, "FCは別URL");
+  has(/href="index\.html\?view=ads&g=all"/, "全社は別URL");
+  has(/id="tab-ads"/, "広告タブがある");
+  // クリエイティブと未紐付けは全社にしか出さない
+  has(/\$\{adSeg\(\)!=="all"\?`/, "区分ページではクリエイティブ別を出さない");
+  has(/<h2>クリエイティブ別 <span class="sub"[^>]*>（全社・区分では割れません）/,
+    "全社側は「区分では割れない」と見出しに書く");
+  has(/1本の広告が複数の店に配信されるので、直営／FCで割ると/, "区分ページに理由と行き先を書く");
+  // クリエイティブの集計そのものは区分で絞らない（絞ると全社の合計と合わなくなる）
+  {
+    const fn = src.slice(src.indexOf("function adDrawCreatives(shortName)"),
+                         src.indexOf("// 未紐付けキャンペーンの割り当て"));
+    if (/adSegOk/.test(fn)) {
+      console.log("  NG  クリエイティブ別を区分で絞っています（1本が複数店にまたがるので割れません）");
+      ng++;
+    } else console.log("  OK  クリエイティブ別は区分で絞っていない（全社のまま）");
+  }
+  // 区分が決まらないものは全社にしか置けない
+  has(/if\(s==="all"\)return true;/, "全社ではすべて通す");
+  has(/return s==="own" \? ow==="直営" : \(!!ow&&ow!=="直営"\);/,
+    "区分なし（ow が無い行）は直営にもFCにも入れない");
+}
+
+// --- 取り込み待ちの言い回し -------------------------------------------
+//   sql/030 で列は足した。「列が無い」と書いたままだと、SQLを流したのに
+//   直っていないように読める。
+{
+  if (/まだDBに列が無いため/.test(src)) {
+    console.log("  NG  「列が無い」のままの注記が残っています（列は用意済み）"); ng++;
+  } else console.log("  OK  取り込み待ちだと書いている（列が無い、ではない）");
+}
+
 console.log(ng ? `\n❌ ${ng}件ずれています。` : "\n✅ すべて期待どおりです。");
 process.exit(ng ? 1 : 0);
