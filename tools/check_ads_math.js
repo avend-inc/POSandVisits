@@ -741,11 +741,19 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
     else { console.log(`  NG  ${label}`); ng++; }
   };
   has(/function adSeg\(\)/, "見ている区分を1か所で決めている");
-  has(/function adSegOk\(ow\)/, "行がその区分に入るかの判定が1か所にある");
-  has(/!AD_HIDE\.has\(r\.st\|\|UNMAPPED\)&&adSegOk\(r\.ow\)/, "集計の元が区分で絞られる");
-  has(/if\(!adSegOk\(r\.ow\)\)continue;\s+\/\/ 点＝店舗/, "散布図も区分で絞る（点＝店舗なので）");
-  has(/for\(const r of \(DATA\.meta\|\|\[\]\)\)if\(adSegOk\(r\.ow\)\)set\.add/,
+  has(/function adSegOk\(r\)/, "行がその区分に入るかの判定が1か所にある");
+  has(/function adOwnOf\(r\)/, "区分そのものを出す関数がある");
+  has(/!AD_HIDE\.has\(r\.st\|\|UNMAPPED\)&&adSegOk\(r\)/, "集計の元が区分で絞られる");
+  has(/if\(!adSegOk\(r\)\)continue;\s+\/\/ 点＝店舗/, "散布図も区分で絞る（点＝店舗なので）");
+  has(/for\(const r of \(DATA\.meta\|\|\[\]\)\)if\(adSegOk\(r\)\)set\.add/,
     "店舗プルダウンもその区分の店だけ");
+  // 見出し（直営店／FC店／区分なし）の振り分けも同じ判定を通すこと。
+  // ここが焼き付けの r.ow のままだと、FCページの中に「直営店」の見出しが出る
+  has(/const ow=adOwnOf\(r\);/, "KPI表の見出しも同じ判定を通す");
+  has(/own:adOwnOf\(r\)/, "散布図の色分けも同じ判定を通す");
+  if (/e=\{own:r\.ow/.test(src)) {
+    console.log("  NG  焼き付けの r.ow で区分を決めている箇所が残っています"); ng++;
+  } else console.log("  OK  焼き付けの r.ow で区分を決めている箇所は無い");
   // URL が分かれた別ページであること（共有・再読み込みで同じ場所に戻る）
   has(/href="index\.html\?view=ads&g=own"/, "直営は別URL");
   has(/href="index\.html\?view=ads&g=fc"/, "FCは別URL");
@@ -767,8 +775,56 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
   }
   // 区分が決まらないものは全社にしか置けない
   has(/if\(s==="all"\)return true;/, "全社ではすべて通す");
-  has(/return s==="own" \? ow==="直営" : \(!!ow&&ow!=="直営"\);/,
-    "区分なし（ow が無い行）は直営にもFCにも入れない");
+  has(/return s==="own" \? ow==="直営" : ow==="FC";/,
+    "区分なし（判定できない行）は直営にもFCにも入れない");
+  // 区分が未設定の店は黙って直営に入れず、名前を出して直せるようにする
+  has(/区分（直営／FC）が未設定の店が/, "区分が未設定の店を画面で知らせる");
+  has(/店舗マスタの ownership を入れると/, "どう直せばよいかを書く");
+}
+
+// --- 区分の判定を実際に動かす ------------------------------------------
+//   ここは「直営にFC店が出る／その逆」で一度やらかした。焼き付けの r.ow ではなく
+//   店舗マスタを見ること、空欄を直営に潰さないことを、実物を動かして確かめる。
+{
+  const f4 = src.indexOf("function adSeg()");
+  const t4 = src.indexOf("// 期間内に広告費が動いた店舗");
+  if (f4 < 0 || t4 <= f4) { console.log("  NG  adSegOk を取り出せませんでした"); ng++; }
+  else {
+    const c4 = { console, GROUP: "own" };
+    vm.createContext(c4);
+    vm.runInContext(
+      // 店舗マスタ：1=直営 / 2=FC / 3=ownership が空 / 4=マスタに無い
+      "const STORES={1:{id:1,own:'直営'},2:{id:2,own:'FC'},3:{id:3,own:null}};\n" +
+      "function storeMeta(sid){return STORES[sid]||null;}\n" +
+      "function ownOf(sid){const s=storeMeta(sid);return (s&&s.own)?s.own:'直営';}\n" +
+      src.slice(f4, t4), c4);
+    const seg = (g, r) => { c4.GROUP = g; return vm.runInContext("adSegOk(" + JSON.stringify(r) + ")", c4); };
+    const okc = (label, cond) => { console.log(`  ${cond ? "OK " : "NG "} ${label}`); if (!cond) ng++; };
+
+    // 焼き付け(ow)と店舗マスタが食い違うケース。マスタを正とする
+    okc("マスタがFCなら、焼き付けが直営でもFC側に入る",
+      seg("fc", { si: 2, ow: "直営" }) === true && seg("own", { si: 2, ow: "直営" }) === false);
+    okc("マスタが直営なら、焼き付けがFCでも直営側に入る",
+      seg("own", { si: 1, ow: "FC" }) === true && seg("fc", { si: 1, ow: "FC" }) === false);
+    // 素直なケース
+    okc("直営の店は直営だけに出る",
+      seg("own", { si: 1, ow: "直営" }) === true && seg("fc", { si: 1, ow: "直営" }) === false);
+    okc("FCの店はFCだけに出る",
+      seg("fc", { si: 2, ow: "FC" }) === true && seg("own", { si: 2, ow: "FC" }) === false);
+    // ownership が空の店。黙って直営に入れない
+    okc("区分が空の店は直営にもFCにも入らない",
+      seg("own", { si: 3 }) === false && seg("fc", { si: 3 }) === false);
+    okc("区分が空の店も全社には出る（広告費が消えない）", seg("all", { si: 3 }) === true);
+    // 店舗に紐づいていない行（未紐付け）
+    okc("未紐付けは直営にもFCにも入らない",
+      seg("own", { si: null, ow: null }) === false && seg("fc", { si: null, ow: null }) === false);
+    okc("未紐付けも全社には出る", seg("all", { si: null, ow: null }) === true);
+    // どの区分でも、行がどこかに必ず1回は出る（＝合計が消えない・二重にならない）
+    const rows = [{ si: 1 }, { si: 2 }, { si: 3 }, { si: null }];
+    const n = rows.filter((r) => seg("own", r)).length + rows.filter((r) => seg("fc", r)).length;
+    okc(`直営とFCで二重に数えない（${n}件／全4件のうち区分がつくのは2件）`, n === 2);
+    okc("全社ではぜんぶ出る", rows.filter((r) => seg("all", r)).length === rows.length);
+  }
 }
 
 // --- 取り込み待ちの言い回し -------------------------------------------
