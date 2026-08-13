@@ -184,15 +184,32 @@
     .dtop.four .card .val{font-size:clamp(11px,3.6vw,15px)}
     .dtop.four .card .val small{font-size:9px}
     .dtop.four .card .knote{font-size:8.5px;margin-top:2px}
-    /* 店舗ページ上部の4枚（前日・今月・着地見込み・売上予算）だけは2×2に折り返す。
-       金額の桁が大きく、1行4列だと「円」がはみ出し、達成見込みも切れてしまうため */
-    .dtop.headline.four{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-    .dtop.headline.four .card{padding:10px 11px}
-    .dtop.headline.four .card .k{font-size:11px;margin-bottom:5px}
-    .dtop.headline.four .card .val{font-size:clamp(15px,5vw,20px)}
-    .dtop.headline.four .card .val small{font-size:11px}
-    .dtop.headline.four .card .knote{font-size:9.5px;margin-top:4px}
+    /* 店舗ページ上部の4枚（前日・今月・着地見込み・売上予算）。
+       折り返さず横1列のまま、中の文字を小さくして収める。
+       いちばん長いのは「2,995,602円」（9桁＋単位）と「達成見込 119.8%」。
+       1枚の幅は (画面幅 - 余白32 - すきま3×5) ÷ 4 ≒ 画面幅の23%。
+       金額は等幅数字にして、字間を詰めて入れる（3.05vw ≒ 393pxで12px）。
+       ※ 幅と桁の関係は tools/check_layout.js が実際のブラウザで測っている */
+    .dtop.headline.four{gap:5px}
+    .dtop.headline.four .card{padding:8px 6px}
+    .dtop.headline.four .card .k{font-size:9.5px;margin-bottom:3px}
+    .dtop.headline.four .card .val{font-size:clamp(11px,3.05vw,17px);letter-spacing:-.04em;
+      font-variant-numeric:tabular-nums}
+    .dtop.headline.four .card .val small{font-size:8.5px;margin-left:0}
+    /* 「税抜 8月・事業計画」は1行に入らない。切って「税抜 8月・事業…」にすると
+       どこから来た予算なのか分からなくなるので、2行に折り返す */
+    .dtop.headline.four .card .knote{font-size:8.5px;margin-top:2px;
+      white-space:normal;line-height:1.35}
+    .dtop.headline.four .card .rate{font-size:9px;letter-spacing:-.03em}
+    .dtop.headline.four .card .ksplit{font-size:8.5px}
   }
+  /* 広告の段の「グラフの刻み」。上の期間ボタン（丸いチップの並び）とは役割が違う
+     ＝「いつを見るか」ではなく「どう刻むか」。ひとかたまりの切り替えにして、
+     見た目でも別ものだと分かるようにしている（同じ形のボタンを2行並べない） */
+  .grainrow{display:flex;align-items:center;gap:8px;margin:0 0 10px;flex-wrap:nowrap;overflow-x:auto}
+  .grainlbl{font-size:11px;color:var(--muted);font-weight:700;white-space:nowrap;flex:none}
+  .seg.agrain{flex:none}
+  .seg.agrain button{font-size:12px;padding:5px 12px;white-space:nowrap}
   /* 表示する項目のプルダウン（広告カード用） */
   .pickwrap{position:relative;display:inline-block}
   .picklist{position:absolute;z-index:30;top:calc(100% + 4px);left:0;min-width:230px;max-height:62vh;
@@ -446,7 +463,11 @@ function restoreSharedUrl(){
 // sel=選択店舗ID(Set)。kind=③期間プリセット。grain=⑤推移の粒度。trendAnchor=⑤の＜＞位置。
 const state={store:"__sel__",sel:null,grain:DETAIL_ID?"day":"month",metric:"ex",from:null,to:null,kind:"thismonth",trendEnd:null,detail:DETAIL_ID,
   heatMetric:"q",trendSel:["ex"],hKind:"thismonth",hFrom:null,hTo:null,
-  aKind:"d28",aFrom:null,aTo:null};
+  aKind:"d28",aFrom:null,aTo:null,
+  // aGrain=広告グラフの刻み（day/week/month）。期間とは別ものなので、期間を変えても保つ。
+  // 端末に覚える（3ヶ月をいつも週次で見る人が、開くたびに押し直さなくて済むように）
+  aGrain:(function(){ try{const v=localStorage.getItem("notime-adgrain");
+    if(v==="day"||v==="week"||v==="month")return v;}catch(e){} return "day"; })()};
   // heatMetric=店舗ページ比率表の切替（q=販売数/a=税抜売上）。trendSel=推移グラフの表示系列（最大3）
   // hKind/hFrom/hTo=店舗ページ比率表の集計期間（KPIまとめの期間とは独立）
   // aKind/aFrom/aTo=店舗ページ広告の段の集計期間（これも独立。既定＝直近28日）
@@ -1306,9 +1327,11 @@ function renderAds(){
 //   ・グラフに触れると、その日の全項目をまとめて黒い吹き出しで出す。
 // cols/tot を渡すと、その項目・その合計で描く（省略すると広告タブの選択を使う）。
 // 店舗ページの広告カードからも同じグラフを使うため、外から差し込めるようにしている。
-function adChart(days,byDay,cols,tot){
+// fmtX は横軸の見出し（日次は「8/12」、週次は週はじめ、月次は「8月」）。
+function adChart(days,byDay,cols,tot,fmtX){
   cols=cols||AD_COLS.filter(k=>!AD_GOFF.has(k));
   tot=tot||adSum(adRows());
+  fmtX=fmtX||(d=>`${+d.slice(5,7)}/${+d.slice(8,10)}`);
   // スマホは座標系ごと小さくする。760幅のまま縮めると目盛りの文字が潰れて読めないため。
   const NARROW=(window.innerWidth||760)<560;
   const W=NARROW?380:760, H=NARROW?190:230, L=NARROW?40:54, R=NARROW?40:54, T=NARROW?8:12, B=NARROW?22:26;
@@ -1343,13 +1366,13 @@ function adChart(days,byDay,cols,tot){
     <div class="adwrap"><svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;display:block"
         data-l="${L}" data-r="${R}" data-w="${W}" data-n="${days.length}">
       ${axis(series[0],"L")}${axis(series[1],"R")}
-      ${days.map((d,i)=>i%step?"":`<text x="${x(i).toFixed(1)}" y="${H-7}" font-size="${FS}" fill="var(--muted)" text-anchor="middle">${+d.slice(5,7)}/${+d.slice(8,10)}</text>`).join("")}
+      ${days.map((d,i)=>i%step?"":`<text x="${x(i).toFixed(1)}" y="${H-7}" font-size="${FS}" fill="var(--muted)" text-anchor="middle">${esc(fmtX(d))}</text>`).join("")}
       <line class="adcursor" x1="0" y1="${T}" x2="0" y2="${H-B}" stroke="var(--ink2)" stroke-width="1" stroke-dasharray="3 3" opacity="0"/>
       ${series.map(s2=>`<path d="${s2.d}" fill="none" stroke="${s2.c}" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round"/>`).join("")}
       ${series.map(s2=>days.map((dd,i)=>{const v=s2.vals[i];
         return (v==null||!isFinite(v))?"":`<circle cx="${x(i).toFixed(1)}" cy="${s2.y(v).toFixed(1)}" r="${dot}" fill="${s2.c}"/>`;}).join("")).join("")}
     </svg><div class="adtip" style="display:none"></div></div>
-    <p class="note" style="margin:4px 0 0">左の軸＝1番目に選んだ項目、右の軸＝2番目。3番目以降は軸を出していません（軸が増えると読めなくなるため）。グラフに触れるとその日の全項目が出ます。</p>`;
+    <p class="note" style="margin:4px 0 0">左の軸＝1番目に選んだ項目、右の軸＝2番目。3番目以降は軸を出していません（軸が増えると読めなくなるため）。グラフに触れると、その目盛りの全項目が出ます。</p>`;
 }
 // 軸の目盛り用に短くする（円は千/万、%は小数1桁）
 function adShort(m,v){
@@ -1362,8 +1385,9 @@ function adShort(m,v){
   return (a<10?F1(v):String(Math.round(v)))+(u||"");
 }
 // グラフに触れたとき、その日の全項目を黒い吹き出しでまとめて出す
-function adWireTip(days,byDay,cols,sel){
+function adWireTip(days,byDay,cols,sel,fmtD){
   cols=cols||AD_COLS.filter(k=>!AD_GOFF.has(k));
+  fmtD=fmtD||(d=>`${d.slice(0,4)}/${+d.slice(5,7)}/${+d.slice(8,10)}（${WK[new Date(d+"T00:00:00Z").getUTCDay()]}）`);
   const wrap=document.querySelector((sel||"#adtrend")+" .adwrap"); if(!wrap)return;
   const svg=wrap.querySelector("svg"), tip=wrap.querySelector(".adtip");
   if(!svg||!tip||!days.length)return;
@@ -1378,7 +1402,7 @@ function adWireTip(days,byDay,cols,sel){
     const i=at(e), d=days[i], p=byDay.get(d);
     if(cur){const gx=days.length<2?(L+(W-R))/2:L+i*(W-L-R)/(days.length-1);
       cur.setAttribute("x1",gx);cur.setAttribute("x2",gx);cur.setAttribute("opacity","1");}
-    tip.innerHTML=`<div class="d">${d.slice(0,4)}/${+d.slice(5,7)}/${+d.slice(8,10)}（${WK[new Date(d+"T00:00:00Z").getUTCDay()]}）</div>`+
+    tip.innerHTML=`<div class="d">${esc(fmtD(d))}</div>`+
       cols.map(k=>{const m=AD_METRICS.find(z=>z.k===k);
         return `<div class="l"><i style="background:${AD_COLOR[k]||"#fff"}"></i>${m.name}<b>${m.fmt(adVal(k,p))}</b></div>`;}).join("");
     tip.style.display="block";
@@ -1937,6 +1961,12 @@ function wireCommon(){
     state.aKind=b.dataset.apreset; state.aFrom=f; state.aTo=t;
     drawStoreAds();
   });
+  // グラフの刻み（日次/週次/月次）。期間とは別もので、期間を変えても刻みは保つ
+  document.querySelectorAll(".agrain button").forEach(b=>b.onclick=()=>{
+    state.aGrain=b.dataset.agrain;
+    try{localStorage.setItem("notime-adgrain",state.aGrain);}catch(e){}
+    drawStoreAds();
+  });
   on("adfrom","onchange",e=>{
     state.aFrom=clampLo(e.target.value||DATA._min);
     if(state.aFrom>state.aTo)state.aTo=state.aFrom;
@@ -2154,6 +2184,16 @@ function renderDetail(){
         <input type="date" id="adfrom" min="${DATA._min}" max="${DATA._max}" value="${state.aFrom}">
         <span class="sub">〜</span>
         <input type="date" id="adto" min="${DATA._min}" max="${DATA._max}" value="${state.aTo}">
+      </div>
+      <!-- 上の段＝「いつを見るか」（期間）／ここ＝「どう刻むか」（グラフの粒度）。
+           役割が違うので、丸いボタンの並びではなく、ひとかたまりの切り替え（seg）にする -->
+      <div class="grainrow">
+        <span class="grainlbl">グラフの刻み</span>
+        <div class="seg agrain">
+          <button data-agrain="day">日次</button>
+          <button data-agrain="week">週次</button>
+          <button data-agrain="month">月次</button>
+        </div>
       </div>
       <div class="pickwrap" id="stad-pick" style="margin:6px 0 10px"></div>
       <div class="dtop four" id="stad-cards"></div>
@@ -3676,6 +3716,40 @@ function kpi2AdRows(id,ctx){
       <td>${dCpc==null?"—":(dCpc>=0?"+":"−")+YEN(Math.round(Math.abs(dCpc)))+"円"}</td>
       <td>${yen(adVal("cpc",wdA.p))}</td><td>${yen(adVal("cpc",weA.p))}</td></tr>`;
 }
+// ---- グラフの刻み（日次／週次／月次）----
+//   期間（上の段）とは役割が違う。期間＝いつを見るか、刻み＝どう刻むか。
+//   3ヶ月ぶんを日次で出すと線が細かすぎて形が読めないので、週次・月次に丸められるようにする。
+function adGrain(){ return state.aGrain||"day"; }
+// 日ごとの集計を、週（月曜はじまり）や月にまとめ直す。
+//   足すのは実額だけ。比率（CTR・CPC・売上比率）は、足したあとに 実額÷実額 で出す。
+//   日ごとの比率を平均すると別の数字になるので、ここで比率には触らない。
+//   平均視聴時間だけは「値がある日の平均」なので、合計と件数を両方持ち越す。
+function adRoll(byDay,grain){
+  const keys=[...byDay.keys()].sort();
+  if(grain!=="week"&&grain!=="month")
+    return {keys,map:byDay,
+      fmtX:d=>`${+d.slice(5,7)}/${+d.slice(8,10)}`,
+      fmtD:d=>`${d.slice(0,4)}/${+d.slice(5,7)}/${+d.slice(8,10)}（${WK[new Date(d+"T00:00:00Z").getUTCDay()]}）`};
+  const keyOf=d=>grain==="week"?mondayOf(d):d.slice(0,7)+"-01";
+  const map=new Map(), span=new Map();
+  for(const d of keys){
+    const k=keyOf(d); let a=map.get(k);
+    if(!a){ a=adZero(); a.sids=null; map.set(k,a); span.set(k,[d,d]); }
+    const s=span.get(k); if(d<s[0])s[0]=d; if(d>s[1])s[1]=d;
+    const b=byDay.get(d);
+    for(const f2 of ["sp","im","rc","ck","fl","pv","lk","vt","vn","ex","vis"])a[f2]+=b[f2]||0;
+  }
+  return {keys:[...map.keys()].sort(), map,
+    fmtX:k=>grain==="month"?`${+k.slice(5,7)}月`:`${+k.slice(5,7)}/${+k.slice(8,10)}`,
+    // 端の刻みは、月や週の途中までしか入っていないことがある（期間 5/16〜8/12 なら
+    // 5月は16日から、8月は12日まで）。「8月」とだけ出すと1ヶ月ぶんに見えるので、
+    // 揃っていないときは実際に入っている範囲を添える
+    fmtD:k=>{ const s=span.get(k)||[k,k];
+      if(grain!=="month")return `${mdLabel(s[0],s[1])}の週`;
+      const mEnd=addDays(addDays(k,32).slice(0,7)+"-01",-1);
+      const full=(s[0]===k&&s[1]===mEnd);
+      return `${k.slice(0,4)}年${+k.slice(5,7)}月`+(full?"":`（${mdLabel(s[0],s[1])}の分）`); }};
+}
 // ---- 広告カードの「表示する項目」プルダウン ----
 //   以前はチップを全部横に並べていたが、項目が11個に増えて、スマホでは3行になり
 //   カードより目立ってしまった。畳んでおいて、開いたときだけ選べるようにする。
@@ -3721,7 +3795,7 @@ function drawStoreAdPick(){
       else    { if(ST_AD_COLS.length>=ST_AD_MAX){cb.checked=false;return;} ST_AD_COLS.push(k); }
       // 並びは AD_METRICS の順に整える（押した順に並ぶと毎回位置が変わって読みにくい）
       ST_AD_COLS=AD_METRICS.map(m=>m.k).filter(k2=>ST_AD_COLS.includes(k2));
-      try{localStorage.setItem("notime-stadcols",JSON.stringify(ST_AD_COLS));}catch(e){}
+      try{localStorage.setItem("notime-stadcols2",JSON.stringify(ST_AD_COLS));}catch(e){}
       drawStoreAds();   // カードと注記を作り直す（プルダウンは開いたまま）
     });
   }
@@ -3771,11 +3845,12 @@ function drawStoreAds(){
   // 表示する項目はプルダウン（開いていればそのまま開いた状態で描き直す）
   drawStoreAdPick();
 
-  // ---- 日別の推移（この店だけ）----
+  // ---- 推移（この店だけ）----
   //   広告タブと同じグラフをそのまま使う。単位も桁も違う（円・回・%）ので、
   //   各項目を「その項目の最小〜最大」で正規化して形を比べる。実際の値は凡例と吹き出しで見る。
-  //   横軸は選んだ期間の全日。広告を出していない日も0円として並べる
-  //   （止めていた期間が見えるほうが役に立つ。比率は分母が0の日は「—」）。
+  //   横軸は選んだ期間の全部の刻み。広告を出していない日も0円として並べる
+  //   （止めていた期間が見えるほうが役に立つ。比率は分母が0の刻みは「—」）。
+  document.querySelectorAll(".agrain button").forEach(b=>b.classList.toggle("on",b.dataset.agrain===adGrain()));
   const tel=document.getElementById("stad-trend");
   if(tel){
     const gcols=ST_AD_COLS.filter(k=>!ST_AD_GOFF.has(k));
@@ -3785,11 +3860,15 @@ function drawStoreAds(){
     // 各日の税抜売上。店は1つに決まっているので店舗集合は使わない
     for(const [d,a] of byDay){ a.sids=null; a.ex=M("ex").calc(sumRows(rowsIn(d,d,id)))||0;
       const v2=sumRows(rowsIn(d,d,id)); a.vis=v2.hasV?v2.v:0; }
-    const days=[...byDay.keys()].sort();
+    // 週次・月次はここで実額を足しなおす。比率（CTR・CPC・売上比率）は
+    // 足したあとに 実額÷実額 で出るので、日ごとの比率を平均することにはならない。
+    const {keys,map,fmtX,fmtD}=adRoll(byDay,adGrain());
+    const days=keys;
+    byDay.clear(); for(const [k2,v2] of map)byDay.set(k2,v2);
     tel.innerHTML=!days.length?`<p class="note">この期間の広告データがありません。</p>`
       :!gcols.length?`<p class="note">グラフに出す項目がありません。上のカードをタップすると、その項目をグラフに出せます。</p>`
-      :adChart(days,byDay,gcols,p);
-    if(days.length&&gcols.length)adWireTip(days,byDay,gcols,"#stad-trend");
+      :adChart(days,byDay,gcols,p,fmtX);
+    if(days.length&&gcols.length)adWireTip(days,byDay,gcols,"#stad-trend",fmtD);
   }
 
   const note=document.getElementById("stad-note");
@@ -4445,12 +4524,17 @@ function adStoreSum(id,from,to){
 }
 // 店舗ページの広告カードに出す項目。端末ごとに覚える（広告タブとは別に持つ：
 // 全社を見る画面と、1店を見る画面とで、見たい項目が違うため）。
-const ST_AD_DEFAULT=["sp","sr","ctr","frq"];
 // 出せるのは最大8つ（横4列 × 2行）。これ以上はスクロールしないと読めず、
 // 「並べたのに見ていない」状態になるので上限を設ける。
 const ST_AD_MAX=8;
+// 既定は上限いっぱいの8つ。要らない人が外すほうが、要る人が毎回
+// プルダウンを開いて足すより手数が少ない。
+// 外してあるのは 売上（上の段に出ている）・フォロー率・CPF（元データ待ち）。
+const ST_AD_DEFAULT=["sp","sr","pv","ctr","cpc","frq","lkr","vt"];
 let ST_AD_COLS=(function(){
-  try{const s=JSON.parse(localStorage.getItem("notime-stadcols")||"null");
+  // キーを stadcols2 に変えている。既定を4つ→8つに増やしたとき、古いキーのままだと
+  // 一度でも画面を開いた端末に4つの選択が残っていて、既定を変えても8つに戻らないため。
+  try{const s=JSON.parse(localStorage.getItem("notime-stadcols2")||"null");
     if(Array.isArray(s)&&s.length){
       // 端末に古い設定（消した指標・上限より多い数）が残っていても直して使う
       const v=AD_METRICS.map(m=>m.k).filter(k=>s.includes(k)).slice(0,ST_AD_MAX);
