@@ -486,8 +486,29 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
   // （別に作ると、正規化のしかたや軸の決め方がいつの間にか食い違う）
   has(/function adChart\(days,byDay,cols,tot,fmtX\)/, "グラフは項目・合計・横軸の見出しを外から受け取れる");
   has(/function adWireTip\(days,byDay,cols,sel,fmtD\)/, "吹き出しも外から受け取れる");
-  has(/adChart\(days,byDay,gcols,p,fmtX\)/, "店舗ページも同じ adChart を使う（作り直していない）");
-  has(/adWireTip\(days,byDay,gcols,"#stad-trend",fmtD\)/, "店舗ページのグラフにも吹き出しが付く");
+  has(/adChart\(days,byB,gcols,p,fmtX\)/, "店舗ページも同じ adChart を使う（作り直していない）");
+  has(/adWireTip\(days,byB,gcols,"#stad-trend",fmtD\)/, "店舗ページのグラフにも吹き出しが付く");
+  // adRoll は日次のとき、渡された入れ物をそのまま返す。それを消してから詰め直すと
+  // 「同じものを空にして、空をなめる」ことになり、日次のグラフが丸ごと消える。
+  // 実際に一度やってしまったので、二度と書けないように見張る
+  {
+    const fn = src.slice(src.indexOf("// ---- 推移（この店だけ）----"),
+                         src.indexOf("// ---- 刻みが粗すぎるときの注意 ----"));
+    if (/byDay\.clear\(\)/.test(fn)) {
+      console.log("  NG  adRoll に渡した入れ物を消しています（日次のグラフが空になります）"); ng++;
+    } else console.log("  OK  adRoll が返した入れ物をそのまま使う（日次でも空にならない）");
+  }
+  // ---- 刻みが粗すぎるときの注意 ----
+  has(/g!=="day"&&days\.length&&days\.length<=3/, "点が3個以下なら注意を出す");
+  has(/形を見るには「日次」にするか、上の期間を長くしてください。/, "どうすれば見えるかを書く");
+  // 日次で点が少ないのは期間が短いだけで、刻みのせいではない
+  has(/const gw=document\.getElementById\("stad-grainwarn"\);/, "注意書きの置き場所がある");
+  // ---- 刻みごとの数値の表 ----
+  has(/<table class="kmat" id="stad-tbl">/, "グラフの下に数値の表がある");
+  has(/const totRow=`<tr class="prow"><td>期間の合計<\/td>/, "表の1行目は期間の合計");
+  has(/days\.slice\(\)\.reverse\(\)/, "表は新しいものが上");
+  has(/if\(!adHas\(m\.need\)\)return `<td>—<\/td>`;/, "元データが無い項目は表でも「—」");
+  has(/return `<td>\$\{v==null\?"—":m\.fmt\(v\)\}<\/td>`;/, "分母が0の比率も「—」（0にしない）");
   has(/<div id="stad-trend"/, "店舗ページにグラフの置き場所がある");
   has(/class="card adcard\$\{off\?" goff":""\}" data-k="\$\{k\}"/, "店舗ページのカードはタップできる");
   // 全社の画面と1店の画面で、消した線が飛び火すると分かりにくい
