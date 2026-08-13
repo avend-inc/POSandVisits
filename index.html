@@ -1175,17 +1175,34 @@ let AD_STORE=(function(){try{return localStorage.getItem("notime-adstore")||"";}
 //   区分が決まらないもの（未紐付け・POS店舗に紐づいていない配信先）も全社にしか置けない。
 function adSeg(){ return GROUP==="fc"?"fc":GROUP==="all"?"all":"own"; }
 function adSegLabel(){ return adSeg()==="fc"?"FC店":adSeg()==="all"?"全社":"直営店"; }
-// 行の区分（r.ow）が、いま見ている区分に入るか。ow が無い＝区分なしは全社だけ
-function adSegOk(ow){
+// 広告の行の区分を出す。
+//   店舗が紐づいていれば店舗マスタ（ownOf）を正とする。直営/FCタブや店舗一覧と
+//   同じ判定にそろえるため。
+//   data.json の r.ow は使わない。あれは取り込んだ時点の焼き付けで、
+//   ・店舗マスタの ownership を直しても、次の取り込みまで古いまま
+//   ・ownership が空の店を「直営」に潰している（tools/export_dashboard.py）
+//   の2つの理由で、直営にFC店が出る／その逆が起きていた。
+//   店舗に紐づいていない行だけは判定材料が無いので、焼き付けの値に頼る（普通は null）。
+//   ※ ownOf() は使わない。あちらは ownership が空のとき「直営」を返す作りで、
+//     それだと区分が未設定なだけの店が直営に混ざる＝直そうとしている症状そのもの。
+//     ここは空欄を「決まらない（null）」のまま扱い、画面で名前を出して直してもらう。
+function adOwnOf(r){
+  const s=(r.si!=null)?storeMeta(r.si):null;
+  if(s)return s.own?(s.own==="直営"?"直営":"FC"):null;
+  return r.ow||null;                       // マスタに無い／店舗に紐づいていない
+}
+// その行が、いま見ている区分に入るか。区分が決まらない行は全社にだけ出す
+function adSegOk(r){
   const s=adSeg();
   if(s==="all")return true;
-  return s==="own" ? ow==="直営" : (!!ow&&ow!=="直営");
+  const ow=adOwnOf(r);
+  return s==="own" ? ow==="直営" : ow==="FC";
 }
 // 期間内に広告費が動いた店舗（＋未紐付け）をプルダウンの選択肢にする。
 // 直営／FCのページでは、その区分の店だけを出す（選べても中身が空になるだけなので）
 function adStoreList(){
   const set=new Set();
-  for(const r of (DATA.meta||[]))if(adSegOk(r.ow))set.add(r.st||UNMAPPED);
+  for(const r of (DATA.meta||[]))if(adSegOk(r))set.add(r.st||UNMAPPED);
   return [...set].sort((a,b)=>a===UNMAPPED?1:b===UNMAPPED?-1:a.localeCompare(b,"ja"));
 }
 const AD_GROUPS=[["c","キャンペーン別"],["st","店舗別"],["a","アカウント別"]];
@@ -1199,7 +1216,7 @@ function adRows(){
 // 非表示にした店だけは、明示的な操作なので一覧からも外す。
 function adRowsAll(){
   return (DATA.meta||[]).filter(r=>r.d>=state.from&&r.d<=state.to&&
-    !AD_HIDE.has(r.st||UNMAPPED)&&adSegOk(r.ow));
+    !AD_HIDE.has(r.st||UNMAPPED)&&adSegOk(r));
 }
 // 店舗ID → その店の日別行。広告費と売上を突き合わせるために一度だけ作る。
 // 結び目は店名ではなく店舗ID（si）。店名は表記ゆれがあって当てにできない。
@@ -1278,6 +1295,7 @@ function renderAds(){
         ? "クリエイティブ別・未紐付けは、区分で割れないのでここだけに出ます"
         : `${adSegLabel()}のぶんだけを集計しています`}</span>
     </div>
+    <p class="note" id="adsegwarn" style="margin:0 2px 10px"></p>
     <div class="panel">
       <div class="sub" style="font-weight:700;margin:2px 0 4px">集計期間</div>
       <div class="adperiod">
@@ -1478,6 +1496,27 @@ function adWireTip(days,byDay,cols,sel,fmtD){
 }
 function drawAds(){
   const rows=adRows(), tot=adSum(rows);
+  // ---- 区分が決まらない店を知らせる ----
+  //   店舗マスタの ownership が空だと、その店は直営にもFCにも入らない。
+  //   黙って直営に入れると「直営ページにFC店が出る」になり、原因も分からない。
+  //   期間内に広告費が動いた店だけを見て、名前を出す（直しに行けるように）。
+  const sw=document.getElementById("adsegwarn");
+  if(sw){
+    const nog=new Map();
+    for(const r of (DATA.meta||[])){
+      if(r.d<state.from||r.d>state.to||!(r.sp>0))continue;
+      if(r.si==null)continue;                       // 未紐付けは別の話（全社に出る）
+      const s=storeMeta(r.si); if(!s||s.own)continue;
+      nog.set(r.si,(nog.get(r.si)||0)+(r.sp||0));
+    }
+    sw.innerHTML=nog.size
+      ? `<b style="color:#b8860b">区分（直営／FC）が未設定の店が ${nog.size}店あります。</b>`+
+        `どの区分にも入らないので、この期間の広告費 ${YEN([...nog.values()].reduce((a,b)=>a+b,0))}円は`+
+        `<a href="index.html?view=ads&g=all">全社</a>にだけ出ています。`+
+        `<br>対象：${[...nog.keys()].map(id=>esc((storeMeta(id)||{}).name||("店舗"+id))).join("・")}`+
+        `　→ 店舗マスタの ownership を入れると、直営／FCに振り分けられます。`
+      : "";
+  }
   // ---- カード（選んだ項目だけ）----
   const cards=document.getElementById("adcards");
   if(cards)cards.innerHTML=AD_COLS.map(k=>{
@@ -1547,8 +1586,10 @@ function drawAds(){
     const byStore=(AD_GROUP==="st"), g=new Map();
     for(const r of rows){
       const key=byStore?(r.st||UNMAPPED):(AD_GROUP==="a"?r.a:r.c);
-      let e=g.get(key); if(!e){e={own:r.ow||null,tot:zero(),bk:new Map()};g.set(key,e);}
-      if(!e.own&&r.ow)e.own=r.ow;
+      // 区分は店舗マスタを正とする（焼き付けの r.ow だと、見出しと中身が食い違う）
+      const ow=adOwnOf(r);
+      let e=g.get(key); if(!e){e={own:ow,tot:zero(),bk:new Map()};g.set(key,e);}
+      if(!e.own&&ow)e.own=ow;
       adAdd(e.tot,r);
       const b=bucketOf(r.d);
       let w=e.bk.get(b); if(!w){w=zero();e.bk.set(b,w);}
@@ -1702,8 +1743,8 @@ function adDrawScatter(shortName){
   for(const r of (DATA.meta||[])){
     if(r.si==null||r.d<from||r.d>to)continue;
     if(AD_HIDE.has(r.st||UNMAPPED))continue;
-    if(!adSegOk(r.ow))continue;              // 点＝店舗なので、見ている区分だけにする
-    let e=g.get(r.si); if(!e){e={name:r.st,own:r.ow,acc:adZero()};g.set(r.si,e);}
+    if(!adSegOk(r))continue;                 // 点＝店舗なので、見ている区分だけにする
+    let e=g.get(r.si); if(!e){e={name:r.st,own:adOwnOf(r),acc:adZero()};g.set(r.si,e);}
     adAdd(e.acc,r);
   }
   for(const [,e] of g)adSales(e.acc,from,to);
