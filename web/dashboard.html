@@ -2198,6 +2198,8 @@ function renderDetail(){
       <div class="pickwrap" id="stad-pick" style="margin:6px 0 10px"></div>
       <div class="dtop four" id="stad-cards"></div>
       <div id="stad-trend" style="margin-top:10px"></div>
+      <p class="note" id="stad-grainwarn" style="margin:6px 0 0"></p>
+      <div class="tblwrap" style="margin-top:8px"><table class="kmat" id="stad-tbl"></table></div>
       <p class="note" id="stad-note" style="margin:8px 0 0"></p>
       <h2 style="margin-top:16px">キャンペーン別</h2>
       <div class="tblwrap"><table class="kmat" id="stad-camp"></table></div>
@@ -3862,13 +3864,48 @@ function drawStoreAds(){
       const v2=sumRows(rowsIn(d,d,id)); a.vis=v2.hasV?v2.v:0; }
     // 週次・月次はここで実額を足しなおす。比率（CTR・CPC・売上比率）は
     // 足したあとに 実額÷実額 で出るので、日ごとの比率を平均することにはならない。
-    const {keys,map,fmtX,fmtD}=adRoll(byDay,adGrain());
-    const days=keys;
-    byDay.clear(); for(const [k2,v2] of map)byDay.set(k2,v2);
+    // 返ってきた入れ物をそのまま使う（日次のときは byDay と同じものが返る。
+    // ここで byDay を作り直すと、同じものを消してから詰め直すことになって空になる）。
+    const {keys:days,map:byB,fmtX,fmtD}=adRoll(byDay,adGrain());
+    // 点が1個だけのときはグラフを出さない。線が引けず、縦に大きな余白が空くだけで、
+    // スマホでは下の表が画面から押し出される。下の注意書きと表のほうが役に立つ。
+    const oneDot=(adGrain()!=="day"&&days.length===1);
+    const drawIt=(days.length&&gcols.length&&!oneDot);
     tel.innerHTML=!days.length?`<p class="note">この期間の広告データがありません。</p>`
       :!gcols.length?`<p class="note">グラフに出す項目がありません。上のカードをタップすると、その項目をグラフに出せます。</p>`
-      :adChart(days,byDay,gcols,p,fmtX);
-    if(days.length&&gcols.length)adWireTip(days,byDay,gcols,"#stad-trend",fmtD);
+      :oneDot?"" :adChart(days,byB,gcols,p,fmtX);
+    if(drawIt)adWireTip(days,byB,gcols,"#stad-trend",fmtD);
+
+    // ---- 刻みが粗すぎるときの注意 ----
+    //   28日間を月次で見ると点が1〜2個しかなく、線に見えるだけで形は読めない。
+    //   黙って出すと「動きが無い」と読まれてしまうので、その場で理由を書く。
+    const gw=document.getElementById("stad-grainwarn");
+    if(gw){
+      const g=adGrain(), nm=g==="month"?"月次":g==="week"?"週次":"日次";
+      gw.innerHTML=(g!=="day"&&days.length&&days.length<=3)
+        ? `<b style="color:#b8860b">${nm}では点が${days.length}個しかありません`+
+          (oneDot?"（線が引けないのでグラフは出していません）":"")+`。</b>`+
+          `形を見るには「日次」にするか、上の期間を長くしてください。`
+        : "";
+    }
+
+    // ---- 刻みごとの数値（グラフの下）----
+    //   グラフは形を見るもので、実際の数字は読み取れない（正規化しているため）。
+    //   カードに出している項目を、そのまま刻みごとに並べる。新しいものが上。
+    const tb=document.getElementById("stad-tbl");
+    if(tb){
+      const cell=(k,a)=>{const m=AD_METRICS.find(x=>x.k===k);
+        if(!adHas(m.need))return `<td>—</td>`;
+        const v=adVal(k,a); return `<td>${v==null?"—":m.fmt(v)}</td>`;};
+      const head=`<thead><tr><th>${adGrain()==="month"?"月":adGrain()==="week"?"週":"日"}</th>`+
+        ST_AD_COLS.map(k=>`<th>${esc((AD_METRICS.find(x=>x.k===k)||{}).name||k)}</th>`).join("")+
+        `</tr></thead>`;
+      // 期間ぜんたいの合計。カードと同じ数字が並ぶので、表の読み始めの目安になる
+      const totRow=`<tr class="prow"><td>期間の合計</td>${ST_AD_COLS.map(k=>cell(k,p)).join("")}</tr>`;
+      const body=days.slice().reverse().map(d2=>
+        `<tr><td>${esc(fmtD(d2))}</td>${ST_AD_COLS.map(k=>cell(k,byB.get(d2))).join("")}</tr>`).join("");
+      tb.innerHTML=days.length?head+`<tbody>${totRow}${body}</tbody>`:"";
+    }
   }
 
   const note=document.getElementById("stad-note");
