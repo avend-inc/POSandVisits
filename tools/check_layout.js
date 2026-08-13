@@ -21,9 +21,13 @@ const { execFileSync } = require("child_process");
 const HTML = path.join(__dirname, "..", "web", "dashboard.html");
 const src = fs.readFileSync(HTML, "utf8");
 
-const CHROME = ["/opt/pw-browsers/chromium", "/usr/bin/chromium",
+// headless_shell を先に探す。通常の Chromium はウィンドウ幅を 500px 未満にできず、
+// iPhone の幅（375〜430px）で測れないため。
+const CHROME = ["/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell",
+                "/opt/pw-browsers/chromium", "/usr/bin/chromium",
                 "/usr/bin/chromium-browser", "/usr/bin/google-chrome"]
   .find((p) => { try { return fs.statSync(p).isFile(); } catch { return false; } });
+const IS_SHELL = !!CHROME && CHROME.endsWith("headless_shell");
 if (!CHROME) {
   console.log("  --  Chromium が無いので画面の測定は飛ばします");
   process.exit(0);
@@ -66,7 +70,7 @@ fs.writeFileSync(tmp, page);
 
 const measure = (w) => {
   const dom = execFileSync(CHROME, [
-    "--headless", "--no-sandbox", "--disable-gpu",
+    ...(IS_SHELL ? [] : ["--headless"]), "--no-sandbox", "--disable-gpu",
     `--window-size=${w},900`, "--virtual-time-budget=2000",
     "--dump-dom", "file://" + tmp,
   ], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 32 << 20 });
@@ -81,16 +85,12 @@ const ok = (label, cond) => { console.log(`  ${cond ? "OK " : "NG "} ${label}`);
 // Chromium はウィンドウ幅を 500px 未満にできないので、スマホ幅の代表として 500 を使う。
 // 実機（iPhone は 390〜430px）はこれより狭いが、狭いほど2列になりやすい側なので、
 // 500px で2列かつ切れていなければ、実機でも切れない。
-for (const w of [500, 620]) {
+// 折り返さず横4列のまま、文字を小さくして収める（折り返すと縦に伸びて、
+// 下の「日別推移」が画面から押し出されるため）。
+// 375=iPhone SE/mini, 390=13/14, 393=15/16, 430=Pro Max。いちばん狭い375で入れば全部入る
+for (const w of (IS_SHELL ? [375, 390, 393, 430, 620, 900, 1200] : [500, 620, 900, 1200])) {
   const r = measure(w);
-  ok(`幅${r.w}px：上の4枚は2行に折り返す（1行4列だと「円」が切れる）`, r.rows === 2);
-  ok(`幅${r.w}px：切れている文字が無い`, r.clipped.length === 0);
-  if (r.clipped.length) console.log("      切れているもの: " + r.clipped.join(" / "));
-}
-// PC幅では今までどおり横1行
-for (const w of [900, 1200]) {
-  const r = measure(w);
-  ok(`幅${r.w}px：横1行のまま`, r.rows === 1);
+  ok(`幅${r.w}px：上の4枚は横1列のまま`, r.rows === 1);
   ok(`幅${r.w}px：切れている文字が無い`, r.clipped.length === 0);
   if (r.clipped.length) console.log("      切れているもの: " + r.clipped.join(" / "));
 }

@@ -419,11 +419,18 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
     if (re.test(src)) console.log(`  OK  ${label}`);
     else { console.log(`  NG  ${label}`); ng++; }
   };
-  has(/const ST_AD_DEFAULT=\["sp","sr","ctr","frq"\];/, "既定は これまでの4つ（広告費・売上比率・CTR・FQ）");
-  has(/localStorage\.setItem\("notime-stadcols"/, "選んだ項目を端末に覚える");
+  // 既定は上限いっぱいの8つ。要らない人が外すほうが、要る人が毎回足すより手数が少ない
+  has(/const ST_AD_DEFAULT=\["sp","sr","pv","ctr","cpc","frq","lkr","vt"\];/,
+    "既定は8つ（上限いっぱい）");
+  has(/localStorage\.setItem\("notime-stadcols2"/, "選んだ項目を端末に覚える");
+  // 既定を4つ→8つに増やしたので、キーも変える。変えないと、一度でも開いた端末に
+  // 4つの選択が残っていて、既定を変えても8つに戻らない
+  has(/"notime-stadcols2"/, "既定を増やしたのでキーも変えている");
+  if (/"notime-stadcols"[^2]/.test(src)) {
+    console.log("  NG  古いキー notime-stadcols がまだ使われています"); ng++;
+  } else console.log("  OK  古いキー notime-stadcols は使っていない");
   // 全社を見る広告タブと、1店を見る店舗ページとで、見たい項目は違う。別のキーで持つ
   has(/"notime-adcols"/, "広告タブは notime-adcols で覚える");
-  has(/"notime-stadcols"/, "店舗ページは notime-stadcols で覚える（別のキー）");
   has(/if\(i>=0\)\{ if\(ST_AD_COLS\.length<=1\)\{cb\.checked=true;return;\}/, "最後の1つは消せない（空のカード列を作らない）");
   has(/ST_AD_COLS=AD_METRICS\.map\(m=>m\.k\)\.filter/, "並びは指標の定義順にそろえる（押した順に散らばらせない）");
 }
@@ -477,10 +484,10 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
   // ---- 店舗ページでもカードをタップしてグラフに線を出せること ----
   // 広告タブと同じ操作にそろえる。グラフは作り直さず同じ adChart を使う
   // （別に作ると、正規化のしかたや軸の決め方がいつの間にか食い違う）
-  has(/function adChart\(days,byDay,cols,tot\)/, "グラフは項目と合計を外から受け取れる");
-  has(/function adWireTip\(days,byDay,cols,sel\)/, "吹き出しも項目と置き場所を外から受け取れる");
-  has(/adChart\(days,byDay,gcols,p\)/, "店舗ページも同じ adChart を使う（作り直していない）");
-  has(/adWireTip\(days,byDay,gcols,"#stad-trend"\)/, "店舗ページのグラフにも吹き出しが付く");
+  has(/function adChart\(days,byDay,cols,tot,fmtX\)/, "グラフは項目・合計・横軸の見出しを外から受け取れる");
+  has(/function adWireTip\(days,byDay,cols,sel,fmtD\)/, "吹き出しも外から受け取れる");
+  has(/adChart\(days,byDay,gcols,p,fmtX\)/, "店舗ページも同じ adChart を使う（作り直していない）");
+  has(/adWireTip\(days,byDay,gcols,"#stad-trend",fmtD\)/, "店舗ページのグラフにも吹き出しが付く");
   has(/<div id="stad-trend"/, "店舗ページにグラフの置き場所がある");
   has(/class="card adcard\$\{off\?" goff":""\}" data-k="\$\{k\}"/, "店舗ページのカードはタップできる");
   // 全社の画面と1店の画面で、消した線が飛び火すると分かりにくい
@@ -493,6 +500,105 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
   // 日ごとの売上は、その日その店の実額。店舗集合は使わない（店は1つに決まっている）
   has(/a\.sids=null; a\.ex=M\("ex"\)\.calc\(sumRows\(rowsIn\(d,d,id\)\)\)\|\|0;/,
     "日ごとの売上はその日・その店の実額で入れる");
+
+  // ---- グラフの刻み（日次／週次／月次） ----
+  // 上の段＝いつを見るか（期間）、この段＝どう刻むか。役割が違うので見た目も変える
+  has(/<div class="seg agrain">/, "刻みは「ひとかたまりの切り替え」で出す（丸いチップの2行目にしない）");
+  has(/<button data-agrain="week">週次<\/button>/, "週次がある");
+  has(/<button data-agrain="month">月次<\/button>/, "月次がある");
+  has(/function adRoll\(byDay,grain\)/, "日ごとの集計を週・月にまとめ直す関数がある");
+  has(/state\.aGrain=b\.dataset\.agrain;/, "押すと刻みが変わる");
+  has(/"notime-adgrain"/, "選んだ刻みは端末に覚える");
+  // 期間と刻みは別もの。期間を押したときに刻みを戻してしまうと、
+  // 「3ヶ月を週次で見る」が毎回やり直しになる
+  {
+    const fn = src.slice(src.indexOf('document.querySelectorAll(".achip").forEach'),
+                         src.indexOf('// グラフの刻み（日次/週次/月次）'));
+    if (/aGrain/.test(fn)) {
+      console.log("  NG  期間を押すと刻みまで戻ってしまいます"); ng++;
+    } else console.log("  OK  期間を変えても刻みは保つ");
+  }
+}
+
+// --- 週次・月次にまとめても、比率が「比率の平均」にならないこと ----------
+//   ここが壊れやすい。日ごとのCTRを平均すると、広告費の少ない日が同じ重みで
+//   効いてしまい、実際とは別の数字になる。実額を足してから割ること。
+{
+  const f3 = src.indexOf("function adRoll(byDay,grain)");
+  const t3 = src.indexOf("// ---- 広告カードの「表示する項目」プルダウン ----");
+  if (f3 < 0 || t3 <= f3) { console.log("  NG  adRoll を取り出せませんでした"); ng++; }
+  else {
+    const c3 = { console, state: {} };
+    vm.createContext(c3);
+    vm.runInContext(
+      "const WK=['日','月','火','水','木','金','土'];\n" +
+      "function mondayOf(d){const t=new Date(d+'T00:00:00Z');" +
+      "t.setUTCDate(t.getUTCDate()-((t.getUTCDay()+6)%7));return t.toISOString().slice(0,10);}\n" +
+      "function mdLabel(f,t){const g=s=>`${+s.slice(5,7)}/${+s.slice(8,10)}`;" +
+      "return f===t?g(f):`${g(f)}〜${g(t)}`;}\n" +
+      "function addDays(d,n){const t=new Date(d+'T00:00:00Z');" +
+      "t.setUTCDate(t.getUTCDate()+n);return t.toISOString().slice(0,10);}\n" +
+      "function adZero(){ return {sp:0,im:0,rc:0,ck:0,fl:0,pv:0,lk:0,vt:0,vn:0,ex:0,vis:0,sids:null}; }\n" +
+      src.slice(f3, t3), c3);
+    // 8/3(月)〜8/9(日) の1週間。広告費もクリックも日によって大きく違う
+    const days = ["2026-08-03", "2026-08-04", "2026-08-05", "2026-08-06",
+                  "2026-08-07", "2026-08-08", "2026-08-09"];
+    const mk = `
+      const byDay=new Map();
+      const D=${JSON.stringify(days)};
+      // 8/3 は広告費9,000円・クリック90（CTR 1%）、他の6日は100円・クリック10（CTR 10%）
+      D.forEach((d,i)=>{const a=adZero();
+        a.sp=i===0?9000:100; a.im=i===0?9000:100; a.ck=i===0?90:10; a.pv=i===0?900:10;
+        a.ex=100000; byDay.set(d,a);});
+      const r=adRoll(byDay,"week");
+      JSON.stringify({keys:r.keys, sp:[...r.map.values()][0].sp, im:[...r.map.values()][0].im,
+        ck:[...r.map.values()][0].ck, pv:[...r.map.values()][0].pv,
+        x:r.fmtX(r.keys[0]), d:r.fmtD(r.keys[0])})`;
+    const r = JSON.parse(vm.runInContext(mk, c3));
+    const okc = (label, cond) => { console.log(`  ${cond ? "OK " : "NG "} ${label}`); if (!cond) ng++; };
+    okc("週次は月曜はじまりの1本にまとまる", r.keys.length === 1 && r.keys[0] === "2026-08-03");
+    okc(`広告費は実額の合計（${r.sp}円）`, r.sp === 9600);
+    okc(`クリックも実額の合計（${r.ck}）`, r.ck === 150);
+    // 実額÷実額なら 150/9600=1.56%。日ごとのCTRを平均すると (1+10*6)/7=8.7% になる
+    okc("CTRは 実額÷実額 になる（日ごとの比率を平均していない）",
+      Math.abs(r.ck / r.im * 100 - 1.5625) < 1e-9);
+    okc("CPCも 実額÷実額（9,600÷960=10円）", Math.abs(r.sp / r.pv - 10) < 1e-9);
+    okc(`横軸は週はじめの日付（${r.x}）`, r.x === "8/3");
+    okc(`吹き出しは週の範囲（${r.d}）`, /8\/3〜8\/9の週/.test(r.d));
+    // 月次
+    const m = JSON.parse(vm.runInContext(`
+      const b2=new Map();
+      b2.set("2026-07-31",Object.assign(adZero(),{sp:500,ex:1000}));
+      b2.set("2026-08-01",Object.assign(adZero(),{sp:100,ex:1000}));
+      b2.set("2026-08-12",Object.assign(adZero(),{sp:200,ex:1000}));
+      const r2=adRoll(b2,"month");
+      JSON.stringify({keys:r2.keys, aug:r2.map.get("2026-08-01").sp,
+        x:r2.fmtX("2026-08-01"), d:r2.fmtD("2026-08-01")})`, c3));
+    okc("月次は月ごとに1本", m.keys.length === 2);
+    okc(`同じ月の広告費はまとまる（${m.aug}円）`, m.aug === 300);
+    okc(`横軸は「8月」（${m.x}）`, m.x === "8月");
+    // 期間の端は月の途中までしか入っていない。「8月」とだけ出すと1ヶ月ぶんに見える
+    okc(`途中までの月は入っている範囲を添える（${m.d}）`, m.d === "2026年8月（8/1〜8/12の分）");
+    const full = vm.runInContext(`
+      const b4=new Map();
+      b4.set("2026-08-01",adZero()); b4.set("2026-08-31",adZero());
+      adRoll(b4,"month").fmtD("2026-08-01")`, c3);
+    okc(`月まるごとなら「2026年8月」だけ（${full}）`, full === "2026年8月");
+    // 日次のときは何も変えない（同じ入れ物をそのまま返す）
+    const d1 = vm.runInContext(`
+      const b3=new Map([["2026-08-03",adZero()]]);
+      const r3=adRoll(b3,"day"); (r3.map===b3)+"|"+r3.fmtX("2026-08-03")`, c3);
+    okc("日次は日ごとのまま（まとめ直さない）", d1.startsWith("true|"));
+    okc("日次の横軸は「8/3」", d1.endsWith("|8/3"));
+  }
+}
+
+// --- 指標の定義（いいね率・平均視聴時間）------------------------------
+{
+  const has = (re, label) => {
+    if (re.test(src)) console.log(`  OK  ${label}`);
+    else { console.log(`  NG  ${label}`); ng++; }
+  };
   has(/\{k:"lkr", name:"いいね率"/, "いいね率がある");
   has(/\{k:"vt",  name:"平均視聴時間"/, "平均視聴時間がある");
   has(/calc:p=>p\.im>0\?p\.lk\/p\.im\*100:null/, "いいね率＝いいね数÷表示回数");
