@@ -52,6 +52,44 @@ PAGE = 1000
 META_AD_DAYS = int(os.environ.get("META_AD_DAYS") or 180)
 
 
+_COLUMNS_CACHE: dict = {}
+
+
+def _columns(sb: Supabase, table: str) -> set:
+    """そのテーブルに実在する列名を PostgREST のスキーマから取る。
+
+    「取り込みの拡張で増えた列を、無い環境でも落ちずに拾う」ために使う。
+    以前は select を欲張った順に投げて、400が返ったら諦める作りだったが、
+    **1つでも存在しない列を混ぜると、その組み合わせごと落ちる**。
+    実際に video_avg_seconds（削除済みの旧列名）が1つ混じっていたせいで、
+    同じ組に入っていた likes / profile_visits まで丸ごと落ちて、
+    画面が「未取込」表示のままになっていた。存在する列だけを選べばこれは起きない。
+    """
+    if not _COLUMNS_CACHE:
+        try:
+            resp = sb._send("GET", f"{sb.url}/rest/v1/")
+            _COLUMNS_CACHE["spec"] = resp.json() if resp.status_code == 200 else {}
+        except Exception:
+            _COLUMNS_CACHE["spec"] = {}
+    defs = (_COLUMNS_CACHE.get("spec") or {}).get("definitions") or {}
+    return set(((defs.get(table) or {}).get("properties") or {}))
+
+
+def _select_cols(sb: Supabase, table: str, base: str, optional: list) -> str:
+    """必須の列＋実在する任意列だけを繋いだ select 文字列を作る。
+
+    スキーマが取れなかったときは base だけで進む（欠けても集計は止まらない）。
+    """
+    have = _columns(sb, table)
+    if not have:
+        return base
+    picked = [c for c in optional if c in have]
+    missing = [c for c in optional if c not in have]
+    if missing:
+        print(f"  （{table} に無い列は読み飛ばします: {', '.join(missing)}）")
+    return base + ("," + ",".join(picked) if picked else "")
+
+
 def _select_all(sb: Supabase, table: str, select: str,
                 order: str, extra: dict | None = None) -> list[dict]:
     """PostgREST のページ制限(1000件)を超えて全件取る。"""
@@ -471,20 +509,24 @@ def build_data(sb: Supabase) -> dict:
                     camp_override[str(cid)] = o.get("destination_id")
         except Exception:
             pass    # まだテーブルが無い環境でも動く
-        # follows / profile_visits / likes / video_avg_seconds は取り込みの拡張後に
-        # 増える列。まだ無い環境でも動くよう、付きで取りに行って失敗したら基本の列だけで
-        # 取り直す（列が増えたら自動で拾う）。
+        # follows / profile_visits / likes / video_avg_time_watched は取り込みの拡張後に
+        # 増える列。実在する列だけを選ぶので、まだ無い環境でも落ちない。
+        #
+        # 平均視聴時間の列名は video_avg_time_watched。以前ここに書いてあった
+        # video_avg_seconds は中身が入らないまま 2026-08-13 に削除された旧列で、
+        # 存在しない列を混ぜたせいで同じ組の likes / profile_visits ごと
+        # 取得に失敗していた（画面に「未取込」と出ていた原因）。
         BASE = ("date,account_name,campaign_id,campaign_name,destination_id,"
                 "spend,impressions,reach,clicks")
-        EXTRA = ",follows,profile_visits,likes,video_avg_seconds"
-        try:
-            meta_src = _select_all(sb, "meta_insights_daily", BASE + EXTRA, order="date")
-        except Exception:
-            try:
-                meta_src = _select_all(sb, "meta_insights_daily",
-                                       BASE + ",follows,profile_visits", order="date")
-            except Exception:
-                meta_src = _select_all(sb, "meta_insights_daily", BASE, order="date")
+        # landing_page_views は CPC の分母に要る。プロフアクセス数は最適化目標が
+        # PROFILE_VISIT のキャンペーンでしか取れず、リンク遷移のキャンペーンでは
+        # 分母が空のまま消化額だけが分子に乗る（福井でCPCが15円→66円に跳ねた原因）。
+        # video_plays は平均視聴時間を再生数で重み付けするために持つ。
+        OPTIONAL = ["follows", "profile_visits", "likes",
+                    "video_avg_time_watched", "video_plays", "landing_page_views"]
+        meta_src = _select_all(sb, "meta_insights_daily",
+                               _select_cols(sb, "meta_insights_daily", BASE, OPTIONAL),
+                               order="date")
         for r in meta_src:
             cid = r.get("campaign_id")
             did = r.get("destination_id")
@@ -516,8 +558,15 @@ def build_data(sb: Supabase) -> dict:
                 meta_rows[-1]["pv"] = int(r["profile_visits"] or 0)
             if r.get("likes") is not None:
                 meta_rows[-1]["lk"] = int(r["likes"] or 0)
-            if r.get("video_avg_seconds") is not None:
-                meta_rows[-1]["vt"] = float(r["video_avg_seconds"] or 0)
+            # 平均視聴時間は「1再生あたりの秒数」。行をまたいで足せない値なので、
+            # 画面側は再生数(vp)で重み付けして平均する。vp が無い行は単純平均に落とす。
+            if r.get("video_avg_time_watched") is not None:
+                meta_rows[-1]["vt"] = float(r["video_avg_time_watched"] or 0)
+            if r.get("video_plays") is not None:
+                meta_rows[-1]["vp"] = int(r["video_plays"] or 0)
+            # lp=リンク遷移数。CPCの分母を pv+lp にするために持つ
+            if r.get("landing_page_views") is not None:
+                meta_rows[-1]["lp"] = int(r["landing_page_views"] or 0)
         runs = sb.select("meta_sync_runs", {
             "select": "started_at,status,unmapped_campaigns,rows_upserted,since,until",
             "order": "started_at.desc", "limit": "1"})
@@ -545,16 +594,12 @@ def build_data(sb: Supabase) -> dict:
         ADBASE = ("date,ad_name,campaign_name,destination_id,"
                   "spend,impressions,reach,clicks")
         # profile_visits はクリエイティブ別のCPC（＝広告費÷プロフアクセス数）に要る。
-        # 列がまだ無い環境でも動くよう、多いほうから順に取り直す（増えたら自動で拾う）。
-        src = []
-        for extra_cols in (",video_avg_seconds,profile_visits,follows,likes",
-                           ",video_avg_seconds", ""):
-            try:
-                src = _select_all(sb, "meta_insights_daily_ad", ADBASE + extra_cols,
-                                  order="date", extra={"date": f"gte.{since}"})
-                break
-            except Exception:
-                continue
+        # 実在する列だけを選ぶ（列が増えたら自動で拾う。無くても落ちない）。
+        ADOPTIONAL = ["video_avg_time_watched", "video_plays", "profile_visits",
+                      "follows", "likes", "landing_page_views"]
+        src = _select_all(sb, "meta_insights_daily_ad",
+                          _select_cols(sb, "meta_insights_daily_ad", ADBASE, ADOPTIONAL),
+                          order="date", extra={"date": f"gte.{since}"})
         for r in src:
             did = r.get("destination_id")
             meta_ads.append({
@@ -568,8 +613,12 @@ def build_data(sb: Supabase) -> dict:
                 "rc": int(r.get("reach") or 0),
                 "ck": int(r.get("clicks") or 0),
             })
-            if r.get("video_avg_seconds") is not None:
-                meta_ads[-1]["vt"] = float(r["video_avg_seconds"] or 0)
+            if r.get("video_avg_time_watched") is not None:
+                meta_ads[-1]["vt"] = float(r["video_avg_time_watched"] or 0)
+            if r.get("video_plays") is not None:
+                meta_ads[-1]["vp"] = int(r["video_plays"] or 0)
+            if r.get("landing_page_views") is not None:
+                meta_ads[-1]["lp"] = int(r["landing_page_views"] or 0)
             # 未取得の日は付けない（付けないと画面で「—」になる。0にはしない）
             if r.get("profile_visits") is not None:
                 meta_ads[-1]["pv"] = int(r["profile_visits"] or 0)
