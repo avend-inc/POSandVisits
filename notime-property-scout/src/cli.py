@@ -123,7 +123,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--file", help="URLを1行ずつ書いたファイル")
     p.set_defaults(func=cmd_linkcheck)
     p = sub.add_parser("selftest"); p.set_defaults(func=cmd_selftest)
+    p = sub.add_parser("links"); p.set_defaults(func=cmd_links)
     return ap
+
+
+def cmd_links(args):
+    from .linksheet import main as links_main
+    links_main()
 
 
 def main(argv=None):
