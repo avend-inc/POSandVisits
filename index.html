@@ -2145,7 +2145,7 @@ function renderDetail(){
         <button class="gchip tmet" data-tmet="pr">購入率</button>
         <button class="gchip tmet" data-tmet="buy">仕入数</button>
         <button class="gchip tmet" data-tmet="aov">客単価</button>
-        ${(!FRAN&&newPanelOn(state.detail)&&adStoreHas(state.detail))?`<button class="gchip tmet" data-tmet="ad">広告費</button>`:""}
+        ${adShown(state.detail)?`<button class="gchip tmet" data-tmet="ad">広告費</button>`:""}
       </div>
       <div class="chart" id="trendchart"></div>
       <p class="note" id="trend-note" style="margin:6px 0 0"></p>
@@ -2187,7 +2187,7 @@ function renderDetail(){
       ${FRAN?'':`<h2 style="margin-top:16px">同ブランド全体 <span class="sub" style="font-weight:500">（${esc(rptBrand3(state.detail))}・比率のみ）</span></h2>
       <div class="tblwrap" style="margin-top:6px"><table class="heat" id="heatB"></table></div>`}
     </div>
-    ${(!FRAN&&newPanelOn(state.detail)&&adStoreHas(state.detail))?`<div class="panel">
+    ${adShown(state.detail)?`<div class="panel">
       <h2>広告（Meta） <span class="sub" id="stad-rng" style="font-weight:700;color:var(--accent)"></span></h2>
       <div class="adperiod" style="margin:7px 0 8px">
         <button class="chip achip" data-apreset="thismonth">今月</button>
@@ -3339,7 +3339,7 @@ async function makeStoreReport(sid,ymArg){
     //   広告は広告タブ、納品は在庫アプリにあり、レポートを作る人が別アプリから
     //   手で拾ってきていた。同じDBに乗ったので自動で載せられる。
     //   広告データも納品データも無い店では、このページごと出さない（空欄の紙を増やさない）。
-    const rAd=(newPanelOn(sid)&&adStoreHas(sid))?adStoreSum(sid,cf,ct):null;
+    const rAd=adShown(sid)?adStoreSum(sid,cf,ct):null;
     const rAdP=(rAd)?adStoreSum(sid,pf,pt):null;
     let rShip=null;
     try{ const sp3=await loadPurchases(sid); if(sp3&&sp3!=="none")rShip=sp3; }catch(_){}
@@ -3675,14 +3675,14 @@ function drawKpi2Detail(el,ctx){
 //   ・広告費は実額。上位3店平均は「各店の広告費の平均」（他の行と同じ作り方）
 //   ・CPCは AVEND定義＝広告費÷（プロフアクセス数＋リンク遷移数）。自店は実額どうしを割り、
 //     上位3店平均は各店のCPCの平均（＝店の平均であって、日の平均ではない）
-//   ・加盟店には広告データを配っていないので、この2行は出ない
+//   ・出す／出さないは adShown() 任せ（加盟店には出ない・広告の無い店には出ない）
 function kpi2AdRows(id,ctx){
-  if(window.FRANCHISEE||!newPanelOn(id)||!adStoreHas(id))return "";
+  if(!adShown(id))return "";
   const {selCol,wdCol,weCol,top3,baked}=ctx;
   const yen=v=>v==null?"—":YEN(Math.round(v))+"円";
-  const spOf=(sid,c)=>adStoreHas(sid)?adStoreSum(sid,c.from,c.to).sp:null;
+  const spOf=(sid,c)=>adShown(sid)?adStoreSum(sid,c.from,c.to).sp:null;
   // CPC＝広告費÷（プロフアクセス数＋リンク遷移数）。どちらも無い店・期間は「—」（0にしない）
-  const cpcOf=(sid,c)=>adStoreHas(sid)?adVal("cpc",adStoreSum(sid,c.from,c.to)):null;
+  const cpcOf=(sid,c)=>adShown(sid)?adVal("cpc",adStoreSum(sid,c.from,c.to)):null;
   const avg=vs=>{const a=vs.filter(v=>v!=null);return a.length?a.reduce((s,v)=>s+v,0)/a.length:null;};
   // 加盟店モード（baked）は他店を持たないので比較列を出さない
   const peerSp=baked?null:avg(top3.map(x=>spOf(x,selCol)));
@@ -4077,7 +4077,7 @@ async function aiWeeklyInsight(){
     // 週次推移（直近6週の税抜売上・来店・広告費・納品点数）
     //   広告と納品は在庫アプリ／広告タブにしか無く、統合前は同じ表に並べられなかった。
     //   これを渡すと「落ちた週は広告を止めていた」「納品が空いた週だった」まで書ける。
-    const adDayA=(newPanelOn(id)&&adStoreHas(id))?adSpendByDay(id):null;
+    const adDayA=adShown(id)?adSpendByDay(id):null;
     let shipA=null;
     try{ const sp2=await loadPurchases(id); if(sp2&&sp2!=="none")shipA=sp2; }catch(_){}
     const sumIn=(m,f2,t2)=>{ if(!m)return null; let x=0;
@@ -4520,15 +4520,11 @@ const WK=["日","月","火","水","木","金","土"];
 //   素直に足すとキャンペーンの本数ぶん売上が膨らむので、ここで足すのは広告の
 //   実額だけにして、比率（売上比率・CTR・FQ）は 実額÷実額 でその都度出す。
 //
-//   【段階導入】まず1店で確かめてから全店に広げる。
-//   NEWPANEL_STORES を空配列 [] にすると全店に出る。
+//   【出す／出さないの決め方】店名では決めない。判定は adShown() の1か所だけで、
+//   「加盟店ログインでない」かつ「その店の広告行がある」。以前は "いわきだけ" と
+//   いう店名の関門を挟んでいたが、確かめ終わったので外した。直営もFCも、
+//   2レジの店（下北沢）も、これで同じ作りになる。
 // ============================================================
-const NEWPANEL_STORES=["いわき"];
-function newPanelOn(id){
-  if(!NEWPANEL_STORES.length)return true;
-  const nm=(storeMeta(id)||{}).name||"";
-  return NEWPANEL_STORES.some(k=>nm.indexOf(k)>=0);
-}
 // 店舗ID → その店の広告行。結び目は店名ではなく si（POS店舗ID）。店名は表記ゆれがある。
 let AD_BYSID=null;
 function adBySid(){
@@ -4592,6 +4588,13 @@ function adSpendByDay(id){
 }
 // その店に広告データがあるか。無い店には列も段も出さない（空欄で幅を取らない）
 function adStoreHas(id){ const a=adBySid().get(id); return !!(a&&a.length); }
+// 店舗ページに広告を出すか。出す・出さないの判定はここ1か所に集める。
+//   ①加盟店ログイン（社外）には出さない … 他店と並べた比較を含むため。
+//     加盟店の読み込み経路はそもそも DATA.meta を取ってこないので今も出ないが、
+//     「データが無いから出ない」に頼ると、配り方を変えた日に黙って漏れる。
+//     社外との境目なので、画面側でも明示的に閉じておく。
+//   ②その店の広告行があるときだけ出す。
+function adShown(id){ return !window.FRANCHISEE && adStoreHas(id); }
 // 売上比率＝広告費÷税抜売上。売上が取れない期間は「—」（0にしない）
 function adSrOf(sp,ex){ return (ex!=null&&ex>0)?sp/ex*100:null; }
 // 平日／土日祝の集計。
@@ -4632,7 +4635,7 @@ function drawDayKpi(){
     return v;
   };
   // 広告費の列。売上・来店・天気と同じ行に並べると、「入れた日に動いたか」が縦に読める。
-  const showAd=newPanelOn(id)&&adStoreHas(id);
+  const showAd=adShown(id);
   const adDay=showAd?adSpendByDay(id):null;
   const adCell=v=>(v==null||v<=0)?"—":YEN(Math.round(v))+"円";
   const avgRow=(label,day,cls)=>`<tr class="avgrow${cls||""}"><th>${label}<small style="display:block;font-weight:500;color:var(--ink2);font-size:9px">直近2週·日平均</small></th>`+
@@ -4962,7 +4965,7 @@ function drawTrendDetail(){
   // 広告費はこの店に広告データがあるときだけ。無い店で選ばれたままにならないよう外す
   //   （店を移動しても選択が残るため。0で描くと「使っていない」ではなく「出していない」が
   //     0円として線になってしまう）
-  const adOK=newPanelOn(id)&&adStoreHas(id);
+  const adOK=adShown(id);
   if(!adOK&&state.trendSel.includes("ad")){
     state.trendSel=state.trendSel.filter(x=>x!=="ad");
     if(!state.trendSel.length)state.trendSel=["ex"];
