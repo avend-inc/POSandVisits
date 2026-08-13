@@ -241,6 +241,8 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
       function dayClass(d){ const w=new Date(d+"T00:00:00Z").getUTCDay(); return (w===0||w===6)?"we":"wd"; }
       function sumRows(rows){ let ex=0,hasEx=false; for(const r of rows){ if(r.ex!=null){ex+=r.ex;hasEx=true;} } return {ex,hasEx}; }
       function M(k){ return {calc:p=>p.hasEx?p.ex:null}; }
+      // グラフの既定（広告費＋プロフアクセス数）はここでは関係ないので空で置く
+      function adGoffDefault(){ return new Set(); }
     `
       // 実物の adZero / adAdd も入れる（店舗ページの集計はこれを使っている）
       + src.slice(src.indexOf("function adZero()"), src.indexOf("function adSales("))
@@ -430,7 +432,7 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
     console.log("  NG  古いキー notime-stadcols がまだ使われています"); ng++;
   } else console.log("  OK  古いキー notime-stadcols は使っていない");
   // 全社を見る広告タブと、1店を見る店舗ページとで、見たい項目は違う。別のキーで持つ
-  has(/"notime-adcols"/, "広告タブは notime-adcols で覚える");
+  has(/"notime-adcols2"/, "広告タブは notime-adcols2 で覚える（既定にプロフアクセス数を足したのでキーも変えた）");
   has(/if\(i>=0\)\{ if\(ST_AD_COLS\.length<=1\)\{cb\.checked=true;return;\}/, "最後の1つは消せない（空のカード列を作らない）");
   has(/ST_AD_COLS=AD_METRICS\.map\(m=>m\.k\)\.filter/, "並びは指標の定義順にそろえる（押した順に散らばらせない）");
 }
@@ -468,14 +470,20 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
   // ---- CPC は画面のどこでも「広告費÷プロフアクセス数」 ----
   // 以前はカードのCPC（プロフアクセス基準）と表の「クリック単価」（クリック基準）が
   // 同じ画面に並んでいて、どちらの数字を見ているのか分からなかった。
-  has(/calc:p=>p\.pv>0\?p\.sp\/p\.pv:null, need:"pv"/, "カードのCPC＝広告費÷プロフアクセス数");
+  // 分母は「プロフアクセス数＋リンク遷移数」。最適化目標が PROFILE_VISIT の
+  // キャンペーンしか pv を返さず、リンク遷移の広告では分母が空のまま消化額だけ
+  // 分子に乗ってCPCが跳ねるため（2026-08 の福井で 15円→66円）
+  has(/function adDen\(p\)\{ return \(p\.pv\|\|0\)\+\(p\.lp\|\|0\); \}/,
+    "CPCの分母＝プロフアクセス数＋リンク遷移数");
+  has(/calc:p=>adDen\(p\)>0\?p\.sp\/adDen\(p\):null, need:\{any:\["pv","lp"\]\}/,
+    "カードのCPCも同じ分母を使う");
   has(/<th>CTR<\/th><th>CPC<\/th><\/tr>/, "キャンペーン別の列名はCPC");
   has(/<th>CTR<\/th><th>CPC<\/th><th>FQ<\/th><\/tr>/, "クリエイティブ別の列名もCPC");
-  has(/\$\{\(e\.pvn&&e\.pv>0\)\?YEN\(Math\.round\(e\.sp\/e\.pv\)\)\+"円":"—"\}/,
-    "表のCPCもプロフアクセス基準（クリック数では割らない）");
+  has(/\$\{\(e\.dnn&&\(e\.pv\+e\.lp\)>0\)\?YEN\(Math\.round\(e\.sp\/\(e\.pv\+e\.lp\)\)\)\+"円":"—"\}/,
+    "表のCPCも同じ分母（クリック数では割らない）");
   // プロフアクセス数が未取込の日を0として足すと、CPCが実際より安く出る
-  has(/if\(r\.pv!=null\)\{ e\.pv\+=r\.pv\|\|0; e\.pvn\+\+; \}/,
-    "プロフアクセス数は値がある行だけ数える（0で薄めない）");
+  has(/if\(r\.pv!=null\|\|r\.lp!=null\)\{ e\.pv\+=r\.pv\|\|0; e\.lp\+=r\.lp\|\|0; e\.dnn\+\+; \}/,
+    "分母は値がある行だけ数える（0で薄めない）");
   if (/店舗ページ[\s\S]{0,400}クリック単価|<th>クリック単価<\/th>/.test(
       src.slice(src.indexOf("// ---- キャンペーン別 ----")))) {
     console.log("  NG  店舗ページの表に「クリック単価」が残っています"); ng++;
@@ -512,8 +520,41 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
   has(/<div id="stad-trend"/, "店舗ページにグラフの置き場所がある");
   has(/class="card adcard\$\{off\?" goff":""\}" data-k="\$\{k\}"/, "店舗ページのカードはタップできる");
   // 全社の画面と1店の画面で、消した線が飛び火すると分かりにくい
-  has(/"notime-stadgoff"/, "店舗ページの非表示は notime-stadgoff で覚える");
-  has(/"notime-adgoff"/, "広告タブの非表示は notime-adgoff のまま（別のキー）");
+  has(/"notime-stadgoff2"/, "店舗ページの非表示は notime-stadgoff2 で覚える");
+  has(/"notime-adgoff2"/, "広告タブの非表示は notime-adgoff2（別のキー）");
+
+  // ---- グラフに最初から引くのは2本だけ ----
+  // カードは8枚出すが、線を8本引くと重なって何も読めない（実際そうなっていた）
+  has(/const AD_GRAPH_DEFAULT=\["sp","pv"\];/, "最初から引くのは 広告費 と プロフアクセス数");
+  has(/const adGoffDefault=\(\)=>new Set\(AD_METRICS\.map\(m=>m\.k\)\.filter\(k=>!AD_GRAPH_DEFAULT\.includes\(k\)\)\)/,
+    "それ以外は最初は消しておく（押せば出る）");
+  has(/return adGoffDefault\(\);\n\}\)\(\);/, "広告タブの既定に使う");
+  // カードに無い項目は線にできないので、既定のカードにも入れておく
+  has(/const AD_DEFAULT=\["sp","pv","sr","ctr","cpc"\];/, "広告タブの既定カードにプロフアクセス数を入れる");
+  // 既定を変えたときはキーも変える。変えないと、一度でも開いた端末に古い既定が残る
+  {
+    const olds = ['"notime-adgoff"', '"notime-stadgoff"', '"notime-adcols"'];
+    const left = olds.filter((k) => new RegExp(k.replace(/"/g, '"') + "[^2]").test(src));
+    if (left.length) {
+      console.log("  NG  古いキーが残っています: " + left.join(", ")); ng++;
+    } else console.log("  OK  古いキーは使っていない（既定の変更が効く）");
+  }
+
+  // ---- 押した期間を画面ごとに覚える ----
+  has(/function adPeriodSave\(key,kind,from,to\)/, "期間を覚える道具がある");
+  has(/function adPeriodRestore\(key\)/, "覚えた期間を戻す道具がある");
+  // 「今月」は意味で覚える。日付をそのまま覚えると、翌月に開いても先月のままになる
+  has(/if\(v\.kind&&v\.kind!=="custom"\)\{\n\s*const r=presetRange\(v\.kind\);/,
+    "プリセットは意味で覚える（次に開くとそのときの今月になる）");
+  has(/if\(v\.from&&v\.to\)return \[clampLo\(v\.from\),clampHi\(v\.to\),"custom"\];/,
+    "日付を直接いじったときだけ、その日付を覚える");
+  // 画面ごとに別のキー。共有すると片方を変えたらもう片方も変わる
+  has(/"notime-adtab-period"/, "広告タブは自分のキーで覚える");
+  has(/"notime-stad-period"/, "店舗ページの広告は自分のキーで覚える");
+  has(/adPeriodSave\("notime-stad-period",state\.aKind,f,t\);/, "店舗ページの期間ボタンを覚える");
+  has(/const r=adPeriodRestore\("notime-adtab-period"\);/, "広告タブは開いたときに覚えた期間を使う");
+  has(/const r=adPeriodRestore\("notime-stad-period"\)\|\|presetRange\("d28"\)\.concat\("d28"\);/,
+    "店舗ページも同じ（無ければ直近28日）");
   has(/let ST_AD_GOFF=/, "店舗ページの非表示は別に持つ");
   // 全部消すとグラフが空の箱になる。何をすれば戻るかを書いておく
   has(/グラフに出す項目がありません。上のカードをタップすると、その項目をグラフに出せます。/,
@@ -623,13 +664,15 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
   has(/\{k:"lkr", name:"いいね率"/, "いいね率がある");
   has(/\{k:"vt",  name:"平均視聴時間"/, "平均視聴時間がある");
   has(/calc:p=>p\.im>0\?p\.lk\/p\.im\*100:null/, "いいね率＝いいね数÷表示回数");
-  // 平均視聴時間は Meta が返す値をそのまま使う。こちらで重み付けなどの加工はしない
-  has(/calc:p=>p\.vn>0\?p\.vt\/p\.vn:null/, "平均視聴時間は値がある行の平均で出す");
-  has(/if\(r\.vt!=null\)\{ a\.vt\+=r\.vt\|\|0; a\.vn\+\+; \}/, "視聴時間が無い行は数えない（0秒で薄めない）");
-  has(/if\(r\.vt!=null\)\{ e\.vt\+=r\.vt\|\|0; e\.vn\+\+; \}/, "クリエイティブ別も同じ扱い");
-  if (/p\.vw|e\.vw/.test(src)) {
-    console.log("  NG  平均視聴時間に重み付けの計算が残っています"); ng++;
-  } else console.log("  OK  平均視聴時間に余計な計算を入れていない");
+  // 平均視聴時間は「1再生あたりの秒数」なので、行をまたいで単純平均すると
+  // 10回しか再生されなかった広告と1万回再生された広告が同じ重みになる。
+  // Σ(秒数×再生数)÷Σ再生数 にする。再生数が来ていない行しか無いときだけ単純平均。
+  has(/calc:p=>p\.vp>0\?p\.vw\/p\.vp:\(p\.vn>0\?p\.vt\/p\.vn:null\)/,
+    "平均視聴時間は再生数で重み付けする");
+  has(/if\(r\.vp>0\)\{ a\.vw\+=\(r\.vt\|\|0\)\*r\.vp; a\.vp\+=r\.vp; \}/,
+    "重み付けは Σ(秒数×再生数) と Σ再生数 で持つ");
+  has(/a\.vt\+=r\.vt\|\|0; a\.vn\+\+;/, "再生数が無い行のために単純平均も残す");
+  has(/val:e=>e\.vp>0\?e\.vw\/e\.vp:\(e\.vn>0\?e\.vt\/e\.vn:null\)/, "クリエイティブ別も同じ扱い");
 }
 
 // --- AIのまとめの見せ方 ------------------------------------------------
@@ -744,13 +787,11 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
   has(/function adSegOk\(r\)/, "行がその区分に入るかの判定が1か所にある");
   has(/function adOwnOf\(r\)/, "区分そのものを出す関数がある");
   has(/!AD_HIDE\.has\(r\.st\|\|UNMAPPED\)&&adSegOk\(r\)/, "集計の元が区分で絞られる");
-  has(/if\(!adSegOk\(r\)\)continue;\s+\/\/ 点＝店舗/, "散布図も区分で絞る（点＝店舗なので）");
   has(/for\(const r of \(DATA\.meta\|\|\[\]\)\)if\(adSegOk\(r\)\)set\.add/,
     "店舗プルダウンもその区分の店だけ");
   // 見出し（直営店／FC店／区分なし）の振り分けも同じ判定を通すこと。
   // ここが焼き付けの r.ow のままだと、FCページの中に「直営店」の見出しが出る
   has(/const ow=adOwnOf\(r\);/, "KPI表の見出しも同じ判定を通す");
-  has(/own:adOwnOf\(r\)/, "散布図の色分けも同じ判定を通す");
   if (/e=\{own:r\.ow/.test(src)) {
     console.log("  NG  焼き付けの r.ow で区分を決めている箇所が残っています"); ng++;
   } else console.log("  OK  焼き付けの r.ow で区分を決めている箇所は無い");
