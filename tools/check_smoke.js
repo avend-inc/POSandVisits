@@ -83,7 +83,9 @@ for (let i = 0; i < DAYS; i++) {
       d: day(i), an: "詰め放題（リール）", c: "CAMP" + s.id,   // 店をまたいで同じ広告名
       ai: "ad" + s.id, ac: "1234567890",
       st: s.name, si: s.id,
-      sp: stop ? 0 : 600 + i * 3, im: stop ? 0 : 5000, rc: 4000, ck: stop ? 0 : 120,
+      // 1日あたり AD_CR_MINSPEND(1,000円) 未満はランキングから外れる。
+      // それだと表が常に空になり、検査にならないので上回る額にしてある
+      sp: stop ? 0 : 1800 + i * 10, im: stop ? 0 : 5000, rc: 4000, ck: stop ? 0 : 120,
       ...(i % 3 !== 0 ? { pv: 80 + i } : {}), ...(i % 4 !== 0 ? { lp: 30 + i } : {}),
       ...(i % 5 !== 0 ? { vt: 4, vp: 90 } : {}),
     });
@@ -156,6 +158,15 @@ for (const [name, query] of VIEWS) {
   ok(`${name}：「読み込めませんでした」が出ていない`, !/class="err"/.test(view),
     (/class="err">([^<]*)/.exec(view) || [])[1]);
   ok(`${name}：中身が描かれている`, body.replace(/<[^>]*>/g, "").trim().length > 80);
+  // 表が「該当なし」のまま通ると、検査したつもりで何も見ていないことになる。
+  // クリエイティブ別があるのは広告タブだけ（CSSにも #adcrtbl が出てくるので、
+  // 文字列の有無ではなく画面で判定する）
+  if (name.startsWith("広告タブ")) {
+    const t = /<table class="kmat" id="adcrtbl">([\s\S]*?)<\/table>/.exec(view);
+    const rows = t ? (t[1].match(/<tr>/g) || []).length : 0;
+    ok(`${name}：クリエイティブ別に行が出ている（${rows - 1}件）`,
+      rows > 1 && !/この条件に合うクリエイティブがありません/.test(t ? t[1] : ""));
+  }
 }
 
 // ---- 触っているのに存在しない id が無いか ------------------------------
