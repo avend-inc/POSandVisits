@@ -591,7 +591,9 @@ def build_data(sb: Supabase) -> dict:
     meta_ads: list[dict] = []
     try:
         since = (datetime.now(JST).date() - timedelta(days=META_AD_DAYS)).isoformat()
-        ADBASE = ("date,ad_name,campaign_name,destination_id,"
+        # ad_id / account_id は広告マネージャへのリンクを作るのに要る
+        #（数字を見てそのまま直しに行けるように、クリエイティブ名からリンクする）。
+        ADBASE = ("date,ad_id,account_id,ad_name,campaign_name,destination_id,"
                   "spend,impressions,reach,clicks")
         # profile_visits はクリエイティブ別のCPC（＝広告費÷プロフアクセス数）に要る。
         # 実在する列だけを選ぶ（列が増えたら自動で拾う。無くても落ちない）。
@@ -605,6 +607,9 @@ def build_data(sb: Supabase) -> dict:
             meta_ads.append({
                 "d": str(r["date"]),
                 "an": r.get("ad_name") or "(名称なし)",
+                # ai=広告ID / ac=広告アカウントID。広告マネージャのURLに使う
+                "ai": str(r["ad_id"]) if r.get("ad_id") is not None else None,
+                "ac": str(r["account_id"]) if r.get("account_id") is not None else None,
                 "c": r.get("campaign_name") or "(名称なし)",
                 "st": dest_name.get(str(did)) if did else None,
                 "si": dest_sid.get(str(did)) if did else None,
