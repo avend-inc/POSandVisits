@@ -232,7 +232,11 @@ def build_data(sb: Supabase) -> dict:
                 "ex_u": 0.0, "ex_m": 0.0, "v_staffed": None,
                 "bag_in": 0.0, "bag_ex": 0.0, "bag_q": 0.0, "reji_in": 0.0, "reji_ex": 0.0,
                 "coup_in": 0.0, "coup_q": 0.0,   # クーポン割引額・点数（レジ袋と分離）
-                "kom_ex": 0.0}                   # 小物の税抜売上（商品単価の分子から除く用）
+                "kom_ex": 0.0,                   # 小物の税抜売上（商品単価の分子から除く用）
+                # nocat_ex=「明細なし」実売上の税抜（SIPOS取引照会など＝点数の裏付けが無い売上）。
+                #   商品単価の分子から差し引く（点数が分母に入らないため、分子分母を揃える）。
+                #   客単価・税抜売上には残す（実売上だから）。
+                "nocat_ex": 0.0}
 
     def _num(v):
         try:
@@ -265,6 +269,10 @@ def build_data(sb: Supabase) -> dict:
                 rec["ex_est"] += ex_tax
             else:
                 rec["ex"] += ex_tax
+                # 実額だが「明細なし」＝商品明細(点数)が無い売上（SIPOS取引照会 等）。
+                # 商品単価の分子から差し引く用に控える（点数が分母に入らないため）。
+                if lc0 in NOCAT:
+                    rec["nocat_ex"] += ex_tax
             # 税抜売上を「無人営業／有人営業」に振り分ける（レジ単位で判定）。
             rec["ex_u" if _pos_mode(sid, r.get("pos_name")) == "u" else "ex_m"] += ex_tax
             rec["tx"] += 1
@@ -393,6 +401,8 @@ def build_data(sb: Supabase) -> dict:
          # komEx=小物の税抜売上。商品単価(税抜)の分子から差し引く（分母の点数も小物を
          #   除いているため）。客単価は小物を残すので差し引かない。
          "komEx": round(v["kom_ex"]),
+         # nocatEx=「明細なし」実売上の税抜。商品単価の分子から差し引く（点数が無い売上のため）。
+         "nocatEx": round(v["nocat_ex"]),
          # クーポン：利用数(点数)と割引額（値引はマイナス金額で入ることが多い）
          "coup": round(v["coup_q"]), "coupAmt": round(v["coup_in"]),
          # 無人／有人の売上内訳（exU/exM）と、有人来店の手入力（vm）。該当する店・日だけ付く。
@@ -811,6 +821,8 @@ def write_dash_tables(sb: Supabase, data: dict) -> None:
         "bag_in": r.get("bag"), "bag_ex": r.get("bagEx"), "bag_qty": r.get("bagq"),
         # komono_ex=小物の税抜売上（商品単価の分子から差し引く用）。
         "komono_ex": r.get("komEx"),
+        # nocat_ex=「明細なし」実売上の税抜（点数の無い売上／商品単価の分子から差し引く用）。
+        "nocat_ex": r.get("nocatEx"),
         "coupon_qty": r.get("coup"), "coupon_amount": r.get("coupAmt"),
         # exU/exM/vm は該当する店・日にしか付かない。無ければ null のまま。
         "sales_ex_unmanned": r.get("exU"), "sales_ex_manned": r.get("exM"),
