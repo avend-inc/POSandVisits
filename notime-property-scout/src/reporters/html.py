@@ -99,10 +99,15 @@ class HtmlReporter:
             properties,
             key=lambda p: (_RANK_ORDER.get(p.rank, 9), -(p.score or 0)),
         )
-        ab = [p for p in ordered if p.rank in ("A", "B")]
-        c = [p for p in ordered if p.rank == "C"]
-        need = [p for p in ordered if p.rank == "要確認"]
-        excluded = [p for p in ordered if p.rank == "除外"]
+        # 個別物件URLが無い（＝リンクが表示できない）物件は主表に出さない（§9.1）。
+        # 一覧URLは不可なので detailPage/個別ドメインを含むものだけ有効なリンクとみなす。
+        def _linkless(p):
+            u = p.detail_url or ""
+            return not ("detailPage" in u or "fudosan.cbiz.ne.jp" in u)
+        ab = [p for p in ordered if p.rank in ("A", "B") and not _linkless(p)]
+        c = [p for p in ordered if p.rank == "C" and not _linkless(p)]
+        need = [p for p in ordered if p.rank == "要確認" and not _linkless(p)]
+        excluded = [p for p in ordered if p.rank == "除外" or _linkless(p)]
 
         broken = ", ".join(summary.broken_sources) if summary.broken_sources else "なし"
         body = (

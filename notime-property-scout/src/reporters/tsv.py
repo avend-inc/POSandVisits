@@ -27,8 +27,11 @@ class TsvReporter:
         self.out_dir.mkdir(parents=True, exist_ok=True)
         path = self.out_dir / f"{run_date.isoformat()}.tsv"
         lines = []
-        # 除外（ゲート不通過）は貼り付け対象から外し、要確認は末尾に置く並びにする。
-        rows = [p for p in properties if p.rank != "除外"]
+        # 除外（ゲート不通過）と、個別URLが無い物件は貼り付け対象から外す（§9.1）。
+        def _has_link(p):
+            u = p.detail_url or ""
+            return "detailPage" in u or "fudosan.cbiz.ne.jp" in u
+        rows = [p for p in properties if p.rank != "除外" and _has_link(p)]
         for p in rows:
             lines.append("\t".join(_clean(c) for c in row9(p)))
         path.write_text("\n".join(lines), encoding="utf-8")
