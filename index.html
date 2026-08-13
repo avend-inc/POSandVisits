@@ -383,6 +383,10 @@
   #adcrtbl th:first-child,#adcrtbl td:first-child{white-space:normal;overflow-wrap:anywhere;
     max-width:min(170px,42vw);min-width:120px}
   #adcrtbl .adname{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  /* 広告マネージャへのリンク。押せることが分かる程度に色を付け、下線はホバー時だけ */
+  a.adlink{color:var(--accent,#1e6fd9);text-decoration:none;cursor:pointer}
+  a.adlink:hover{text-decoration:underline}
+  a.adlink .exto{font-size:10px;margin-left:3px;opacity:.7}
   /* 未紐付けキャンペーンの割り当て。スマホでは縦積みにして、はみ出させない */
   .admaprow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 0;border-top:1px solid var(--line)}
   .admaprow:first-child{border-top:none}
@@ -1717,6 +1721,26 @@ function drawAds(){
 }
 
 
+// 広告マネージャで、その広告を選んだ状態で開くURL。
+//   数字を見たあと、そのまま直しに行けるようにするためのリンク。
+//   同じ広告名が複数の広告IDに分かれていることがある（同じ名前を別の広告セットで
+//   使い回す）ので、まとめて選択して開く。
+//   IDは数字だけを通す（data.json の値をそのままURLに入れないため）。
+function adsManagerUrl(acc,ids){
+  const a=String(acc||"").replace(/[^0-9]/g,"");
+  const list=[...(ids||[])].map(x=>String(x).replace(/[^0-9]/g,"")).filter(Boolean).slice(0,25);
+  if(!a||!list.length)return null;
+  return `https://adsmanager.facebook.com/adsmanager/manage/ads`+
+         `?act=${a}&selected_ad_ids=${list.join(",")}`;
+}
+// 広告名のセル。リンクを張れるときだけ <a> にする（IDが無い古いデータでも崩れない）
+function adNameCell(nm,url,prefix){
+  const inner=(prefix||"")+esc(nm);
+  return url
+    ? `<a class="adname adlink" href="${url}" target="_blank" rel="noopener" title="${esc(nm)}｜広告マネージャで開く">${inner}<span class="exto">↗</span></a>`
+    : `<div class="adname" title="${esc(nm)}">${inner}</div>`;
+}
+
 // ============================================================
 // クリエイティブ別（広告＝ad単位）
 //   広告単位のデータには プロフアクセス数 が無いため、ここのCPCは
@@ -1741,7 +1765,8 @@ function adDrawCreatives(shortName){
     // 区切りはエスケープで書く（生の制御文字を混ぜない）。区切りが無いと
     // 店1の広告「23」と店12の広告「3」が同じキーになってしまう
     const key=(r.si==null?"?":r.si)+"\u001f"+r.an;
-    let e=g.get(key); if(!e){e={nm:r.an,sp:0,im:0,ck:0,rc:0,vt:0,vn:0,vw:0,vp:0,st:r.st||null,days:new Set()};g.set(key,e);}
+    let e=g.get(key); if(!e){e={nm:r.an,sp:0,im:0,ck:0,rc:0,vt:0,vn:0,vw:0,vp:0,st:r.st||null,days:new Set(),ids:new Set(),acc:null};g.set(key,e);}
+    if(r.ai)e.ids.add(r.ai); if(r.ac)e.acc=r.ac;
     e.sp+=r.sp||0;e.im+=r.im||0;e.ck+=r.ck||0;e.rc+=r.rc||0;
     e.days.add(r.d);
     // 平均視聴時間は1再生あたりの秒数。再生数で重み付けして平均する
@@ -1787,7 +1812,7 @@ function adDrawCreatives(shortName){
   const body=top.length?top.map(([,e],i)=>{
     // 1行＝1店の1広告。店は1つに決まるので「他◯店」は出ない
     const where=e.st?esc(shortName(e.st)):`<span style="color:#b8860b">未紐付け</span>`;
-    return `<tr><td style="text-align:left"><div class="adname" title="${esc(e.nm)}"><b>${i+1}.</b> ${esc(e.nm)}</div>`+
+    return `<tr><td style="text-align:left">${adNameCell(e.nm,adsManagerUrl(e.acc,e.ids),`<b>${i+1}.</b> `)}`+
       `<div class="sub" style="font-weight:500">${where}／1日 ${YEN(Math.round(e.spd))}円</div></td>`+
       COLS.map(c=>`<td>${ready(c)?F(c.val(e),c.fmt):"—"}</td>`).join("")+`</tr>`;
   }).join(""):`<tr><td colspan="${COLS.length+1}" class="sub">この条件に合うクリエイティブがありません</td></tr>`;
@@ -3953,7 +3978,8 @@ function drawStoreAds(){
   const cg=new Map();
   for(const r of (DATA.metaAds||[])){
     if(r.si!==id||r.d<f||r.d>t)continue;
-    let e=cg.get(r.an); if(!e){e={sp:0,im:0,ck:0,rc:0,pv:0,lp:0,dnn:0,days:new Set()};cg.set(r.an,e);}
+    let e=cg.get(r.an); if(!e){e={sp:0,im:0,ck:0,rc:0,pv:0,lp:0,dnn:0,days:new Set(),ids:new Set(),acc:null};cg.set(r.an,e);}
+    if(r.ai)e.ids.add(r.ai); if(r.ac)e.acc=r.ac;
     e.sp+=r.sp||0;e.im+=r.im||0;e.ck+=r.ck||0;e.rc+=r.rc||0;e.days.add(r.d);
     if(r.pv!=null||r.lp!=null){ e.pv+=r.pv||0; e.lp+=r.lp||0; e.dnn++; }
   }
@@ -3961,7 +3987,7 @@ function drawStoreAds(){
   const top=crs.slice(0,5);
   const crt=document.getElementById("stad-cr");
   if(crt){
-    const row=([nm,e],i)=>`<tr><td style="text-align:left"><div class="adname" title="${esc(nm)}"><b>${i+1}.</b> ${esc(nm)}</div>`+
+    const row=([nm,e],i)=>`<tr><td style="text-align:left">${adNameCell(nm,adsManagerUrl(e.acc,e.ids),`<b>${i+1}.</b> `)}`+
       `<div class="sub" style="font-weight:500">${e.days.size}日／1日 ${YEN(Math.round(e.days.size?e.sp/e.days.size:0))}円</div></td>`+
       `<td>${YEN(Math.round(e.sp))}円</td><td>${NUM(e.im)}</td><td>${NUM(e.ck)}</td>`+
       `<td>${e.im>0?F1(e.ck/e.im*100)+"%":"—"}</td>`+
