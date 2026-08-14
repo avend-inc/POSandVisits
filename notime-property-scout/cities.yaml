@@ -1,0 +1,60 @@
+# 対象市（§6.0）。都市を追加する手順はこの3ステップのみ：
+#   1. ここに1行足す
+#   2. python -m src.discover add-city --name X市 --pref Y県  （§5.2・第3段階）
+#   3. pending になった候補ソースを人がレビューして verified にする
+#
+# 注: 仕様書§6.0 は "name: 福島市 ; pref: ..." のインライン記法だが、標準YAMLでは
+#     セミコロンが値に混ざってしまうため、ここでは正しいYAMLマッピングで表現している。
+#     フィールドは仕様書のとおり（name / pref / jis / main_station / priority）。
+#
+# pref_roma は連合隊(§5.1.1)等の area パラメータ用ローマ字県名。
+# warn: §6.0.1 の商圏未解決フラグ（true の市はランクA判定を出さない＝flags に「商圏未確定」）。
+
+cities:
+  - name: 福島市
+    pref: 福島県
+    pref_roma: fukushima
+    jis: "07201"
+    main_station: 福島駅
+    priority: 1
+    warn: false
+
+  - name: 秋田市
+    pref: 秋田県
+    pref_roma: akita
+    jis: "05201"
+    main_station: 秋田駅
+    priority: 1
+    warn: false
+
+  - name: 富士市
+    pref: 静岡県
+    pref_roma: shizuoka
+    jis: "22210"
+    main_station: 富士駅
+    priority: 2
+    warn: true          # §6.0.1 独立度0.209 パターンB
+
+  - name: 大分市
+    pref: 大分県
+    pref_roma: oita
+    jis: "44201"
+    main_station: 大分駅
+    priority: 2
+    warn: true          # §6.0.1 広域独立度低・40km圏未取得
+
+  - name: 宮崎市
+    pref: 宮崎県
+    pref_roma: miyazaki
+    jis: "45201"
+    main_station: 宮崎駅
+    priority: 1
+    warn: false
+
+  - name: 長崎市
+    pref: 長崎県
+    pref_roma: nagasaki
+    jis: "42201"
+    main_station: 長崎駅
+    priority: 1
+    warn: false

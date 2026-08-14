@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>物件レビュー</title>
+<style>
+  :root{--ink:#1a1a1a;--ink2:#6b6b6b;--bg:#f5f5f3;--surface:#fff;--border:#e4e4e4;
+    --accent:#b8860b;--ok:#1b8a3a;--ng:#c0392b;--hold:#8a6d00;--shadow:0 1px 3px rgba(0,0,0,.06);}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:system-ui,-apple-system,"Hiragino Kaku Gothic ProN",sans-serif;padding-bottom:70px}
+  header{background:var(--surface);border-bottom:1px solid var(--border);padding:14px 16px;
+    position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:10px}
+  header h1{font-size:16px;margin:0;flex:1}
+  .hbtn{border:1px solid var(--border);background:var(--surface);color:var(--ink2);
+    border-radius:9px;padding:7px 11px;font-size:12px;cursor:pointer;text-decoration:none;white-space:nowrap}
+  main{max-width:720px;margin:0 auto;padding:12px}
+  .filters{display:flex;gap:6px;overflow-x:auto;padding:4px 0 10px}
+  .chip{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:999px;
+    padding:7px 13px;font-size:13px;font-weight:700;white-space:nowrap;cursor:pointer}
+  .chip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:14px;
+    margin:10px 0;box-shadow:var(--shadow)}
+  .card.v-OK{border-left:5px solid var(--ok)} .card.v-NG{border-left:5px solid var(--ng)}
+  .card.v-保留{border-left:5px solid var(--hold)}
+  .top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px}
+  .badge{font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;color:#fff}
+  .badge.hit{background:var(--ok)} .badge.info{background:#888}
+  .city{font-size:12px;color:var(--ink2)}
+  .name{font-size:16px;font-weight:700;margin:2px 0 6px}
+  .specs{display:grid;grid-template-columns:1fr 1fr;gap:5px 12px;margin:6px 0}
+  .specs label{display:block;font-size:11px;color:var(--ink2)} .specs b{font-size:15px}
+  .note{font-size:12px;color:var(--ink2);margin:4px 0 8px;line-height:1.6}
+  .links{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 10px}
+  .links a{font-size:13px;text-decoration:none;color:#1558d6;border:1px solid #ccd;border-radius:8px;padding:6px 10px}
+  .verdicts{display:flex;gap:8px;margin:8px 0}
+  .vb{flex:1;border:1px solid var(--border);background:#fafafa;border-radius:10px;padding:11px 0;
+    font-size:14px;font-weight:700;cursor:pointer;color:var(--ink2)}
+  .vb.sel-OK{background:var(--ok);color:#fff;border-color:var(--ok)}
+  .vb.sel-NG{background:var(--ng);color:#fff;border-color:var(--ng)}
+  .vb.sel-保留{background:var(--hold);color:#fff;border-color:var(--hold)}
+  textarea{width:100%;border:1px solid var(--border);border-radius:10px;padding:10px;font-size:14px;
+    font-family:inherit;resize:vertical;min-height:52px}
+  .saved{font-size:12px;color:var(--ok);height:16px;margin-top:4px}
+  .msg{padding:30px 16px;color:var(--ink2);text-align:center;line-height:1.8}
+  .loginbtn{display:inline-block;margin-top:12px;background:var(--accent);color:#fff;border:none;
+    border-radius:10px;padding:11px 20px;font-size:15px;font-weight:700;cursor:pointer}
+</style></head>
+<body>
+<header>
+  <a class="hbtn" href="index.html?g=own">‹ 戻る</a>
+  <h1>物件レビュー</h1>
+  <button class="hbtn" id="logoutbtn" style="display:none">ログアウト</button>
+</header>
+<main>
+  <div class="filters" id="filters" style="display:none">
+    <button class="chip on" data-f="todo">未判定</button>
+    <button class="chip" data-f="OK">OK</button>
+    <button class="chip" data-f="NG">NG</button>
+    <button class="chip" data-f="保留">保留</button>
+    <button class="chip" data-f="all">全部</button>
+  </div>
+  <div id="list"><div class="msg">読み込み中…</div></div>
+</main>
+
+<script>
+"use strict";
+// POSandVisits ダッシュボードと同じ Supabase / 同じログイン(notime-auth)を共有する。
+const CONFIG_URL="https://qcdxhsrnlsgpntbiellh.supabase.co/storage/v1/object/public/dashboard/config.json";
+let SB=null, ME={email:""}, ROWS=[], FILTER="todo";
+
+const YEN=n=>"¥"+Math.round(n).toLocaleString("ja-JP");
+const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+async function loadSupabase(){
+  if(window.supabase)return;
+  await new Promise((res,rej)=>{const s=document.createElement("script");
+    s.src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2";
+    s.onload=res;s.onerror=()=>rej(new Error("ログイン部品を読み込めませんでした"));
+    document.head.appendChild(s);});
+}
+function screen(html){document.getElementById("list").innerHTML=html;}
+
+async function boot(){
+  try{
+    const cfg=await (await fetch(CONFIG_URL,{cache:"no-store"})).json();
+    await loadSupabase();
+    SB=window.supabase.createClient(cfg.url,cfg.anon,
+      {auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,flowType:"pkce",storageKey:"notime-auth"}});
+    const {data:{session}}=await SB.auth.getSession();
+    if(!session){
+      screen('<div class="msg">物件レビューを見るにはログインが必要です。'
+        +'<br><button class="loginbtn" id="lg">Googleでログイン</button></div>');
+      document.getElementById("lg").onclick=()=>SB.auth.signInWithOAuth(
+        {provider:"google",options:{redirectTo:location.origin+location.pathname,queryParams:{prompt:"select_account"}}});
+      return;
+    }
+    ME.email=(session.user&&session.user.email||"").toLowerCase();
+    document.getElementById("logoutbtn").style.display="";
+    document.getElementById("logoutbtn").onclick=async()=>{try{await SB.auth.signOut();}catch(e){}location.reload();};
+    await load();
+  }catch(e){ screen('<div class="msg">読み込みに失敗しました：'+esc(e.message||e)+'</div>'); }
+}
+
+async function load(){
+  const {data,error}=await SB.from("bukken").select("*");
+  if(error){
+    screen('<div class="msg">物件テーブルを読めませんでした。<br>'
+      +'（Supabaseに bukken テーブル未作成の可能性。SQLをチャットから流してください）<br>'
+      +'<small>'+esc(error.message)+'</small></div>');
+    return;
+  }
+  // 並び：成功パターン→未判定→市→検出日の新しい順
+  const rank=r=>(r.success_flag?0:1)*10+(r.verdict?1:0);
+  ROWS=(data||[]).sort((a,b)=>rank(a)-rank(b)
+    || String(a.city).localeCompare(String(b.city))
+    || String(b.first_seen||"").localeCompare(String(a.first_seen||"")));
+  document.getElementById("filters").style.display="";
+  render();
+}
+
+function pass(r){
+  if(FILTER==="all")return true;
+  if(FILTER==="todo")return !r.verdict;
+  return r.verdict===FILTER;
+}
+function specArea(r){
+  if(r.area_tsubo)return r.area_tsubo.toFixed(1)+"坪"+(r.area_sqm?"（"+r.area_sqm.toFixed(1)+"㎡）":"");
+  return r.spec_note?"—":"要確認";
+}
+function render(){
+  const rows=ROWS.filter(pass);
+  if(!rows.length){screen('<div class="msg">該当なし</div>');return;}
+  document.getElementById("list").innerHTML=rows.map(r=>{
+    const v=r.verdict||"";
+    const badge=r.success_flag?'<span class="badge hit">成功パターン</span>':'<span class="badge info">要確認</span>';
+    const rent=r.rent_yen?YEN(r.rent_yen):"要確認";
+    const park=(r.parking!=null)?r.parking+"台":"—";
+    const floor=(r.floor!=null)?r.floor+"階":"—";
+    const link=r.detail_url?'<a href="'+esc(r.detail_url)+'" target="_blank" rel="noopener">元ページ ›</a>':'';
+    return `<div class="card v-${esc(v)}" data-id="${esc(r.id)}">
+      <div class="top">${badge}<span class="city">${esc(r.city)}</span></div>
+      <div class="name">${esc(r.name||"（名称なし）")}</div>
+      ${r.note?`<div class="note">${esc(r.note)}</div>`:""}
+      <div class="specs">
+        <div><label>坪数</label><b>${esc(specArea(r))}</b></div>
+        <div><label>家賃</label><b>${esc(rent)}</b></div>
+        <div><label>駐車場</label><b>${esc(park)}</b></div>
+        <div><label>階数</label><b>${esc(floor)}</b></div>
+      </div>
+      <div class="links">${link}<span class="city" style="align-self:center">出典：${esc(r.source||"")}</span></div>
+      <div class="verdicts">
+        <button class="vb ${v==="OK"?"sel-OK":""}" data-v="OK">OK</button>
+        <button class="vb ${v==="NG"?"sel-NG":""}" data-v="NG">NG</button>
+        <button class="vb ${v==="保留"?"sel-保留":""}" data-v="保留">保留</button>
+      </div>
+      <textarea placeholder="OK/NGの理由（例：幹線沿いで駐車も十分／住宅地の中で通行量が薄い）">${esc(r.reason||"")}</textarea>
+      <div class="saved" data-saved></div>
+    </div>`;
+  }).join("");
+  bind();
+}
+
+function bind(){
+  document.querySelectorAll(".card").forEach(card=>{
+    const id=card.dataset.id;
+    card.querySelectorAll(".vb").forEach(b=>b.onclick=()=>{
+      const verdict=b.dataset.v;
+      const reason=card.querySelector("textarea").value;
+      save(id,card,{verdict,reason});
+    });
+    card.querySelector("textarea").addEventListener("blur",e=>{
+      const row=ROWS.find(r=>r.id===id);
+      save(id,card,{verdict:row.verdict||null,reason:e.target.value});
+    });
+  });
+}
+
+async function save(id,card,patch){
+  const saved=card.querySelector("[data-saved]");
+  saved.textContent="保存中…";
+  const payload=Object.assign({},patch,{reviewed_by:ME.email,reviewed_at:new Date().toISOString()});
+  const {error}=await SB.from("bukken").update(payload).eq("id",id);
+  if(error){saved.textContent="保存に失敗："+error.message;saved.style.color="var(--ng)";return;}
+  saved.style.color="var(--ok)";saved.textContent="✓ 保存済み";
+  const row=ROWS.find(r=>r.id===id); if(row)Object.assign(row,patch);
+  // 判定バッジ／枠線を即時反映（フィルタが未判定なら消える）
+  card.className="card v-"+(patch.verdict||"");
+  card.querySelectorAll(".vb").forEach(b=>{
+    b.className="vb"+(patch.verdict&&b.dataset.v===patch.verdict?(" sel-"+patch.verdict):"");
+  });
+  if(FILTER!=="all" && (FILTER==="todo") === !!patch.verdict){ setTimeout(render,600); }
+}
+
+document.querySelectorAll(".chip").forEach(c=>c.onclick=()=>{
+  document.querySelectorAll(".chip").forEach(x=>x.classList.remove("on"));
+  c.classList.add("on");FILTER=c.dataset.f;render();
+});
+
+boot();
+</script>
+</body></html>

@@ -1,0 +1,22 @@
+# 秘密情報（§10：Places / Programmable Search のキーをコミットしない）
+.env
+
+# SQLite・クールダウン等（§10：data/properties.db。バックアップは別途）
+# data/ と out/ はディレクトリ構造だけ残し、中身は追跡しない（.gitkeep は追跡）。
+data/*
+!data/.gitkeep
+
+# 日次レポート出力（§9.2 / §9.3）
+out/*
+!out/.gitkeep
+
+# 取得した生HTML（§5.1.1：meta-robots noarchive のため原則保存しない。
+# 手元でパーサ検証する時だけ使う一時ファイル。コミットしない）
+samples/*.html
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/

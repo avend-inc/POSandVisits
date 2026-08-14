@@ -1,0 +1,59 @@
+# ============================================================
+#  物件フィード(feeds/bukken.jsonl) を Supabase の bukken テーブルへ同期する
+#
+#  【なぜ必要か】
+#   物件の発見は Claude セッション(WebSearch)で行うが、その環境からは Supabase に
+#   直接書けない（egress遮断）。そこで「発見結果をリポジトリに追記 → ここで Supabase へ
+#   upsert」という橋渡しをする。ユーザーがSQLを手で流す必要をなくすのが目的。
+#
+#  【動くタイミング】
+#   ・notime-property-scout/feeds/bukken.jsonl を push したとき（＝新しい物件が追記されたとき）
+#   ・毎日 06:10 JST（取りこぼし同期）
+#   ・手動実行（Actions → Run workflow）
+#
+#  【やること】
+#   sync_bukken.py が feed を読み、id で upsert。物件スペック列だけ送るので、
+#   ユーザーが付けた OK/NG・理由（verdict/reason）は保持される。
+# ============================================================
+name: 物件フィードをSupabaseへ同期(bukken)
+
+on:
+  push:
+    branches: [feature/supabase-etl]
+    paths: ["notime-property-scout/feeds/bukken.jsonl"]
+  schedule:
+    - cron: "10 21 * * *"   # 06:10 JST（UTC 21:10）
+  workflow_dispatch:
+
+concurrency:
+  group: bukken-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      # sales_fc_店舗開発_開業支援 チャンネル用の Incoming Webhook。無ければ既存 SLACK_WEBHOOK に落とす。
+      SLACK_WEBHOOK_BUKKEN: ${{ secrets.SLACK_WEBHOOK_BUKKEN }}
+      SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Supabaseへ upsert（新規判定つき）
+        id: sync
+        run: python notime-property-scout/tools/sync_bukken.py
+      # 新規物件があった時だけ、店舗開発チャンネルへ通知する
+      - name: Slack通知（新規のみ）
+        if: ${{ steps.sync.outputs.new_count != '0' && steps.sync.outputs.new_count != '' }}
+        env:
+          NEW_COUNT: ${{ steps.sync.outputs.new_count }}
+          NAMES: ${{ steps.sync.outputs.names }}
+        run: |
+          hook="${SLACK_WEBHOOK_BUKKEN:-$SLACK_WEBHOOK}"
+          if [ -z "$hook" ]; then echo "Slack webhook未設定。通知スキップ"; exit 0; fi
+          payload=$(python3 -c 'import json,os; print(json.dumps({"text":"🏢 新しい物件が "+os.environ["NEW_COUNT"]+" 件あります\n"+os.environ.get("NAMES","")+"\n▶ レビュー: https://avend-inc.github.io/POSandVisits/bukken.html"}))')
+          curl -sS -X POST -H 'content-type: application/json' --data "$payload" "$hook" || true

@@ -1,0 +1,13 @@
+# notime-property-scout MVP（§11）依存
+# 実行は手元Mac / 小規模VPS（§10）。データセンターIPはボット遮断されるため
+# GitHub Actions 等での取得はしないこと。
+
+requests>=2.31        # HTTP取得（§5.4：3秒間隔・robots尊重・UAに連絡先）
+beautifulsoup4>=4.12  # HTMLパース（§5.1.1 連合隊カード）
+lxml>=4.9             # bs4のパーサ
+PyYAML>=6.0           # cities.yaml / registry.yaml
+
+# 第2段階以降で追加予定（MVPでは未使用）:
+#   - OSM接道判定（§7.1）は requests のみで可
+#   - Google Places / Street View（§7.2 / §7.3）
+#   - normalize-japanese-addresses 相当（§8.1 住所正規化の高精度化）
