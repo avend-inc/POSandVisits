@@ -27,10 +27,12 @@
   .badge.hit{background:var(--ok)} .badge.info{background:#888}
   .city{font-size:12px;color:var(--ink2)}
   .name{font-size:16px;font-weight:700;margin:2px 0 6px}
-  .specs{display:grid;grid-template-columns:1fr 1fr;gap:5px 12px;margin:6px 0}
+  .specs{display:grid;grid-template-columns:1fr 1fr;gap:7px 12px;margin:6px 0}
   .specs label{display:block;font-size:11px;color:var(--ink2)} .specs b{font-size:15px}
+  .unk{color:#b0b0b0;font-weight:400;font-size:13px}     /* 不明（未取得） */
+  .none{color:var(--ng);font-weight:600;font-size:14px}  /* なし（0） */
   .note{font-size:12px;color:var(--ink2);margin:4px 0 8px;line-height:1.6}
-  .links{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 10px}
+  .links{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 10px;align-items:center}
   .links a{font-size:13px;text-decoration:none;color:#1558d6;border:1px solid #ccd;border-radius:8px;padding:6px 10px}
   .verdicts{display:flex;gap:8px;margin:8px 0}
   .vb{flex:1;border:1px solid var(--border);background:#fafafa;border-radius:10px;padding:11px 0;
@@ -38,12 +40,31 @@
   .vb.sel-OK{background:var(--ok);color:#fff;border-color:var(--ok)}
   .vb.sel-NG{background:var(--ng);color:#fff;border-color:var(--ng)}
   .vb.sel-保留{background:var(--hold);color:#fff;border-color:var(--hold)}
-  textarea{width:100%;border:1px solid var(--border);border-radius:10px;padding:10px;font-size:14px;
-    font-family:inherit;resize:vertical;min-height:52px}
-  .saved{font-size:12px;color:var(--ok);height:16px;margin-top:4px}
+  .reasonshow{font-size:12.5px;color:var(--ink2);margin-top:4px;line-height:1.6;min-height:16px}
+  .reasonshow b{color:var(--ink)}
+  .saved{font-size:12px;color:var(--ok);height:16px;margin-top:2px}
   .msg{padding:30px 16px;color:var(--ink2);text-align:center;line-height:1.8}
   .loginbtn{display:inline-block;margin-top:12px;background:var(--accent);color:#fff;border:none;
     border-radius:10px;padding:11px 20px;font-size:15px;font-weight:700;cursor:pointer}
+  /* 理由ポップアップ（ボトムシート） */
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:flex-end;
+    justify-content:center;z-index:100}
+  .overlay.on{display:flex}
+  .modal{background:var(--surface);border-radius:16px 16px 0 0;width:100%;max-width:720px;
+    max-height:86vh;overflow:auto;padding:16px 16px calc(16px + env(safe-area-inset-bottom))}
+  .mhead{font-size:15px;font-weight:700;margin-bottom:4px}
+  .msub{font-size:12px;color:var(--ink2);margin-bottom:10px}
+  .ropt{display:flex;align-items:center;gap:10px;padding:11px 12px;border:1px solid var(--border);
+    border-radius:11px;margin:7px 0;font-size:14px;cursor:pointer;user-select:none}
+  .ropt.sel{border-color:var(--accent);background:#fff8e8}
+  .ropt input{width:18px;height:18px;accent-color:var(--accent)}
+  .otherrow{display:flex;gap:8px;margin:10px 0}
+  .otherrow input{flex:1;border:1px solid var(--border);border-radius:10px;padding:10px;font-size:14px}
+  .otherrow button{border:1px solid var(--border);background:#fafafa;border-radius:10px;padding:0 14px;font-weight:700;cursor:pointer}
+  .mfoot{display:flex;gap:10px;margin-top:14px;position:sticky;bottom:0;background:var(--surface);padding-top:8px}
+  .mfoot button{flex:1;border-radius:11px;padding:13px 0;font-size:15px;font-weight:700;cursor:pointer;border:1px solid var(--border)}
+  #rsave{background:var(--accent);color:#fff;border-color:var(--accent)}
+  #rcancel{background:#fafafa;color:var(--ink2)}
 </style></head>
 <body>
 <header>
@@ -62,11 +83,27 @@
   <div id="list"><div class="msg">読み込み中…</div></div>
 </main>
 
+<div class="overlay" id="ov"><div class="modal">
+  <div class="mhead" id="mhead">理由を選ぶ</div>
+  <div class="msub" id="msub"></div>
+  <div id="ropts"></div>
+  <div class="otherrow"><input id="rother" placeholder="その他の理由を入力"><button id="raddbtn">追加</button></div>
+  <div class="mfoot"><button id="rcancel">キャンセル</button><button id="rsave">保存</button></div>
+</div></div>
+
 <script>
 "use strict";
 // POSandVisits ダッシュボードと同じ Supabase / 同じログイン(notime-auth)を共有する。
 const CONFIG_URL="https://qcdxhsrnlsgpntbiellh.supabase.co/storage/v1/object/public/dashboard/config.json";
 let SB=null, ME={email:""}, ROWS=[], FILTER="todo";
+
+// 市→主要駅（cities.yaml の main_station）。駅距離が未取得でも駅名は出す。
+const STATION={福島市:"福島駅",秋田市:"秋田駅",富士市:"富士駅",大分市:"大分駅",宮崎市:"宮崎駅",長崎市:"長崎駅"};
+// 理由プリセット（成功/失敗パターンに対応）。ユーザー追加分は localStorage に貯める。
+const PRESET={
+  OK:["幹線沿い・視認性が良い","駐車場が十分","面積が成功帯(25坪+)","坪単価が安い","集客装置が近い","独立店舗・ロードサイド"],
+  NG:["住宅地の中・幹線から外れる","通行量が少ない","駐車場が不足","面積が狭い","坪単価が高い","2階で視認性が弱い","商圏が弱い","家賃が過大","繁華街の徒歩型"]
+};
 
 const YEN=n=>"¥"+Math.round(n).toLocaleString("ja-JP");
 const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -105,11 +142,10 @@ async function load(){
   const {data,error}=await SB.from("bukken").select("*");
   if(error){
     screen('<div class="msg">物件テーブルを読めませんでした。<br>'
-      +'（Supabaseに bukken テーブル未作成の可能性。SQLをチャットから流してください）<br>'
+      +'（bukken テーブル未作成／列不足の可能性。SQLをチャットから流してください）<br>'
       +'<small>'+esc(error.message)+'</small></div>');
     return;
   }
-  // 並び：成功パターン→未判定→市→検出日の新しい順
   const rank=r=>(r.success_flag?0:1)*10+(r.verdict?1:0);
   ROWS=(data||[]).sort((a,b)=>rank(a)-rank(b)
     || String(a.city).localeCompare(String(b.city))
@@ -123,39 +159,57 @@ function pass(r){
   if(FILTER==="todo")return !r.verdict;
   return r.verdict===FILTER;
 }
-function specArea(r){
-  if(r.area_tsubo)return r.area_tsubo.toFixed(1)+"坪"+(r.area_sqm?"（"+r.area_sqm.toFixed(1)+"㎡）":"");
-  return r.spec_note?"—":"要確認";
+
+// --- 各項目の表示：不明(null)＝グレー / なし(0)＝赤 / 値＝そのまま ---
+function fArea(r){
+  if(r.area_tsubo==null) return '<span class="unk">不明</span>';
+  return r.area_tsubo.toFixed(1)+"坪"+(r.area_sqm!=null?"（"+r.area_sqm.toFixed(1)+"㎡）":"");
 }
+function fRent(r){ return r.rent_yen==null?'<span class="unk">不明</span>':YEN(r.rent_yen); }
+function fPark(r){
+  if(r.parking==null) return '<span class="unk">不明</span>';
+  if(r.parking===0)  return '<span class="none">なし(0台)</span>';
+  return r.parking+"台";
+}
+function fFloor(r){ return r.floor==null?'<span class="unk">不明</span>':r.floor+"階"; }
+function fStation(r){
+  const nm=r.station_name||STATION[r.city]||"";
+  if(r.station_km==null) return (nm?esc(nm)+" ":"")+'<span class="unk">不明</span>';
+  const drv=r.station_drive_min!=null?"（車"+r.station_drive_min+"分）":"";
+  return esc(nm)+" "+r.station_km.toFixed(1)+"km"+drv;
+}
+function gmapUrl(r){
+  const q=(r.address&&r.address.trim())?r.address:((r.city||"")+(r.name||""));
+  return "https://maps.google.com/maps?q="+encodeURIComponent(q);
+}
+
 function render(){
   const rows=ROWS.filter(pass);
   if(!rows.length){screen('<div class="msg">該当なし</div>');return;}
   document.getElementById("list").innerHTML=rows.map(r=>{
     const v=r.verdict||"";
     const badge=r.success_flag?'<span class="badge hit">成功パターン</span>':'<span class="badge info">要確認</span>';
-    const rent=r.rent_yen?YEN(r.rent_yen):"要確認";
-    const park=(r.parking!=null)?r.parking+"台":"—";
-    const floor=(r.floor!=null)?r.floor+"階":"—";
-    // 個別物件URLか、業者の一覧ページかでラベルを分ける（正直表記）
     const isDetail=/detailPage|\/detail[-\/]|\/bukken[-\/]|\/property\/[^\/]*\d/i.test(r.detail_url||"");
     const link=r.detail_url?'<a href="'+esc(r.detail_url)+'" target="_blank" rel="noopener">'+(isDetail?'物件ページ':'掲載元サイト（一覧）')+' ›</a>':'';
+    const gmap='<a href="'+esc(gmapUrl(r))+'" target="_blank" rel="noopener">🗺 地図</a>';
     return `<div class="card v-${esc(v)}" data-id="${esc(r.id)}">
       <div class="top">${badge}<span class="city">${esc(r.city)}</span></div>
       <div class="name">${esc(r.name||"（名称なし）")}</div>
       ${r.note?`<div class="note">${esc(r.note)}</div>`:""}
       <div class="specs">
-        <div><label>坪数</label><b>${esc(specArea(r))}</b></div>
-        <div><label>家賃</label><b>${esc(rent)}</b></div>
-        <div><label>駐車場</label><b>${esc(park)}</b></div>
-        <div><label>階数</label><b>${esc(floor)}</b></div>
+        <div><label>坪数</label><b>${fArea(r)}</b></div>
+        <div><label>家賃</label><b>${fRent(r)}</b></div>
+        <div><label>駐車場</label><b>${fPark(r)}</b></div>
+        <div><label>階数</label><b>${fFloor(r)}</b></div>
+        <div><label>主要駅からの距離</label><b>${fStation(r)}</b></div>
       </div>
-      <div class="links">${link}<span class="city" style="align-self:center">出典：${esc(r.source||"")}</span></div>
+      <div class="links">${link}${gmap}<span class="city" style="align-self:center">出典：${esc(r.source||"")}</span></div>
       <div class="verdicts">
         <button class="vb ${v==="OK"?"sel-OK":""}" data-v="OK">OK</button>
         <button class="vb ${v==="NG"?"sel-NG":""}" data-v="NG">NG</button>
         <button class="vb ${v==="保留"?"sel-保留":""}" data-v="保留">保留</button>
       </div>
-      <textarea placeholder="OK/NGの理由（例：幹線沿いで駐車も十分／住宅地の中で通行量が薄い）">${esc(r.reason||"")}</textarea>
+      <div class="reasonshow" data-reason>${r.reason?'理由：<b>'+esc(r.reason)+'</b>':''}</div>
       <div class="saved" data-saved></div>
     </div>`;
   }).join("");
@@ -167,30 +221,70 @@ function bind(){
     const id=card.dataset.id;
     card.querySelectorAll(".vb").forEach(b=>b.onclick=()=>{
       const verdict=b.dataset.v;
-      const reason=card.querySelector("textarea").value;
-      save(id,card,{verdict,reason});
-    });
-    card.querySelector("textarea").addEventListener("blur",e=>{
-      const row=ROWS.find(r=>r.id===id);
-      save(id,card,{verdict:row.verdict||null,reason:e.target.value});
+      if(verdict==="保留"){ save(id,card,{verdict:"保留",reason:(ROWS.find(r=>r.id===id)||{}).reason||null}); }
+      else openReason(id,card,verdict);      // OK/NG は理由ポップアップ
     });
   });
 }
 
+// ---- 理由ポップアップ ----
+const OV=document.getElementById("ov");
+function customKey(v){return "bukken_reasons_"+v;}
+function loadCustom(v){ try{return JSON.parse(localStorage.getItem(customKey(v))||"[]");}catch(e){return [];} }
+function addCustom(v,label){ const a=loadCustom(v); if(label&&!a.includes(label)){a.push(label);localStorage.setItem(customKey(v),JSON.stringify(a));} }
+
+function openReason(id,card,verdict){
+  const row=ROWS.find(r=>r.id===id)||{};
+  const chosen=new Set(String(row.reason||"").split("、").map(s=>s.trim()).filter(Boolean));
+  const opts=PRESET[verdict].concat(loadCustom(verdict).filter(x=>!PRESET[verdict].includes(x)));
+  document.getElementById("mhead").textContent=(verdict==="OK"?"OK":"NG")+"の理由（複数選択可）";
+  document.getElementById("msub").textContent=esc(row.name||"")+"　選んだ理由が判断基準として溜まります";
+  const box=document.getElementById("ropts");
+  box.innerHTML=opts.map(label=>{
+    const on=chosen.has(label);
+    return '<label class="ropt'+(on?' sel':'')+'"><input type="checkbox" '+(on?'checked':'')+' value="'+esc(label)+'"><span>'+esc(label)+'</span></label>';
+  }).join("");
+  box.querySelectorAll(".ropt").forEach(el=>{
+    const cb=el.querySelector("input");
+    cb.onchange=()=>el.classList.toggle("sel",cb.checked);
+  });
+  const other=document.getElementById("rother"); other.value="";
+  document.getElementById("raddbtn").onclick=()=>{
+    const val=other.value.trim(); if(!val)return;
+    addCustom(verdict,val);
+    const lab=document.createElement("label"); lab.className="ropt sel";
+    lab.innerHTML='<input type="checkbox" checked value="'+esc(val)+'"><span>'+esc(val)+'</span>';
+    lab.querySelector("input").onchange=e=>lab.classList.toggle("sel",e.target.checked);
+    box.appendChild(lab); other.value="";
+  };
+  document.getElementById("rcancel").onclick=closeReason;
+  document.getElementById("rsave").onclick=()=>{
+    const picked=Array.from(box.querySelectorAll("input:checked")).map(i=>i.value);
+    const extra=other.value.trim();
+    if(extra){ addCustom(verdict,extra); picked.push(extra); }
+    save(id,card,{verdict,reason:picked.join("、")});
+    closeReason();
+  };
+  OV.classList.add("on");
+}
+function closeReason(){ OV.classList.remove("on"); }
+OV.addEventListener("click",e=>{ if(e.target===OV)closeReason(); });
+
 async function save(id,card,patch){
   const saved=card.querySelector("[data-saved]");
-  saved.textContent="保存中…";
+  saved.textContent="保存中…"; saved.style.color="var(--ink2)";
   const payload=Object.assign({},patch,{reviewed_by:ME.email,reviewed_at:new Date().toISOString()});
   const {error}=await SB.from("bukken").update(payload).eq("id",id);
   if(error){saved.textContent="保存に失敗："+error.message;saved.style.color="var(--ng)";return;}
   saved.style.color="var(--ok)";saved.textContent="✓ 保存済み";
   const row=ROWS.find(r=>r.id===id); if(row)Object.assign(row,patch);
-  // 判定バッジ／枠線を即時反映（フィルタが未判定なら消える）
   card.className="card v-"+(patch.verdict||"");
   card.querySelectorAll(".vb").forEach(b=>{
     b.className="vb"+(patch.verdict&&b.dataset.v===patch.verdict?(" sel-"+patch.verdict):"");
   });
-  if(FILTER!=="all" && (FILTER==="todo") === !!patch.verdict){ setTimeout(render,600); }
+  const rs=card.querySelector("[data-reason]");
+  if(rs)rs.innerHTML=patch.reason?('理由：<b>'+esc(patch.reason)+'</b>'):'';
+  if(FILTER!=="all" && (FILTER==="todo")===!!patch.verdict){ setTimeout(render,700); }
 }
 
 document.querySelectorAll(".chip").forEach(c=>c.onclick=()=>{
