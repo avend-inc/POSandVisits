@@ -481,11 +481,11 @@ function restoreSharedUrl(){
   try{ history.replaceState(null,"",location.pathname+saved); }catch(e){ return; }
   readRoute();
   state.detail=DETAIL_ID;
-  if(DETAIL_ID){ state.sel=new Set([DETAIL_ID]); state.grain="day"; }
+  if(DETAIL_ID){ state.sel=new Set([DETAIL_ID]); }
 }
 
 // sel=選択店舗ID(Set)。kind=③期間プリセット。grain=⑤推移の粒度。trendAnchor=⑤の＜＞位置。
-const state={store:"__sel__",sel:null,grain:DETAIL_ID?"day":"month",metric:"ex",from:null,to:null,kind:"thismonth",trendEnd:null,detail:DETAIL_ID,
+const state={store:"__sel__",sel:null,grain:"day",metric:"ex",from:null,to:null,kind:"thismonth",trendEnd:null,detail:DETAIL_ID,
   heatMetric:"q",trendSel:["ex"],hKind:"thismonth",hFrom:null,hTo:null,
   aKind:"d28",aFrom:null,aTo:null,
   // aGrain=広告グラフの刻み（day/week/month）。期間とは別ものなので、期間を変えても保つ。
@@ -2062,9 +2062,10 @@ function renderMain(){
     <div class="panel">
       <h2>④ 売上推移 <span class="sub" style="font-weight:500">税抜</span></h2>
       <div style="display:flex;align-items:center;gap:8px;margin:4px 0 8px;flex-wrap:wrap">
-        <button class="gchip" data-grain="month">月</button>
-        <button class="gchip" data-grain="week">週</button>
         <button class="gchip" data-grain="day">日</button>
+        <button class="gchip" data-grain="week">週</button>
+        <button class="gchip" data-grain="month">月</button>
+        <button class="gchip" data-grain="all">全期間</button>
         <span style="margin-left:auto;display:flex;align-items:center;gap:8px">
           <button class="chip" id="tr-prev">◀</button>
           <span class="sub" id="trend-range"></span>
@@ -2133,9 +2134,10 @@ function renderDetail(){
     <div class="panel">
       <h2>KPIの推移 <span class="sub" id="trend-range" style="font-weight:700;color:var(--accent)"></span></h2>
       <div style="display:flex;align-items:center;gap:6px;margin:6px 0 8px">
-        <button class="gchip" data-grain="month">月</button>
-        <button class="gchip" data-grain="week">週</button>
         <button class="gchip" data-grain="day">日</button>
+        <button class="gchip" data-grain="week">週</button>
+        <button class="gchip" data-grain="month">月</button>
+        <button class="gchip" data-grain="all">全期間</button>
         <button class="chip" id="tr-prev" style="margin-left:auto">◀</button>
         <button class="chip" id="tr-next">▶</button>
       </div>
@@ -4848,15 +4850,36 @@ function drawStoreKpi(){
   el.querySelectorAll(".stbtn").forEach(b=>b.onclick=()=>{location.href="index.html?g="+GROUP+"&store="+b.dataset.sid;});
 }
 
-// ⑤ 売上推移（縦=選択店舗／横=期間。月/週/日、◀▶で移動。既定=月×直近6）
-function trendLatestAnchor(g){const sd=DATA._salesMax||DATA._max;return g==="month"?sd.slice(0,7):g==="week"?mondayOf(sd):sd;}
+// ⑤ 売上推移（縦=選択店舗／横=期間。日/週/月/全期間、◀▶で移動。既定=日）
+// 「全期間」は日でも週でもなく、月のマスを最初から最後まで並べたもの。
+//   日で全期間を出すと数百本になってスマホでは読めないので、束ね方は月に固定する。
+//   下の関数たち（pKey・periodSpan・pShort・pRange）は日/週/月しか知らないので、
+//   束ね方を聞かれたら month と答える。この読み替えは gBucket() 1か所だけ。
+const gBucket=g=>g==="all"?"month":g;
+function trendLatestAnchor(g){const sd=DATA._salesMax||DATA._max;
+  const b=gBucket(g);return b==="month"?sd.slice(0,7):b==="week"?mondayOf(sd):sd;}
 function trendShift(dir){const g=state.grain;
+  if(g==="all")return;                            // 全部出ているので送る先が無い
   if(g==="month"){let[y,m]=state.trendEnd.split("-").map(Number);m+=dir;while(m<=0){m+=12;y--;}while(m>12){m-=12;y++;}state.trendEnd=`${y}-${String(m).padStart(2,"0")}`;}
   else if(g==="week")state.trendEnd=addDays(state.trendEnd,7*dir);
   else state.trendEnd=addDays(state.trendEnd,dir);
   const latest=trendLatestAnchor(g); if(state.trendEnd>latest)state.trendEnd=latest;
 }
+// 全期間のマス＝データのある最初の月から最新の月まで、途切れなく並べる。
+//   売上が1件も無い月も飛ばさずに出す（間を詰めると、休んでいた月が無かったことになる）。
+function trendAllMonths(){
+  const from=(DATA._min||"").slice(0,7), to=(DATA._salesMax||DATA._max||"").slice(0,7);
+  if(!from||!to)return [];
+  const keys=[];let[y,m]=from.split("-").map(Number);
+  for(let i=0;i<600;i++){                          // 50年ぶんで打ち切り（無限ループよけ）
+    const k=`${y}-${String(m).padStart(2,"0")}`;keys.push(k);
+    if(k>=to)break;
+    if(++m>12){m=1;y++;}
+  }
+  return keys;
+}
 function trendKeys(){const g=state.grain,n=10,end=state.trendEnd||trendLatestAnchor(g),keys=[];
+  if(g==="all")return trendAllMonths();
   if(g==="month"){let[y,m]=end.split("-").map(Number);for(let i=n-1;i>=0;i--){let yy=y,mm=m-i;while(mm<=0){mm+=12;yy--;}keys.push(`${yy}-${String(mm).padStart(2,"0")}`);}}
   else if(g==="week"){for(let i=n-1;i>=0;i--)keys.push(addDays(end,-7*i));}
   else{for(let i=n-1;i>=0;i--)keys.push(addDays(end,-i));}
@@ -4866,7 +4889,7 @@ function drawTrend2(){
   if(state.detail){ drawTrendDetail(); return; }   // 店舗ページはグラフのみ（表は出さない）
   const el=document.getElementById("trend"); if(!el)return;
   if(!state.trendEnd)state.trendEnd=trendLatestAnchor(state.grain);
-  const g=state.grain,keys=trendKeys(),kset=new Set(keys);
+  const g=gBucket(state.grain),keys=trendKeys(),kset=new Set(keys);
   const exOf=r=>(r.ex!=null?r.ex:(r.in||0)/1.1);
   const first=periodSpan(keys[0],g)[0], last=periodSpan(keys[keys.length-1],g)[1], map={};
   for(const r of DATA.daily){ if(!state.sel.has(r.s))continue; if(r.d<first||r.d>last)continue;
@@ -4892,7 +4915,10 @@ function drawTrend2(){
   else h+=`<tr><td colspan="${keys.length+1}" class="sub">店舗が選択されていません</td></tr>`;
   el.innerHTML=h+`</tbody>`;
   const rl=document.getElementById("trend-range"); if(rl)rl.textContent=`${lab(dk[0])} 〜 ${pLabel(dk[dk.length-1],g)}`;
-  document.querySelectorAll(".gchip[data-grain]").forEach(b=>b.classList.toggle("on",b.dataset.grain===g));
+  document.querySelectorAll(".gchip[data-grain]").forEach(b=>b.classList.toggle("on",b.dataset.grain===state.grain));
+  // 全期間は全部出ているので、◀▶は押せなくする（押しても何も起きない、を見た目でも示す）
+  ["tr-prev","tr-next"].forEach(i=>{const b=document.getElementById(i);
+    if(b){b.disabled=state.grain==="all";b.style.opacity=state.grain==="all"?.35:"";}});
 }
 
 // ---- 店舗ページの推移グラフ（多系列・最大3つ） ----
@@ -4948,7 +4974,7 @@ function syncTmetChips(){
 function drawTrendDetail(){
   const box=document.getElementById("trendchart"); if(!box)return;
   if(!state.trendEnd)state.trendEnd=trendLatestAnchor(state.grain);
-  const g=state.grain, keys=trendKeys(), id=state.detail;
+  const g=gBucket(state.grain), keys=trendKeys(), id=state.detail;
   const spans=keys.map(k=>periodSpan(k,g));
   const first=spans[0][0], last=spans[spans.length-1][1];
   const byKey=new Map();
@@ -4985,10 +5011,17 @@ function drawTrendDetail(){
     });
     return {key:m.key,label:m.label,color:m.color,fmt:m.fmt,axf:m.axf,vals};
   });
-  drawMultiChart(box,keys.map(k=>pShort(k,g)),series,keys.map(k=>k===fkey));
+  // 全期間は年をまたぐので、1月と左端には年を付ける。
+  //   付けないと「10月」が2回出てきて、どちらの年か分からなくなる。
+  const xlab=k=>(state.grain==="all"&&(k.endsWith("-01")||k===keys[0]))
+    ?`${k.slice(2,4)}年${+k.slice(5,7)}月`:pShort(k,g);
+  drawMultiChart(box,keys.map(xlab),series,keys.map(k=>k===fkey));
   const rl=document.getElementById("trend-range"), lastKey=keys[keys.length-1];
   if(rl)rl.textContent=`${pRange(keys[0],g)}〜${pRange(lastKey,g)}${lastKey===fkey?"(見込)":""}`;
-  document.querySelectorAll(".gchip[data-grain]").forEach(b=>b.classList.toggle("on",b.dataset.grain===g));
+  document.querySelectorAll(".gchip[data-grain]").forEach(b=>b.classList.toggle("on",b.dataset.grain===state.grain));
+  // 全期間は全部出ているので、◀▶は押せなくする（押しても何も起きない、を見た目でも示す）
+  ["tr-prev","tr-next"].forEach(i=>{const b=document.getElementById(i);
+    if(b){b.disabled=state.grain==="all";b.style.opacity=state.grain==="all"?.35:"";}});
   syncTmetChips();
   const note=document.getElementById("trend-note");
   if(note)note.textContent=needBuy?(SHIP[id]==="none"?"仕入数：この店舗は在庫管理アプリと連携されていません（設定ページのPOS連携で紐付けできます）。":(!ship?"仕入数を取得中…":"")):"";

@@ -38,11 +38,12 @@ const IS_SHELL = CHROME.endsWith("headless_shell");
 // ---- 作り物のデータ ----------------------------------------------------
 // 実データは使わない。壊れ方を見つけたいのはコードのほうなので、
 // 「よくある形」と「端のケース」を混ぜて作る。
+const DAYS = 420;                      // 年をまたぐ長さ（「全期間」の見え方を見るため）
+// 最終日が「今」に近くなるように、DAYS ぶんさかのぼった日から並べる
 const day = (n) => {
-  const t = new Date(Date.UTC(2026, 6, 1) + n * 86400000);
+  const t = new Date(Date.UTC(2026, 7, 5) - (DAYS - 1 - n) * 86400000);
   return t.toISOString().slice(0, 10);
 };
-const DAYS = 60;
 const STORES = [
   { id: 1, name: "NTMいわき", own: "直営", kv: true, visible: true },
   { id: 2, name: "NTM所沢", own: "FC", kv: true, visible: true },
@@ -198,6 +199,85 @@ for (const [name, query] of VIEWS) {
     const rows = t ? (t[1].match(/<tr>/g) || []).length : 0;
     ok(`${name}：クリエイティブ別に行が出ている（${rows - 1}件）`,
       rows > 1 && !/この条件に合うクリエイティブがありません/.test(t ? t[1] : ""));
+  }
+}
+
+// ---- 期間の粒度（日／週／月／全期間）-----------------------------------
+//   既定は「日」。「全期間」はデータのある最初の月から最新の月まで、月のマスで
+//   全部並べる（◀▶は送る先が無いので押せなくする）。
+//   ボタンを実際に押して確かめる＝押したときに何が起きるかまで見る。
+{
+  const probe = (grain) => `window.addEventListener('load',function(){setTimeout(function(){
+    var out={};
+    try{
+      out.grain0=state.grain;
+      if(${JSON.stringify(grain)}){
+        var b=document.querySelector('.gchip[data-grain="'+${JSON.stringify(grain)}+'"]');
+        if(!b){out.err='ボタンが無い';}else{b.click();}
+      }
+      out.grain=state.grain;
+      out.keys=trendKeys().length;
+      out.first=trendKeys()[0]; out.last=trendKeys()[trendKeys().length-1];
+      out.range=(document.getElementById('trend-range')||{}).textContent||'';
+      var on=[].slice.call(document.querySelectorAll('.gchip[data-grain].on')).map(function(x){return x.dataset.grain;});
+      out.on=on.join(',');
+      out.pager=['tr-prev','tr-next'].map(function(i){var e=document.getElementById(i);return e?(e.disabled?'off':'on'):'—';}).join('/');
+      out.xlabels=[].slice.call(document.querySelectorAll('#trendchart text')).map(function(t){return t.textContent;}).join(' ');
+    }catch(e){ out.err=String(e&&e.message||e); }
+    var d=document.createElement('div');d.id='grainprobe';d.style.display='none';
+    d.textContent='__G__'+JSON.stringify(out)+'__END__';document.body.appendChild(d);},1400);});`;
+  const run = (grain, query) => {
+    const f2 = path.join(dir, "grain-" + (grain || "default") + ".html");
+    fs.writeFileSync(f2, src.replace("<script>",
+      "<script>\nwindow.__DATA__=" + JSON.stringify(DATA) + ";\n" + probe(grain) + "\n</script>\n<script>", 1));
+    const dom = execFileSync(CHROME, [...(IS_SHELL ? [] : ["--headless"]), "--no-sandbox",
+      "--disable-gpu", "--window-size=393,900", "--virtual-time-budget=7000",
+      "--dump-dom", "file://" + f2 + (query || "?g=own&store=5")],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 64 << 20 });
+    const m = /__G__(.*?)__END__/.exec(dom.replace(/<script[\s\S]*?<\/script>/g, ""));
+    return m ? JSON.parse(m[1]) : null;
+  };
+  const ok = (label, cond, extra) => {
+    console.log(`  ${cond ? "OK " : "NG "} ${label}`);
+    if (!cond) { ng++; if (extra) console.log("      " + String(extra).slice(0, 300)); }
+  };
+  // 作り物のデータが何か月ぶんあるか（＝全期間で並ぶはずのマスの数）
+  const months = new Set(daily.map((r) => r.d.slice(0, 7)));
+
+  const d0 = run(null);
+  if (!d0) { console.log("  NG  粒度の確認：画面から値を取れませんでした"); ng++; }
+  else {
+    ok(`既定は「日」（いま ${d0.grain0}）`, d0.grain0 === "day", JSON.stringify(d0));
+    ok("「日」で押されている印が付くのは1つだけ", d0.on === "day", d0.on);
+    ok("「日」では◀▶が押せる", d0.pager === "on/on", d0.pager);
+  }
+  for (const [g, label] of [["week", "週"], ["month", "月"]]) {
+    const d = run(g);
+    if (!d) { console.log(`  NG  「${label}」に切り替えられませんでした`); ng++; continue; }
+    ok(`「${label}」に切り替わる`, d.grain === g && d.on === g, JSON.stringify(d));
+    ok(`「${label}」では◀▶が押せる`, d.pager === "on/on", d.pager);
+  }
+  const da = run("all");
+  if (!da) { console.log("  NG  「全期間」に切り替えられませんでした"); ng++; }
+  else {
+    ok("「全期間」に切り替わる", da.grain === "all" && da.on === "all", JSON.stringify(da));
+    ok(`「全期間」はデータのある月を全部並べる（${da.keys}マス／データは${months.size}か月）`,
+      da.keys === months.size, `${da.first}〜${da.last} / ${[...months].sort().join(",")}`);
+    ok("「全期間」では◀▶を押せなくする", da.pager === "off/off", da.pager);
+    ok("「全期間」の見出しは最初の月から最新の月まで", /年.*月.*〜.*年.*月/.test(da.range), da.range);
+    // 年をまたぐので、1月と左端には年を付ける（「10月」が2回出ると見分けが付かない）
+    ok("年をまたぐ目盛りに年が付いている", /\d\d年\d+月/.test(da.xlabels || ""), da.xlabels);
+    ok("「全期間」でも例外が出ていない", !da.err, da.err);
+  }
+  // 店舗一覧の④売上推移は別の関数（drawTrend2）が描いていて、こちらは表も作る。
+  // 同じ「全期間」で落ちないことを見る（片方だけ直して片方が壊れる、を防ぐ）
+  const dl = run("all", "?g=own");
+  if (!dl) { console.log("  NG  店舗一覧の推移で「全期間」に切り替えられませんでした"); ng++; }
+  else {
+    ok("店舗一覧の推移も「全期間」に切り替わる", dl.grain === "all" && !dl.err,
+      JSON.stringify(dl));
+    ok(`店舗一覧の推移も月を全部並べる（${dl.keys}マス）`, dl.keys === months.size,
+      `${dl.first}〜${dl.last}`);
   }
 }
 
