@@ -175,13 +175,30 @@ def audit_all(sb: Supabase, sid: int, name: str) -> None:
             m, y = 1, y + 1
     if gaps:
         print(f"\n  ⚠ データが1行も無い月: {'、'.join(gaps)}")
-    # 片方のレジしか入っていない月（2レジ運用の店で、取り込み漏れが見える）
-    if len(poss) > 1:
-        partial = [ym for ym, e in sorted(per.items()) if len(e) < len(poss)]
-        if partial:
-            print(f"  ⚠ 一部のレジしか入っていない月: {'、'.join(partial)}")
-        else:
-            print("  すべての月に、全部のレジのデータが入っています。")
+    # レジごとに「動いていた期間」の内側だけを見て、途中で抜けている月を探す。
+    #   全部のレジが全期間そろっている前提で見ると、あとから増えたレジ・
+    #   名前が変わったレジ（下北沢の Si→SIPOS）で毎月警告が出てしまい、
+    #   本当の取り込み漏れが埋もれる。始まる前・終わったあとは「抜け」ではない。
+    holes = []
+    for p in poss:
+        months = sorted(ym for ym, e in per.items() if p in e)
+        if not months:
+            continue
+        y2, m2 = int(months[0][:4]), int(months[0][5:7])
+        ey, em = int(months[-1][:4]), int(months[-1][5:7])
+        have = set(months)
+        miss = []
+        while (y2, m2) <= (ey, em):
+            ym2 = f"{y2:04d}-{m2:02d}"
+            if ym2 not in have:
+                miss.append(ym2)
+            if (m2 := m2 + 1) > 12:
+                m2, y2 = 1, y2 + 1
+        print(f"  {p}: {months[0]}〜{months[-1]}（{len(months)}か月）"
+              + (f"  ⚠ 抜け: {'、'.join(miss)}" if miss else ""))
+        holes += miss
+    if not holes:
+        print("  どのレジも、動いていた期間の中に抜けはありません。")
 
 
 def main() -> int:
