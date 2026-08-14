@@ -1,4 +1,4 @@
-"""Meta広告のアクション系（プロフアクセス数・フォロー数）を取り込む。
+"""Meta広告のアクション系（プロフアクセス数・フォロー数・いいね数・平均視聴時間）を取り込む。
 
     python -m etl.meta_actions_fetch                          # 前日ぶん
     python -m etl.meta_actions_fetch --date 2026-08-09
@@ -9,6 +9,9 @@
   meta_insights_daily には、広告費・表示回数・クリックは入っているのに
   follows / profile_visits（フォロー数・プロフアクセス数）が空のままになっている。
   そこを、この取り込みが Meta の insights から取って埋める。
+  あわせて likes（いいね数）と video_avg_seconds（平均視聴時間）も入れる。
+  ・いいね数    … actions の post_reaction（候補は下の LIKE_CANDS）
+  ・平均視聴時間 … video_avg_time_watched_actions（actions とは別のフィールド。秒）
 
 【行は作らない。既にある行の列だけ埋める】
   meta_insights_daily の持ち主は別の取り込み（avend-meta-ads）で、そちらが
@@ -74,6 +77,13 @@ PROFILE_CANDS = _cands("META_PROFILE_ACTIONS", [
     "profile_visit",
     "onsite_conversion.instagram_profile_visit",
 ])
+# いいね（投稿へのリアクション）。Metaは post_reaction を返すことが多いが、
+# like を返す環境もあるので、フォロー数と同じく候補から選ぶ。
+LIKE_CANDS = _cands("META_LIKE_ACTIONS", [
+    "post_reaction",
+    "like",
+    "onsite_conversion.post_save",
+])
 
 
 def _token() -> str:
@@ -128,7 +138,28 @@ def insights(act: str, since: str, until: str) -> list[dict]:
         "level": "campaign",
         "time_increment": "1",
         "time_range": f'{{"since":"{since}","until":"{until}"}}',
-        "fields": "date_start,campaign_id,campaign_name,actions",
+        # video_avg_time_watched_actions は actions とは別のフィールド。
+        # 動画でない広告では返ってこないので、無くても壊れないようにしてある。
+        "fields": ("date_start,campaign_id,campaign_name,actions,"
+                   "video_avg_time_watched_actions"),
+        "use_unified_attribution_setting": "true",
+        "limit": "500",
+    })
+
+
+def insights_ad(act: str, since: str, until: str) -> list[dict]:
+    """日 × 広告（クリエイティブ）で取る。meta_insights_daily_ad と同じ粒度。
+
+    キャンペーン単位とは別に、もう一度取りに行く。level を変えると Meta が返す
+    行はまるごと別ものになるので、キャンペーンぶんを広告に割り戻すことはできない
+    （プロフアクセス数は人の数なので、広告をまたいで同じ人を数えたぶんがずれる）。
+    """
+    return _paged(f"{act}/insights", {
+        "level": "ad",
+        "time_increment": "1",
+        "time_range": f'{{"since":"{since}","until":"{until}"}}',
+        "fields": ("date_start,ad_id,ad_name,actions,"
+                   "video_avg_time_watched_actions"),
         "use_unified_attribution_setting": "true",
         "limit": "500",
     })
@@ -178,20 +209,21 @@ def main() -> int:
     # ---- 取得 ----------------------------------------------------------
     # (日, キャンペーンID) → {action_type: 値}
     got: dict[tuple[str, str], dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    # (日, キャンペーンID) → 平均視聴秒数。actions とは別に持つ
+    vid: dict[tuple[str, str], float] = {}
+    # (日, 広告名) → {action_type: 値} / 平均視聴秒数。クリエイティブ別の画面で使う。
+    # meta_insights_daily_ad には ad_id を持っていないので、日と広告名で突き合わせる。
+    got_ad: dict[tuple[str, str], dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    vid_ad: dict[tuple[str, str], float] = {}
     seen: set[str] = set()
     totals: dict[str, float] = defaultdict(float)
-    failed = 0
+    failed = ad_failed = 0
 
-    for a in accts:
-        try:
-            rows = insights(a["id"], since, until)
-        except RuntimeError as e:
-            failed += 1
-            print(f"  ⚠️ {a.get('name') or a['id']}: {e}")
-            continue
+    def take(rows, key_of, into, into_vid):
+        """actions と平均視聴時間を、渡された入れ物にためる（粒度が違うだけで中身は同じ）。"""
         for r in rows:
-            d, cid = r.get("date_start"), r.get("campaign_id")
-            if not d or not cid:
+            k = key_of(r)
+            if k is None:
                 continue
             for act in (r.get("actions") or []):
                 t = act.get("action_type")
@@ -203,18 +235,53 @@ def main() -> int:
                     continue
                 seen.add(t)
                 totals[t] += v
-                got[(d, str(cid))][t] += v
+                into[k][t] += v
+            for w in (r.get("video_avg_time_watched_actions") or []):
+                try:
+                    into_vid[k] = float(w.get("value") or 0)
+                except (TypeError, ValueError):
+                    pass
+                break
 
-    print(f"\n  取れた 日×キャンペーン: {len(got)}件 / action_type {len(seen)}種"
+    for a in accts:
+        # 広告（クリエイティブ）単位。キャンペーン単位とは別の呼び出しが要る。
+        # ここが取れないだけなら、キャンペーンぶんは今までどおり入るようにする。
+        try:
+            take(insights_ad(a["id"], since, until),
+                 lambda r: (r["date_start"], r["ad_name"])
+                 if r.get("date_start") and r.get("ad_name") else None,
+                 got_ad, vid_ad)
+        except RuntimeError as e:
+            ad_failed += 1
+            print(f"  ⚠️ 広告単位が取れません {a.get('name') or a['id']}: {e}")
+        try:
+            rows = insights(a["id"], since, until)
+        except RuntimeError as e:
+            failed += 1
+            print(f"  ⚠️ {a.get('name') or a['id']}: {e}")
+            continue
+        # 平均視聴時間は配列で返るので、いちばん代表的な値（先頭）を採る。
+        # ここは「平均」なので、日をまたいで足してはいけない。
+        take(rows,
+             lambda r: (r["date_start"], str(r["campaign_id"]))
+             if r.get("date_start") and r.get("campaign_id") else None,
+             got, vid)
+
+    print(f"\n  取れた 日×キャンペーン: {len(got)}件 / 日×広告: {len(got_ad)}件"
+          + (f" / 広告単位が取れなかった {ad_failed}アカウント" if ad_failed else "")
+          + f" / action_type {len(seen)}種"
           + (f" / 失敗 {failed}アカウント" if failed else ""))
 
     # ---- どの action_type を使うか決める --------------------------------
     fk = pick(seen, FOLLOW_CANDS)
     pk = pick(seen, PROFILE_CANDS)
+    lk = pick(seen, LIKE_CANDS)
     print(f"\n  フォロー数      に使う action_type: {fk or '（見つからず）'}")
     print(f"  プロフアクセス数 に使う action_type: {pk or '（見つからず）'}")
+    print(f"  いいね数        に使う action_type: {lk or '（見つからず）'}")
+    print(f"  平均視聴時間    が取れた 日×キャンペーン: {len(vid)}件")
 
-    if not fk and not pk:
+    if not fk and not pk and not lk and not vid:
         # ここで0を書き込むと「本当に0だった」と読めてしまうので、何も書かない。
         print("\n❌ 候補の action_type がどれも返ってきませんでした。書き込みは行いません。")
         print("   返ってきた action_type は次のとおりです。この中から正しいものを選び、")
@@ -224,7 +291,7 @@ def main() -> int:
         return 1
 
     print(f"\n  期間合計: フォロー {totals.get(fk, 0):,.0f} / "
-          f"プロフアクセス {totals.get(pk, 0):,.0f}")
+          f"プロフアクセス {totals.get(pk, 0):,.0f} / いいね {totals.get(lk, 0):,.0f}")
 
     if args.dry_run:
         print("\n  （--dry-run のためDBには書いていません）")
@@ -233,12 +300,18 @@ def main() -> int:
     # ---- 既にある行の列だけ埋める（行は作らない）------------------------
     sb = Supabase()
     updated = missing = 0
-    for (d, cid), acts in sorted(got.items()):
+    keys = sorted(set(got) | set(vid))
+    for (d, cid) in keys:
+        acts = got.get((d, cid), {})
         patch = {}
         if fk:
             patch["follows"] = int(acts.get(fk, 0))
         if pk:
             patch["profile_visits"] = int(acts.get(pk, 0))
+        if lk:
+            patch["likes"] = int(acts.get(lk, 0))
+        if (d, cid) in vid:
+            patch["video_avg_seconds"] = round(vid[(d, cid)], 2)
         if not patch:
             continue
         n = sb.update("meta_insights_daily",
@@ -253,6 +326,44 @@ def main() -> int:
     if missing:
         print("   （meta_insights_daily 側にその日のキャンペーン行がまだ無い場合です。"
               "先方の取り込みが走ったあと、もう一度流すと埋まります）")
+
+    # ---- 広告（クリエイティブ）単位 -------------------------------------
+    #   クリエイティブ別のCPC（＝広告費÷プロフアクセス数）を出すのに要る。
+    #   ここも UPDATE だけ。列がまだ無い環境では黙って飛ばす（先に SQL を流す）。
+    ad_up = ad_miss = 0
+    ad_keys = sorted(set(got_ad) | set(vid_ad))
+    if ad_keys:
+        for (d, an) in ad_keys:
+            acts = got_ad.get((d, an), {})
+            patch = {}
+            if pk:
+                patch["profile_visits"] = int(acts.get(pk, 0))
+            if fk:
+                patch["follows"] = int(acts.get(fk, 0))
+            if lk:
+                patch["likes"] = int(acts.get(lk, 0))
+            if (d, an) in vid_ad:
+                patch["video_avg_seconds"] = round(vid_ad[(d, an)], 2)
+            if not patch:
+                continue
+            try:
+                n = sb.update("meta_insights_daily_ad",
+                              {"date": f"eq.{d}", "ad_name": f"eq.{an}"}, patch)
+            except Exception as e:                       # noqa: BLE001
+                # 列がまだ無い／表が無い。ここで止めると、上のキャンペーンぶんまで
+                # 「失敗」に見えてしまうので、知らせて先へ進む
+                print(f"\n  ⚠️ 広告単位は書けませんでした（列がまだ無い可能性）: "
+                      f"{str(e)[:160]}")
+                print("     sql/030_meta_ad_action_columns.sql を先に流してください。")
+                ad_keys = []
+                break
+            if n:
+                ad_up += n
+            else:
+                ad_miss += 1
+    if ad_keys:
+        print(f"  広告単位の更新 {ad_up}行"
+              + (f" / 相手の行が無くて書けなかった {ad_miss}件" if ad_miss else ""))
     print("\n✅ 取り込みが終わりました。")
     print("   答え合わせ: Notimeつくば 2026-07-07 は"
           " 広告費1,800円 / プロフアクセス135 / フォロー36 が正解です。")

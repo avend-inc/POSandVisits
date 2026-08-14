@@ -17,7 +17,8 @@ KCOLS = ["ex", "v", "pr", "aov", "qty", "upt", "aup"]
 def _sum_rows(rows, kv_of, visit_stores):
     """dashboard.html の sumRows を移植（KPI2_COLS に必要な項目のみ）。"""
     p = {"in": 0.0, "ex": 0.0, "tx": 0, "txv": 0, "it": 0.0, "txIt": 0,
-         "v": 0, "hasV": False, "hasEx": False, "hasIt": False}
+         "v": 0, "bagEx": 0.0, "komEx": 0.0, "nocatEx": 0.0,
+         "hasV": False, "hasEx": False, "hasIt": False}
     for r in rows:
         p["in"] += r.get("in") or 0
         p["tx"] += r.get("tx") or 0
@@ -25,6 +26,10 @@ def _sum_rows(rows, kv_of, visit_stores):
             p["ex"] += r["ex"]; p["hasEx"] = True
         if r.get("it") is not None:
             p["it"] += r["it"]; p["hasIt"] = True; p["txIt"] += r.get("tx") or 0
+        # レジ袋・小物・明細なし の税抜（商品単価の分子から差し引く用。dashboard.html と同じ定義）
+        p["bagEx"] += r.get("bagEx") or 0
+        p["komEx"] += r.get("komEx") or 0
+        p["nocatEx"] += r.get("nocatEx") or 0
         if kv_of(r["s"]) and r["s"] in visit_stores:
             p["txv"] += r.get("tx") or 0
             if r.get("v") is not None:
@@ -51,7 +56,8 @@ def _calc(k, p):
     if k == "upt":
         return (p["it"] / p["txIt"]) if (p["hasIt"] and p["txIt"] > 0) else None
     if k == "aup":
-        return (p["ex"] / p["it"]) if (p["hasEx"] and p["it"] > 0) else None
+        # 商品単価＝(税抜売上−レジ袋−小物−明細なし売上)÷点数。分母(点数)が持たない売上を分子からも除く。
+        return ((p["ex"] - p["bagEx"] - p["komEx"] - p["nocatEx"]) / p["it"]) if (p["hasEx"] and p["it"] > 0) else None
     return None
 
 

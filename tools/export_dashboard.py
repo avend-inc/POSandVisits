@@ -52,6 +52,44 @@ PAGE = 1000
 META_AD_DAYS = int(os.environ.get("META_AD_DAYS") or 180)
 
 
+_COLUMNS_CACHE: dict = {}
+
+
+def _columns(sb: Supabase, table: str) -> set:
+    """そのテーブルに実在する列名を PostgREST のスキーマから取る。
+
+    「取り込みの拡張で増えた列を、無い環境でも落ちずに拾う」ために使う。
+    以前は select を欲張った順に投げて、400が返ったら諦める作りだったが、
+    **1つでも存在しない列を混ぜると、その組み合わせごと落ちる**。
+    実際に video_avg_seconds（削除済みの旧列名）が1つ混じっていたせいで、
+    同じ組に入っていた likes / profile_visits まで丸ごと落ちて、
+    画面が「未取込」表示のままになっていた。存在する列だけを選べばこれは起きない。
+    """
+    if not _COLUMNS_CACHE:
+        try:
+            resp = sb._send("GET", f"{sb.url}/rest/v1/")
+            _COLUMNS_CACHE["spec"] = resp.json() if resp.status_code == 200 else {}
+        except Exception:
+            _COLUMNS_CACHE["spec"] = {}
+    defs = (_COLUMNS_CACHE.get("spec") or {}).get("definitions") or {}
+    return set(((defs.get(table) or {}).get("properties") or {}))
+
+
+def _select_cols(sb: Supabase, table: str, base: str, optional: list) -> str:
+    """必須の列＋実在する任意列だけを繋いだ select 文字列を作る。
+
+    スキーマが取れなかったときは base だけで進む（欠けても集計は止まらない）。
+    """
+    have = _columns(sb, table)
+    if not have:
+        return base
+    picked = [c for c in optional if c in have]
+    missing = [c for c in optional if c not in have]
+    if missing:
+        print(f"  （{table} に無い列は読み飛ばします: {', '.join(missing)}）")
+    return base + ("," + ",".join(picked) if picked else "")
+
+
 def _select_all(sb: Supabase, table: str, select: str,
                 order: str, extra: dict | None = None) -> list[dict]:
     """PostgREST のページ制限(1000件)を超えて全件取る。"""
@@ -77,7 +115,10 @@ def build_data(sb: Supabase) -> dict:
     stores = [s for s in sb.select("stores", {"select": "*", "order": "id"})
               if s.get("id") is not None]
     name_by_id = {s["id"]: s["name"] for s in stores}
-    own_by_id = {s["id"]: (s.get("ownership") or "直営") for s in stores}
+    # 直営/FC。空欄を「直営」で埋めない。埋めると、区分が未設定なだけの店が
+    # 直営として集計され、広告の直営ページにFC店が出る（実際に起きた）。
+    # 未設定は未設定のまま渡して、画面側で「区分が未設定」と分かるようにする。
+    own_by_id = {s["id"]: (s.get("ownership") or None) for s in stores}
     # KPIに来店数を使うか（列が未追加でも既定 True）。False の店は来店・購入率をKPIから外す。
     kv_by_id = {s["id"]: bool(s.get("kpi_visitors", True)) for s in stores}
     # ダッシュボードに表示するか（列が未追加でも既定 True）。False の店は各画面の一覧・合計から外す。
@@ -166,10 +207,17 @@ def build_data(sb: Supabase) -> dict:
     # 商品ではないので「売上・点数・カテゴリ」すべてから除外する。
     #  ・レジ袋 / クーポン … 物ではない（config.py の NON_MERCH と同じ考え方）
     #  ・「不明」は EZレジで明細が無いだけの“実売上”なので売上には残す（除外しない）
-    EXCLUDE = {"レジ袋", "クーポン"}
+    # 袋（＝レジ袋と同じ扱い）。下北沢の「ロゴ入り」＝ロゴ入りショッパー(¥100)のように、
+    #  袋なのに商品名で点数に入るものを袋へ寄せる（点数・カテゴリから除外し、商品単価の
+    #  分子からも引く。売上・客単価には残す＝客が払った額）。
+    BAG_NAMES = {"レジ袋", "ロゴ入り"}
+    EXCLUDE = BAG_NAMES | {"クーポン"}
     # 「商品販売数(it)」には数えないが、売上・カテゴリ別には残す区分（ユーザー要望）。
     #  小物は“商品ではあるが点数に数えたくない”ため、点数だけから除外する。
-    QTY_EXCLUDE = {"小物"}
+    #  アクセ類（CAP/キャップ・キーホルダー/リング/ピンズ/ガチャ系）も「小物」と同じ扱いに
+    #  する（POSで別名のまま入り、点数を押し下げていたため。CAPは箱モノ＝小物とのこと）。
+    QTY_EXCLUDE = {"小物", "CAP", "キャップ", "キーホルダー", "リング",
+                   "ピンズ", "ガチャキー", "ガチャピン"}
     # 「（明細なし）」= SIPOS取引照会のように商品明細が無い実売上。
     #  売上・客数・点数などのKPIには含めるが、カテゴリ別/価格帯別ランキングには入れない
     #  （カテゴリ不明のものが「その他」として上位を占めてしまうのを防ぐ）。
@@ -185,10 +233,17 @@ def build_data(sb: Supabase) -> dict:
         # ex_u/ex_m=税抜売上の営業形態別内訳（u=無人営業時間・m=有人営業時間）。
         #   2レジ運用の店（下北沢＝SIPOS＋Airレジ）の内訳表示に使う。
         # v_staffed=有人営業時間の来店数（画面から手入力したぶん。visits.source='staffed'）
+        # kom_ex=小物の税抜売上。商品単価(税抜)の分子から差し引く用（分母の点数からも
+        #   小物を除いているので、分子・分母を揃える）。客単価には小物を残す（差し引かない）。
         return {"in": 0.0, "ex": 0.0, "ex_est": 0.0, "tx": 0, "it": 0.0, "v": None,
                 "ex_u": 0.0, "ex_m": 0.0, "v_staffed": None,
                 "bag_in": 0.0, "bag_ex": 0.0, "bag_q": 0.0, "reji_in": 0.0, "reji_ex": 0.0,
-                "coup_in": 0.0, "coup_q": 0.0}   # クーポン割引額・点数（レジ袋と分離）
+                "coup_in": 0.0, "coup_q": 0.0,   # クーポン割引額・点数（レジ袋と分離）
+                "kom_ex": 0.0,                   # 小物の税抜売上（商品単価の分子から除く用）
+                # nocat_ex=「明細なし」実売上の税抜（SIPOS取引照会など＝点数の裏付けが無い売上）。
+                #   商品単価の分子から差し引く（点数が分母に入らないため、分子分母を揃える）。
+                #   客単価・税抜売上には残す（実売上だから）。
+                "nocat_ex": 0.0}
 
     def _num(v):
         try:
@@ -221,6 +276,10 @@ def build_data(sb: Supabase) -> dict:
                 rec["ex_est"] += ex_tax
             else:
                 rec["ex"] += ex_tax
+                # 実額だが「明細なし」＝商品明細(点数)が無い売上（SIPOS取引照会 等）。
+                # 商品単価の分子から差し引く用に控える（点数が分母に入らないため）。
+                if lc0 in NOCAT:
+                    rec["nocat_ex"] += ex_tax
             # 税抜売上を「無人営業／有人営業」に振り分ける（レジ単位で判定）。
             rec["ex_u" if _pos_mode(sid, r.get("pos_name")) == "u" else "ex_m"] += ex_tax
             rec["tx"] += 1
@@ -247,18 +306,31 @@ def build_data(sb: Supabase) -> dict:
             ratio = (in_tax / ex_tax) if ex_tax else 1.0   # 伝票の税率で税込換算
             rec["bag_in"] += amt * ratio
             rec["bag_q"] += qty
-            if c == "レジ袋":                 # レジ袋売上は単体で（クーポン割引と混ぜない）
+            if c in BAG_NAMES:                # 袋（レジ袋・ロゴ入りショッパー）は単体で集計
                 rec["reji_in"] += amt * ratio
-                rec["reji_ex"] += amt         # レジ袋の税抜（客単価・商品単価から差し引く用）
+                rec["reji_ex"] += amt         # 袋の税抜（客単価・商品単価から差し引く用）
             if c == "クーポン":               # クーポン割引額・利用数を分離して記録
                 rec["coup_in"] += amt * ratio
                 rec["coup_q"] += qty
             continue
 
-        # 販売点数（＝商品販売数）。レジ袋・クーポンに加え、小物も点数から除く。
-        #  （小物の売上・カテゴリ別ランキングは下でそのまま残す）
-        if c not in QTY_EXCLUDE:
+        # 販売点数（＝商品販売数）。レジ袋・クーポンは上で除外済み。さらに：
+        #  ・小物 は点数に数えない（ユーザー要望：商品ではあるが点数から除く）。
+        #  ・セット割の親行（is_parent＝「セール商品」）は点数に数えない。
+        #    セット割は Airレジのジャーナルで「セール商品」という“セットの器”1行
+        #    (is_parent・金額あり)＋中身の各商品行(is_child・金額0) の形で出る。
+        #    実際に売れた商品は子行(is_child)として別に計上されるので、親行も数えると
+        #    1セットぶんを二重計上してしまう（＝POSの商品販売数より過大になる原因）。
+        #    → 親行は点数から除外し、実商品(子行)＋通常明細だけを数える。
+        #    ※ 売上・カテゴリ別集計は従来どおり（親行の金額＝セット売上はそのまま残す）。
+        if c not in QTY_EXCLUDE and not r.get("is_parent"):
             rec["it"] += qty
+
+        # 小物類（小物・アクセ）の税抜売上を控える（商品単価の分子から差し引く用）。
+        # 商品単価は分母(点数)からこれらを除いているので、分子(売上)からも除いて揃える。
+        # 売上KPI・カテゴリ別・客単価には残す（差し引かない）。
+        if c in QTY_EXCLUDE:
+            rec["kom_ex"] += amt
 
         # 明細なし（SIPOS取引照会）は 点数・売上KPI には含めるが、
         # カテゴリ別・価格帯別（→ランク帯）ランキングには入れない。
@@ -333,6 +405,11 @@ def build_data(sb: Supabase) -> dict:
          "it": (None if (v["ex"] <= 0 and v["ex_est"] > 0) else round(v["it"])),
          "v": v["v"],
          "bag": round(v["reji_in"]), "bagEx": round(v["reji_ex"]), "bagq": round(v["bag_q"]),
+         # komEx=小物の税抜売上。商品単価(税抜)の分子から差し引く（分母の点数も小物を
+         #   除いているため）。客単価は小物を残すので差し引かない。
+         "komEx": round(v["kom_ex"]),
+         # nocatEx=「明細なし」実売上の税抜。商品単価の分子から差し引く（点数が無い売上のため）。
+         "nocatEx": round(v["nocat_ex"]),
          # クーポン：利用数(点数)と割引額（値引はマイナス金額で入ることが多い）
          "coup": round(v["coup_q"]), "coupAmt": round(v["coup_in"]),
          # 無人／有人の売上内訳（exU/exM）と、有人来店の手入力（vm）。該当する店・日だけ付く。
@@ -449,15 +526,24 @@ def build_data(sb: Supabase) -> dict:
                     camp_override[str(cid)] = o.get("destination_id")
         except Exception:
             pass    # まだテーブルが無い環境でも動く
-        # follows / profile_visits は取り込みの拡張後に増える列。まだ無い環境でも動くよう、
-        # 付きで取りに行って失敗したら基本の列だけで取り直す（列が増えたら自動で拾う）。
+        # follows / profile_visits / likes / video_avg_time_watched は取り込みの拡張後に
+        # 増える列。実在する列だけを選ぶので、まだ無い環境でも落ちない。
+        #
+        # 平均視聴時間の列名は video_avg_time_watched。以前ここに書いてあった
+        # video_avg_seconds は中身が入らないまま 2026-08-13 に削除された旧列で、
+        # 存在しない列を混ぜたせいで同じ組の likes / profile_visits ごと
+        # 取得に失敗していた（画面に「未取込」と出ていた原因）。
         BASE = ("date,account_name,campaign_id,campaign_name,destination_id,"
                 "spend,impressions,reach,clicks")
-        try:
-            meta_src = _select_all(sb, "meta_insights_daily",
-                                   BASE + ",follows,profile_visits", order="date")
-        except Exception:
-            meta_src = _select_all(sb, "meta_insights_daily", BASE, order="date")
+        # landing_page_views は CPC の分母に要る。プロフアクセス数は最適化目標が
+        # PROFILE_VISIT のキャンペーンでしか取れず、リンク遷移のキャンペーンでは
+        # 分母が空のまま消化額だけが分子に乗る（福井でCPCが15円→66円に跳ねた原因）。
+        # video_plays は平均視聴時間を再生数で重み付けするために持つ。
+        OPTIONAL = ["follows", "profile_visits", "likes",
+                    "video_avg_time_watched", "video_plays", "landing_page_views"]
+        meta_src = _select_all(sb, "meta_insights_daily",
+                               _select_cols(sb, "meta_insights_daily", BASE, OPTIONAL),
+                               order="date")
         for r in meta_src:
             cid = r.get("campaign_id")
             did = r.get("destination_id")
@@ -481,11 +567,23 @@ def build_data(sb: Supabase) -> dict:
                 "rc": int(r.get("reach") or 0),
                 "ck": int(r.get("clicks") or 0),
             })
-            # フォロー数・プロフアクセス数は、列がある環境だけ載せる（無い日は付けない）
+            # フォロー数・プロフアクセス数・いいね数・平均視聴時間は、
+            # 列がある環境だけ載せる（無い日は付けない＝画面では「—」になる）
             if r.get("follows") is not None:
                 meta_rows[-1]["fl"] = int(r["follows"] or 0)
             if r.get("profile_visits") is not None:
                 meta_rows[-1]["pv"] = int(r["profile_visits"] or 0)
+            if r.get("likes") is not None:
+                meta_rows[-1]["lk"] = int(r["likes"] or 0)
+            # 平均視聴時間は「1再生あたりの秒数」。行をまたいで足せない値なので、
+            # 画面側は再生数(vp)で重み付けして平均する。vp が無い行は単純平均に落とす。
+            if r.get("video_avg_time_watched") is not None:
+                meta_rows[-1]["vt"] = float(r["video_avg_time_watched"] or 0)
+            if r.get("video_plays") is not None:
+                meta_rows[-1]["vp"] = int(r["video_plays"] or 0)
+            # lp=リンク遷移数。CPCの分母を pv+lp にするために持つ
+            if r.get("landing_page_views") is not None:
+                meta_rows[-1]["lp"] = int(r["landing_page_views"] or 0)
         runs = sb.select("meta_sync_runs", {
             "select": "started_at,status,unmapped_campaigns,rows_upserted,since,until",
             "order": "started_at.desc", "limit": "1"})
@@ -510,15 +608,25 @@ def build_data(sb: Supabase) -> dict:
     meta_ads: list[dict] = []
     try:
         since = (datetime.now(JST).date() - timedelta(days=META_AD_DAYS)).isoformat()
+        # ad_id / account_id は広告マネージャへのリンクを作るのに要る
+        #（数字を見てそのまま直しに行けるように、クリエイティブ名からリンクする）。
+        ADBASE = ("date,ad_id,account_id,ad_name,campaign_name,destination_id,"
+                  "spend,impressions,reach,clicks")
+        # profile_visits はクリエイティブ別のCPC（＝広告費÷プロフアクセス数）に要る。
+        # 実在する列だけを選ぶ（列が増えたら自動で拾う。無くても落ちない）。
+        ADOPTIONAL = ["video_avg_time_watched", "video_plays", "profile_visits",
+                      "follows", "likes", "landing_page_views"]
         src = _select_all(sb, "meta_insights_daily_ad",
-                          "date,ad_name,campaign_name,destination_id,"
-                          "spend,impressions,reach,clicks",
+                          _select_cols(sb, "meta_insights_daily_ad", ADBASE, ADOPTIONAL),
                           order="date", extra={"date": f"gte.{since}"})
         for r in src:
             did = r.get("destination_id")
             meta_ads.append({
                 "d": str(r["date"]),
                 "an": r.get("ad_name") or "(名称なし)",
+                # ai=広告ID / ac=広告アカウントID。広告マネージャのURLに使う
+                "ai": str(r["ad_id"]) if r.get("ad_id") is not None else None,
+                "ac": str(r["account_id"]) if r.get("account_id") is not None else None,
                 "c": r.get("campaign_name") or "(名称なし)",
                 "st": dest_name.get(str(did)) if did else None,
                 "si": dest_sid.get(str(did)) if did else None,
@@ -527,6 +635,19 @@ def build_data(sb: Supabase) -> dict:
                 "rc": int(r.get("reach") or 0),
                 "ck": int(r.get("clicks") or 0),
             })
+            if r.get("video_avg_time_watched") is not None:
+                meta_ads[-1]["vt"] = float(r["video_avg_time_watched"] or 0)
+            if r.get("video_plays") is not None:
+                meta_ads[-1]["vp"] = int(r["video_plays"] or 0)
+            if r.get("landing_page_views") is not None:
+                meta_ads[-1]["lp"] = int(r["landing_page_views"] or 0)
+            # 未取得の日は付けない（付けないと画面で「—」になる。0にはしない）
+            if r.get("profile_visits") is not None:
+                meta_ads[-1]["pv"] = int(r["profile_visits"] or 0)
+            if r.get("follows") is not None:
+                meta_ads[-1]["fl"] = int(r["follows"] or 0)
+            if r.get("likes") is not None:
+                meta_ads[-1]["lk"] = int(r["likes"] or 0)
         if meta_ads:
             names = len({r["an"] for r in meta_ads})
             print(f"  Meta広告(クリエイティブ): {len(meta_ads)}行 / {names}種"
@@ -555,7 +676,7 @@ def build_data(sb: Supabase) -> dict:
         "metaDests": dests,
         "metaSync": meta_sync,
         "stores": [{"id": s["id"], "name": name_by_id.get(s["id"], str(s["id"])),
-                    "own": own_by_id.get(s["id"], "直営"),
+                    "own": own_by_id.get(s["id"]),      # null＝区分が未設定
                     "kv": kv_by_id.get(s["id"], True),
                     "visible": vis_by_id.get(s["id"], True)}
                    for s in stores],
@@ -705,6 +826,10 @@ def write_dash_tables(sb: Supabase, data: dict) -> None:
         "sales_in": r.get("in"), "sales_ex": r.get("ex"),
         "tx": r.get("tx"), "items": r.get("it"), "visitors": r.get("v"),
         "bag_in": r.get("bag"), "bag_ex": r.get("bagEx"), "bag_qty": r.get("bagq"),
+        # komono_ex=小物の税抜売上（商品単価の分子から差し引く用）。
+        "komono_ex": r.get("komEx"),
+        # nocat_ex=「明細なし」実売上の税抜（点数の無い売上／商品単価の分子から差し引く用）。
+        "nocat_ex": r.get("nocatEx"),
         "coupon_qty": r.get("coup"), "coupon_amount": r.get("coupAmt"),
         # exU/exM/vm は該当する店・日にしか付かない。無ければ null のまま。
         "sales_ex_unmanned": r.get("exU"), "sales_ex_manned": r.get("exM"),
