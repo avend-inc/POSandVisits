@@ -1,0 +1,73 @@
+# ============================================================
+#  毎朝の物件discovery（実サイト取得→feed追記→Supabase反映→新規時Slack）
+#
+#  【なぜGitHub Actionsか】
+#   Claudeセッション環境は不動産サイトへegress遮断で出られない。GitHub Actions は
+#   インターネットに出られるため、実サイトを取得して物件を集められる。
+#   （§10のとおりデータセンターIPが一部サイトにbot遮断される可能性はある。
+#    取れないサイトは自動でスキップし、取れた分だけ feed に足す。）
+#
+#  【動くタイミング】毎朝6:03 JST / 手動
+#  【やること】discover.py で新規物件を feeds/bukken.jsonl に追記 → push →
+#             sync_bukken.py で Supabase へ upsert → 新規があれば店舗開発チャンネルへ通知
+# ============================================================
+name: 物件discovery(毎朝・bukken)
+
+on:
+  schedule:
+    - cron: "3 21 * * *"    # 06:03 JST
+  workflow_dispatch:
+
+concurrency:
+  group: bukken-discover
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      SLACK_WEBHOOK_BUKKEN: ${{ secrets.SLACK_WEBHOOK_BUKKEN }}
+      SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+      SCOUT_CONTACT: ${{ secrets.SCOUT_CONTACT }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/supabase-etl
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 依存インストール
+        run: python -m pip install --quiet requests beautifulsoup4 lxml
+
+      - name: 実サイトから新規物件を発見して feed に追記
+        id: disc
+        run: python notime-property-scout/tools/discover.py
+
+      - name: 新規があれば feed を commit & push
+        if: ${{ steps.disc.outputs.new_count != '0' && steps.disc.outputs.new_count != '' }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add notime-property-scout/feeds/bukken.jsonl
+          git commit -m "discovery: 新規物件を追記 (${{ steps.disc.outputs.new_count }}件)"
+          git push origin HEAD:feature/supabase-etl
+
+      - name: Supabaseへ upsert（新規判定つき）
+        id: sync
+        run: python notime-property-scout/tools/sync_bukken.py
+
+      - name: Slack通知（新規のみ・店舗開発チャンネル）
+        if: ${{ steps.sync.outputs.new_count != '0' && steps.sync.outputs.new_count != '' }}
+        env:
+          NEW_COUNT: ${{ steps.sync.outputs.new_count }}
+          NAMES: ${{ steps.sync.outputs.names }}
+        run: |
+          hook="${SLACK_WEBHOOK_BUKKEN:-$SLACK_WEBHOOK}"
+          if [ -z "$hook" ]; then echo "Slack webhook未設定。通知スキップ"; exit 0; fi
+          payload=$(python3 -c 'import json,os; print(json.dumps({"text":"🏢 新しい物件が "+os.environ["NEW_COUNT"]+" 件あります\n"+os.environ.get("NAMES","")+"\n▶ レビュー: https://avend-inc.github.io/POSandVisits/bukken.html"}))')
+          curl -sS -X POST -H 'content-type: application/json' --data "$payload" "$hook" || true
