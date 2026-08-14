@@ -47,8 +47,10 @@ _RE_PARK = re.compile(r"駐車[場車]?[^\d]{0,6}(\d+)\s*台")
 _RE_FLOOR = re.compile(r"(?:^|[^\d])(\d{1,2})\s*階")
 _RE_ROAD = re.compile(r"路面|幹線|国道|バイパス|ロードサイド")
 _RE_HASSPEC = re.compile(r"坪|㎡|m2|平米|賃料|家賃|万円|駐車")
-# 物件詳細ページらしいリンク
-_RE_DETAIL = re.compile(r"detailPage|/detail[-/]|/bukken/|/property/|/room/|/rent[_/].*\d", re.I)
+# 物件“個別”詳細ページらしいリンク（§9.1：一覧URLは不可。個別のみ拾う）
+_RE_DETAIL = re.compile(r"detailPage|/detail[-/]|/bukken[-/]|/property/[^/]*\d|/room/[^/]*\d", re.I)
+# 一覧・検索・カテゴリ等（=個別物件ではない）は除外する
+_RE_NOTDETAIL = re.compile(r"/result/|/list/|/search|/category|/area_|/grouping/|sp-tenannto", re.I)
 
 
 def load_known():
@@ -103,11 +105,11 @@ def extract(html: str, source: str, city: str, base_url: str,
     out, seen = [], set()
     for a in soup.find_all("a", href=True):
         href = a["href"]
-        if not _RE_DETAIL.search(href):
+        if not _RE_DETAIL.search(href) or _RE_NOTDETAIL.search(href):
             continue
         url = urljoin(base_url, href.split("#")[0])
-        if url in seen or url in known_urls:
-            continue
+        if url == base_url or url in seen or url in known_urls:
+            continue      # 一覧URL自身や既知URLは弾く（§9.1 一覧URLは不可）
         card = a.find_parent(["li", "article", "div", "tr", "section"]) or a.parent
         text = card.get_text(" ", strip=True) if card else ""
         if not _RE_HASSPEC.search(text):

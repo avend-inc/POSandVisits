@@ -136,7 +136,9 @@ function render(){
     const rent=r.rent_yen?YEN(r.rent_yen):"要確認";
     const park=(r.parking!=null)?r.parking+"台":"—";
     const floor=(r.floor!=null)?r.floor+"階":"—";
-    const link=r.detail_url?'<a href="'+esc(r.detail_url)+'" target="_blank" rel="noopener">元ページ ›</a>':'';
+    // 個別物件URLか、業者の一覧ページかでラベルを分ける（正直表記）
+    const isDetail=/detailPage|\/detail[-\/]|\/bukken[-\/]|\/property\/[^\/]*\d/i.test(r.detail_url||"");
+    const link=r.detail_url?'<a href="'+esc(r.detail_url)+'" target="_blank" rel="noopener">'+(isDetail?'物件ページ':'掲載元サイト（一覧）')+' ›</a>':'';
     return `<div class="card v-${esc(v)}" data-id="${esc(r.id)}">
       <div class="top">${badge}<span class="city">${esc(r.city)}</span></div>
       <div class="name">${esc(r.name||"（名称なし）")}</div>
