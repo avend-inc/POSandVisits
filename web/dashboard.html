@@ -4869,8 +4869,16 @@ function trendShift(dir){const g=state.grain;
 // 全期間のマス＝データのある最初の月から最新の月まで、途切れなく並べる。
 //   売上が1件も無い月も飛ばさずに出す（間を詰めると、休んでいた月が無かったことになる）。
 function trendAllMonths(){
-  const from=(DATA._min||"").slice(0,7), to=(DATA._salesMax||DATA._max||"").slice(0,7);
-  if(!from||!to)return [];
+  // 店舗ページなら、その店に売上がある範囲にする。全店の最古から始めると、
+  // あとから開いた店は左half分が空欄になって、肝心の推移が右端に潰れる
+  //（店ごとに始まりが違う。下北沢は2025-04から）。
+  let from=(DATA._min||"").slice(0,7), to=(DATA._salesMax||DATA._max||"").slice(0,7);
+  if(state.detail!=null){
+    const ds=DATA.daily.filter(r=>r.s===state.detail&&(r.ex!=null||(r.in||0)>0||(r.tx||0)>0))
+                       .map(r=>r.d).sort();
+    if(ds.length){ from=ds[0].slice(0,7); const mx=ds[ds.length-1].slice(0,7); if(mx<to)to=mx; }
+  }
+  if(!from||!to||from>to)return [];
   const keys=[];let[y,m]=from.split("-").map(Number);
   for(let i=0;i<600;i++){                          // 50年ぶんで打ち切り（無限ループよけ）
     const k=`${y}-${String(m).padStart(2,"0")}`;keys.push(k);

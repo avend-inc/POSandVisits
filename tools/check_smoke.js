@@ -53,11 +53,16 @@ const STORES = [
   // 内訳の段・有人来店の手入力・来店数の合算という、この店だけの作りがある。
   // 広告を全店に広げたときに、そこが消えないことを見る
   { id: 5, name: "SFG下北沢", own: "直営", kv: true, visible: true, mix: true },
+  // あとから開いた店。「全期間」がその店の範囲になることを見る
+  //（全店の最古から始めると、左半分が空欄になって推移が右端に潰れる）
+  { id: 6, name: "NTM新店", own: "直営", kv: true, visible: true, opensAt: 300 },
 ];
+const LATE = 6, LATE_OPENS = 300;
 const SHIMO = 5;
 const daily = [];
 for (let i = 0; i < DAYS; i++) {
   for (const s of STORES) {
+    if (s.opensAt != null && i < s.opensAt) continue;   // 開店前は行そのものが無い
     const r = {
       d: day(i), s: s.id,
       ex: (s.id === 4 && i % 7 === 0) ? null : 80000 + ((i * 37 + s.id * 11) % 40000),
@@ -271,6 +276,16 @@ for (const [name, query] of VIEWS) {
   }
   // 店舗一覧の④売上推移は別の関数（drawTrend2）が描いていて、こちらは表も作る。
   // 同じ「全期間」で落ちないことを見る（片方だけ直して片方が壊れる、を防ぐ）
+  // あとから開いた店は、その店に売上がある月だけを並べる（全店の最古から始めない）
+  const dn = run("all", `?g=own&store=${LATE}`);
+  if (!dn) { console.log("  NG  あとから開いた店で「全期間」に切り替えられませんでした"); ng++; }
+  else {
+    const lateMonths = new Set(daily.filter((r) => r.s === LATE).map((r) => r.d.slice(0, 7)));
+    ok(`あとから開いた店の「全期間」はその店の範囲だけ（${dn.keys}マス／その店は${lateMonths.size}か月）`,
+      dn.keys === lateMonths.size, `${dn.first}〜${dn.last}`);
+    ok("あとから開いた店の「全期間」が全店の最古から始まっていない",
+      dn.keys < months.size, `${dn.keys} vs 全店 ${months.size}`);
+  }
   const dl = run("all", "?g=own");
   if (!dl) { console.log("  NG  店舗一覧の推移で「全期間」に切り替えられませんでした"); ng++; }
   else {
