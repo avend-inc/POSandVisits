@@ -454,6 +454,9 @@ const KPI_ORDER=["ex","v","tx","qty","pr","aov","upt","aup"];
 //   直営ページ … 直営店だけ。FCページ … FC店だけ。既定（無指定）は直営。
 // ?store=<id> があれば「店舗専用ページ」を表示（一覧の店名タップで遷移＝ブラウザ戻るで一覧へ）
 // ログイン後にURLを復元して読み直せるよう、let にして関数から入れ直せるようにしてある。
+// 物件レビューページ（直営タブ右上「物件一覧」ボタンの飛び先）。同アプリ内の bukken.html。
+// 外部URL（別ホスティングのHTMLレポート等）にしたいときは絶対URLを入れれば別タブで開く。
+const BUKKEN_REPORT_URL="bukken.html";
 let GROUP="own", GROUP_LABEL="直営店", DETAIL_ID=null, VIEW="";
 function readRoute(){
   const q=new URLSearchParams(location.search);
@@ -2003,8 +2006,15 @@ function wireCommon(){
   });
   on("themebtn","onclick",toggleTheme);
   on("reportbtn","onclick",openReportDialog);
+  on("bukkenbtn","onclick",openBukken);
   on("storereportbtn","onclick",openStoreReportDialog);
   if(SB)on("logoutbtn","onclick",doLogout);
+}
+// 直営タブ右上「🏢 物件一覧」→ 物件レビューページを開く。相対パスは同タブ遷移、絶対URLは別タブ。
+function openBukken(){
+  if(!BUKKEN_REPORT_URL){ alert("物件レビューページは準備中です。"); return; }
+  if(/^https?:/i.test(BUKKEN_REPORT_URL)){ window.open(BUKKEN_REPORT_URL,"_blank","noopener"); }
+  else{ location.href=BUKKEN_REPORT_URL; }
 }
 function renderMain(){
   syncAdminTab(); syncAdsTab();
@@ -2013,7 +2023,8 @@ function renderMain(){
   document.getElementById("app").innerHTML=`
     <header>
       <h1>売上KPI管理 <span class="gbadge">${GROUP_LABEL}</span></h1>
-      <button class="themebtn" id="reportbtn" style="margin-left:auto;width:auto;padding:0 12px;gap:5px">📊 レポート</button>
+      ${(GROUP==="own"&&!window.FRANCHISEE)?'<button class="themebtn" id="bukkenbtn" style="margin-left:auto;width:auto;padding:0 12px;gap:5px">🏢 物件一覧</button>':''}
+      <button class="themebtn" id="reportbtn" style="margin-left:${(GROUP==="own"&&!window.FRANCHISEE)?'6px':'auto'};width:auto;padding:0 12px;gap:5px">📊 レポート</button>
       <button class="themebtn" id="themebtn" style="margin-left:6px">◐</button>
       ${SB?'<button class="themebtn" id="logoutbtn" style="margin-left:6px">ログアウト</button>':''}
     </header>
