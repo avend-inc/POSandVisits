@@ -51,19 +51,27 @@
   .gbtn .g{width:18px;height:18px;border-radius:50%;background:conic-gradient(#ea4335 0 25%,#fbbc05 0 50%,#34a853 0 75%,#4285f4 0);}
   .navlink{color:var(--accent);text-decoration:none;font-weight:700;font-size:14px;}
   .err{padding:20px;color:var(--bad);font-weight:600;}
+  /* 「ホーム」ボタン。どのページでも同じ見た目にするため、
+     ページごとに違う .navlink には頼らず自前で持つ */
+  .homebtn{display:inline-flex;align-items:center;gap:4px;white-space:nowrap;margin-left:auto;
+    border:1px solid var(--border);background:var(--surface);color:var(--accent);
+    border-radius:9px;padding:7px 11px;font-size:12px;font-weight:700;
+    text-decoration:none;cursor:pointer;}
+  .homebtn:hover{border-color:var(--accent);}
 </style>
 </head>
 <body>
 <div class="wrap" id="app"><div class="sub" style="padding:40px 0">読み込み中…</div></div>
 <nav class="tabbar"><div class="tabbar-in">
-  <a href="index.html?g=own"><span class="ic">🏢</span>直営</a>
-  <a href="index.html?g=fc"><span class="ic">🏬</span>FC</a>
+  <a href="index.html?g=own" id="tab-own"><span class="ic">🏢</span>直営</a>
+  <a href="index.html?g=fc" id="tab-fc"><span class="ic">🏬</span>FC</a>
   <a href="pl.html"><span class="ic">📋</span>予実</a>
   <a href="trends.html"><span class="ic">📈</span>推移</a>
   <a href="promo.html"><span class="ic">🏷️</span>販促</a>
   <a href="ask.html"><span class="ic">🔍</span>分析AI</a>
-  <a href="keiei.html" class="on"><span class="ic">🧮</span>経営</a>
-  <a href="admin.html" id="tab-admin" style="display:none"><span class="ic">⚙️</span>管理</a>
+  <a href="index.html?view=ads&amp;g=own" id="tab-ads"><span class="ic">📣</span>広告</a>
+  <a href="keiei.html" id="tab-keiei" class="on"><span class="ic">🧮</span>経営</a>
+  <a href="admin.html" id="tab-admin"><span class="ic">⚙️</span>管理</a>
 </div></nav>
 <script>
 "use strict";
@@ -324,7 +332,9 @@ async function renderKeiei(){
   const niY=(k,v)=>`<span class="yenin">¥${ni(k,v)}</span>`;   // 円マーク付き入力
   const WH=[["NOTIME","NOTIME"],["SELFURUGI","SELFURUGI"],["GARAGE","SELFURUGI GARAGE"],["NEW","新店"]];
   let h='';
-  h+=`<header><h1>🧮 経営レポート</h1><span class="sub">対象 <b>${cur}</b>（前月 ${ml(prev)}／当月 ${ml(cur)}／来月 ${ml(next)}）${elapsed?`　当月は ${elapsed}/${daysIn}日で日割り換算`:'　当月データなし'}</span><a class="navlink" href="index.html" style="margin-left:auto">← ダッシュボード</a></header>`;
+  h+=`<header><h1>🧮 経営レポート</h1><span class="sub">対象 <b>${cur}</b>（前月 ${ml(prev)}／当月 ${ml(cur)}／来月 ${ml(next)}）${elapsed?`　当月は ${elapsed}/${daysIn}日で日割り換算`:'　当月データなし'}</span><a class="navlink" href="index.html" style="margin-left:auto">← ダッシュボード</a>
+      <a class="navlink homebtn" href="../" title="アプリのトップへ">🏠 ホーム</a>
+    </header>`;
   h+=`<div class="note">前月＝実績確定／当月＝<b>ダッシュボードと同じ着地見込み（①②③）</b>／翌月以降＝<b>予算（事業計画 bizplan）</b>を着地見込みに（予算が無い店のみ前年同月比で推定）。自動入力ですが編集できます（「保存する」で全員に共有）。</div>`;
   // ■ 予算達成の見込み（目標 vs 着地）※月次予実Excelから取込んだ目標を店舗に紐付け
   const trows=Object.keys(T).map(tok=>{ const cand=usableStores().filter(s=>(s.name||"").indexOf(tok)>=0); return {tok,st:cand.find(s=>ownOf(s.id)==="直営")||cand[0]}; }).filter(x=>x.st&&T[x.tok][cur]);

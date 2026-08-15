@@ -315,6 +315,41 @@ for (const [name, query] of VIEWS) {
     if (/(?<![.\w$])DATA\.daily/.test(t) && !/dash_daily/.test(t)) missing.push(f);
     if (/stock\.html/.test(t)) noStock.push(f);
   }
+  // メニューバーは全ページで同じ中身にする。以前は3種類に割れていた
+  //   ・dashboard だけ「広告」がある ・admin だけ「経営」が無い
+  //   ・bukken にはメニューバー自体が無い
+  // 「いま開いているページの印(on)」と「権限で隠す(display:none)」は
+  // ページごとに違ってよいので、そこは外してから見比べる。
+  {
+    // 転送だけのページ（forecast.html → pl.html）は中身が無いので対象外
+    const isStub = (t) => /http-equiv="refresh"/.test(t);
+    const real = pages.filter((f) => !isStub(fs.readFileSync(path.join(dir2, f), "utf8")));
+    const navOf = (t) => {
+      const m = /<nav class="tabbar">([\s\S]*?)<\/nav>/.exec(t);
+      if (!m) return null;
+      return [...m[1].matchAll(/<a href="([^"]+)"[^>]*>(?:<span[^>]*>[^<]*<\/span>)?([^<]*)<\/a>/g)]
+        .map((x) => `${x[1]} ${x[2].trim()}`).join(" / ");
+    };
+    const navs = {}, noNav = [];
+    for (const f of real) {
+      const n = navOf(fs.readFileSync(path.join(dir2, f), "utf8"));
+      if (n === null) { noNav.push(f); continue; }
+      (navs[n] || (navs[n] = [])).push(f);
+    }
+    const kinds = Object.keys(navs);
+    ok("メニューバーが全ページで同じ", kinds.length === 1 && noNav.length === 0,
+      [...(noNav.length ? [`メニューバーが無い: ${noNav.join(", ")}`] : []),
+       ...(kinds.length > 1 ? kinds.map((k, i) => `(${i + 1}) ${navs[k].join(", ")}`) : [])]);
+    // アプリのトップへ戻る導線。/sales/ の1つ上なので相対で "../"
+    const noHome = real.filter((f) =>
+      !/class="navlink homebtn"/.test(fs.readFileSync(path.join(dir2, f), "utf8")));
+    ok("どのページにもホームボタンがある", noHome.length === 0, noHome);
+    const badHref = real.filter((f) => {
+      const t = fs.readFileSync(path.join(dir2, f), "utf8");
+      return /homebtn/.test(t) && !/<a class="navlink homebtn" href="\.\.\/"/.test(t);
+    });
+    ok('ホームボタンの行き先が "../"（絶対パスにしない）', badHref.length === 0, badHref);
+  }
   ok(`日別を使うページは全部 dash_daily を読んでいる（${pages.length}ページ）`,
     missing.length === 0, missing.join(", "));
   // 棚卸は在庫アプリの /pos-stocktake に移した。売上アプリ側には残さない

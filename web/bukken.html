@@ -67,13 +67,22 @@
   .mfoot button{flex:1;border-radius:11px;padding:13px 0;font-size:15px;font-weight:700;cursor:pointer;border:1px solid var(--border)}
   #rsave{background:var(--accent);color:#fff;border-color:var(--accent)}
   #rcancel{background:#fafafa;color:var(--ink2)}
+  /* 「ホーム」ボタン。どのページでも同じ見た目にするため、
+     ページごとに違う .navlink には頼らず自前で持つ */
+  .homebtn{display:inline-flex;align-items:center;gap:4px;white-space:nowrap;margin-left:auto;
+    border:1px solid var(--border);background:var(--surface);color:var(--accent);
+    border-radius:9px;padding:7px 11px;font-size:12px;font-weight:700;
+    text-decoration:none;cursor:pointer;}
+  .homebtn:hover{border-color:var(--accent);}
 </style></head>
 <body>
 <header>
   <a class="hbtn" href="index.html?g=own">‹ 戻る</a>
   <h1>物件レビュー</h1>
   <button class="hbtn" id="logoutbtn" style="display:none">ログアウト</button>
-</header>
+
+      <a class="navlink homebtn" href="../" title="アプリのトップへ">🏠 ホーム</a>
+    </header>
 <main>
   <div class="filters" id="filters" style="display:none">
     <button class="chip on" data-f="todo">未判定</button>
@@ -335,4 +344,15 @@ document.querySelectorAll(".chip").forEach(c=>c.onclick=()=>{
 
 boot();
 </script>
+<nav class="tabbar"><div class="tabbar-in">
+  <a href="index.html?g=own" id="tab-own"><span class="ic">🏢</span>直営</a>
+  <a href="index.html?g=fc" id="tab-fc"><span class="ic">🏬</span>FC</a>
+  <a href="pl.html"><span class="ic">📋</span>予実</a>
+  <a href="trends.html"><span class="ic">📈</span>推移</a>
+  <a href="promo.html"><span class="ic">🏷️</span>販促</a>
+  <a href="ask.html"><span class="ic">🔍</span>分析AI</a>
+  <a href="index.html?view=ads&amp;g=own" id="tab-ads"><span class="ic">📣</span>広告</a>
+  <a href="keiei.html" id="tab-keiei" style="display:none"><span class="ic">🧮</span>経営</a>
+  <a href="admin.html" id="tab-admin" style="display:none"><span class="ic">⚙️</span>管理</a>
+</div></nav>
 </body></html>
