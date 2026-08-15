@@ -48,13 +48,13 @@ jobs:
         id: disc
         run: python notime-property-scout/tools/discover.py
 
-      - name: 新規があれば feed を commit & push
-        if: ${{ steps.disc.outputs.new_count != '0' && steps.disc.outputs.new_count != '' }}
+      - name: feed に変更があれば commit & push（新規0でも補完分を確定）
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add notime-property-scout/feeds/bukken.jsonl
-          git commit -m "discovery: 新規物件を追記 (${{ steps.disc.outputs.new_count }}件)"
+          if git diff --cached --quiet; then echo "feed変更なし"; exit 0; fi
+          git commit -m "discovery: feed更新（新規 ${{ steps.disc.outputs.new_count }} 件・補完含む）"
           git push origin HEAD:feature/supabase-etl
 
       - name: Supabaseへ upsert（新規判定つき）
