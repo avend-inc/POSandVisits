@@ -358,6 +358,15 @@ def enrich(rec: dict) -> dict | None:
     return rec
 
 
+def _feed_screen_out(r: dict) -> bool:
+    """feedに残すべきでない行（未判定の想定）: 100坪超 or 事務所・オフィス専用。"""
+    at = r.get("area_tsubo")
+    if at and at > AREA_MAX_TSUBO:
+        return True
+    hay = " ".join(str(r.get(k) or "") for k in ("usage", "name", "note"))
+    return _office_only(hay)
+
+
 def sources() -> list[tuple[str, str, str]]:
     """(city, source_name, list_url)。semi(bot遮断)は除外。"""
     lst = []
@@ -437,6 +446,12 @@ def main() -> int:
     print(f"既存の家賃null行を補完: {filled} 件試行")
 
     all_rows = kept + found            # 既存(補完済) + 新規
+    # feed書き出し時の最終スクリーニング（除外条件が後から入っても、次回以降で確実に落とす）。
+    #  判定済みはfeedに存在しない（verdictはDB側のみ）ので、ここでの除外は未判定行だけに効く。
+    before = len(all_rows)
+    all_rows = [r for r in all_rows if not _feed_screen_out(r)]
+    if before != len(all_rows):
+        print(f"feed最終スクリーニング除外 {before - len(all_rows)} 件（100坪超/事務所専用）")
     with FEED.open("w", encoding="utf-8") as f:
         for r in all_rows:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
