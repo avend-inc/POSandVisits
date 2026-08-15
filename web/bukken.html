@@ -174,10 +174,13 @@ function fPark(r){
 }
 function fFloor(r){ return r.floor==null?'<span class="unk">不明</span>':r.floor+"階"; }
 function fStation(r){
-  const nm=r.station_name||STATION[r.city]||"";
-  if(r.station_km==null) return (nm?esc(nm)+" ":"")+'<span class="unk">不明</span>';
-  const drv=r.station_drive_min!=null?"（車"+r.station_drive_min+"分）":"";
-  return esc(nm)+" "+r.station_km.toFixed(1)+"km"+drv;
+  if(r.station_name){          // 詳細ページ由来（例「秋田駅 徒歩11分」）
+    let s=esc(r.station_name);
+    if(r.station_km!=null)s+=" "+r.station_km.toFixed(1)+"km";
+    return s;
+  }
+  const nm=STATION[r.city]||"";
+  return (nm?esc(nm)+" ":"")+'<span class="unk">不明</span>';
 }
 function gmapUrl(r){
   const q=(r.address&&r.address.trim())?r.address:((r.city||"")+(r.name||""));

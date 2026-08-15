@@ -38,9 +38,9 @@ UA = f"notime-property-scout/0.1 (+{CONTACT})"
 REQUEST_GAP_SEC = 3.0          # §5.4 1リクエスト/3秒以上
 MAX_NEW_PER_RUN = 60           # 1回の総上限（暴走防止）
 PER_CITY = 8                   # 1市あたりの上限（1市で埋め尽くさず6市に散らす）
-ENRICH_EXISTING = 30           # 既存の家賃null行を1回あたり最大この数だけ詳細ページで補完
+ENRICH_EXISTING = 50           # 既存の家賃/面積が欠けた行を1回あたり最大この数だけ詳細ページで読み直す
 PROP_COLS = ["id", "city", "name", "address", "area_tsubo", "area_sqm", "rent_yen",
-             "parking", "floor", "source", "detail_url", "success_flag", "note"]
+             "parking", "floor", "station_name", "source", "detail_url", "success_flag", "note"]
 
 # カード本文からのスペック抽出（連合隊パーサと同じ二段構えの正規表現側）
 # 賃料：月額。直後が「坪」のものは坪単価なので除外（負の先読み）。
@@ -161,10 +161,11 @@ def extract(html: str, source: str, city: str, base_url: str,
             "area_tsubo": round(area_tsubo, 2) if area_tsubo else None,
             "area_sqm": round(area_sqm, 2) if area_sqm else None,
             "rent_yen": rent, "parking": parking, "floor": floor,
+            "station_name": None,
             "source": source, "detail_url": url, "success_flag": success,
             "note": note,
         }
-        out.append({k: rec[k] for k in PROP_COLS})
+        out.append({k: rec.get(k) for k in PROP_COLS})
     return out
 
 
@@ -195,6 +196,10 @@ def enrich(rec: dict) -> dict | None:
         if fl >= 3:
             return None            # 1階・2階のみ（§2 G2）
         rec["floor"] = fl
+    # 最寄り駅（例「秋田駅 徒歩11分」）を詳細ページから拾う
+    sm = re.search(r"([^\s、。/／]{1,12}駅)\s*(徒歩|車|バス)?\s*(\d+)\s*分", text)
+    if sm:
+        rec["station_name"] = f"{sm.group(1)} {sm.group(2) or ''}{sm.group(3)}分".strip()
     at, pk2 = rec.get("area_tsubo"), rec.get("parking")
     rec["success_flag"] = bool(at and at >= 25 and (pk2 is None or pk2 >= 2)
                                and _RE_ROAD.search(text))
@@ -264,7 +269,9 @@ def main() -> int:
     budget = ENRICH_EXISTING
     kept = []
     for r in existing:
-        need = (not r.get("rent_yen")) and bool(re.search(r"detailPage|/detail[-/]|/bukken[-/]", r.get("detail_url") or ""))
+        indiv = bool(re.search(r"detailPage|/detail[-/]|/bukken[-/]", r.get("detail_url") or ""))
+        # 家賃 or 面積 が欠けている行は詳細ページで読み直す（一覧の誤家賃も上書き修正される）
+        need = indiv and (not r.get("area_tsubo") or not r.get("rent_yen"))
         if budget > 0 and need:
             time.sleep(REQUEST_GAP_SEC)
             e = enrich(r)
