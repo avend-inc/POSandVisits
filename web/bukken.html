@@ -167,6 +167,15 @@ function fArea(r){
   if(r.area_tsubo==null) return '<span class="unk">不明</span>';
   return r.area_tsubo.toFixed(1)+"坪"+(r.area_sqm!=null?"（"+r.area_sqm.toFixed(1)+"㎡）":"");
 }
+// 想定は25〜50坪。50坪超は「広い＝建物全体の可能性」で要確認、25坪未満は「狭い」で要確認。
+function areaWarn(r){
+  if(r.area_tsubo==null) return "";
+  if(r.area_tsubo>50) return ' <span class="badge warn">⚠広い</span>';
+  if(r.area_tsubo<25) return ' <span class="badge warn">⚠狭い</span>';
+  return "";
+}
+// 用途（事務所/店舗 等）。取得できていれば表示。
+function fUsage(r){ return r.usage?esc(r.usage):'<span class="unk">不明</span>'; }
 function fRent(r){ return r.rent_yen==null?'<span class="unk">不明</span>':YEN(r.rent_yen); }
 // 家賃の異常値検知：面積があれば坪単価、無ければ絶対額で「高すぎ（＝保証金/坪単価総額の拾い間違い疑い）」を判定
 function rentWarn(r){
@@ -208,8 +217,9 @@ function render(){
       <div class="name">${esc(r.name||"（名称なし）")}</div>
       ${r.note?`<div class="note">${esc(r.note)}</div>`:""}
       <div class="specs">
-        <div><label>坪数</label><b>${fArea(r)}</b></div>
+        <div><label>坪数</label><b>${fArea(r)}${areaWarn(r)}</b></div>
         <div><label>家賃</label><b>${fRent(r)}${rentWarn(r)?' <span class="badge warn">⚠要確認</span>':''}</b></div>
+        <div><label>用途</label><b>${fUsage(r)}</b></div>
         <div><label>駐車場</label><b>${fPark(r)}</b></div>
         <div><label>階数</label><b>${fFloor(r)}</b></div>
         <div><label>主要駅からの距離</label><b>${fStation(r)}</b></div>

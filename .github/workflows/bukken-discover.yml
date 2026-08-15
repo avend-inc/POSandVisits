@@ -76,8 +76,9 @@ jobs:
           done
           echo "pushはリトライしても失敗。DBは既にupsert済みなので致命的ではない。"; exit 0
 
-      - name: Slack通知（新規のみ・店舗開発チャンネル）
-        if: ${{ steps.sync.outputs.new_count != '0' && steps.sync.outputs.new_count != '' }}
+      # 通知は「毎朝の定期実行」1回だけ。手動実行(workflow_dispatch)や検証実行では鳴らさない。
+      - name: Slack通知（新規のみ・店舗開発チャンネル・1日1回）
+        if: ${{ github.event_name == 'schedule' && steps.sync.outputs.new_count != '0' && steps.sync.outputs.new_count != '' }}
         env:
           NEW_COUNT: ${{ steps.sync.outputs.new_count }}
           NAMES: ${{ steps.sync.outputs.names }}

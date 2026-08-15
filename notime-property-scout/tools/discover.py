@@ -40,21 +40,44 @@ MAX_NEW_PER_RUN = 60           # 1回の総上限（暴走防止）
 PER_CITY = 8                   # 1市あたりの上限（1市で埋め尽くさず6市に散らす）
 ENRICH_EXISTING = 50           # 既存の家賃/面積が欠けた行を1回あたり最大この数だけ詳細ページで読み直す
 PROP_COLS = ["id", "city", "name", "address", "area_tsubo", "area_sqm", "rent_yen",
-             "parking", "floor", "station_name", "source", "detail_url", "success_flag", "note"]
+             "parking", "floor", "station_name", "usage", "source", "detail_url",
+             "success_flag", "note"]
 
 # 全サイト共通の「ラベル基準」抽出。各不動産サイトはUIが違っても、賃料/面積/駐車場/
 # 階/駅という項目名(ラベル)は共通なので、ラベルの近くの数値を読む。ラベルの言い回しを広く取る。
 # 賃料：月額。直後が「坪」のものは坪単価なので除外（負の先読み）。
 _RE_RENT = re.compile(r"(?:賃料|家賃|月額賃料|月額|募集賃料)[^\d]{0,10}([\d,]+(?:\.\d+)?)\s*(万円|円)(?![\s/／]*坪)")
-# 面積：ラベル付き（土地面積は除く）を優先して拾う。
-_RE_AREA_L = re.compile(
-    r"(?:使用部分面積|使用面積|専有面積|賃貸面積|建物面積|延床面積|床面積|面積)[^\d]{0,8}"
+# 面積：まず「区画（テナント単位）の面積」を優先し、無ければ建物面積等にフォールバック。
+#  ※ 建物面積/延床面積を先に拾うと一棟全体の坪数(例236坪)を掴んで実態とズレるため二段構え。
+_RE_AREA_UNIT = re.compile(
+    r"(?:使用部分面積|使用面積|専有面積|賃貸面積|店舗面積|貸室面積|区画面積)[^\d]{0,8}"
+    r"([\d,]+(?:\.\d+)?)\s*(㎡|m2|m²|平米|坪|帖|畳)")
+_RE_AREA_BLDG = re.compile(
+    r"(?:建物面積|延床面積|床面積|面積)[^\d]{0,8}"
     r"([\d,]+(?:\.\d+)?)\s*(㎡|m2|m²|平米|坪|帖|畳)")
 _RE_PARK = re.compile(r"駐車[場車]?[^\d]{0,8}(\d+)\s*台")
 # 階数：「15階建」等の建物規模は拾わない（(?!建)）。物件の所在階のみ。
 _RE_FLOOR = re.compile(r"(?:所在階[^\d]{0,4})?(\d{1,2})\s*階(?!建)")
 _RE_STATION = re.compile(r"([^\s、。/／]{1,12}駅)\s*(徒歩|車|バス)?\s*(\d+)\s*分")
 RENT_MIN = 30000   # これ未満は坪単価/管理費の拾い間違いとみなし採用しない
+AREA_MAX_TSUBO = 100    # これ超は「建物全体の面積を誤取得」の疑いが濃いので不採用（NOTIME/SELFURUGIは25〜50坪想定）
+# 用途/種目（事務所かテナント店舗か）。店舗として出せない事務所・オフィス専用を弾くために使う。
+_RE_USAGE = re.compile(r"(?:用途|種目|物件種目|使用用途|業種|種別)[：:\s　]{0,4}([^\s　/／|｜、。]{1,20})")
+_RE_OFFICE = re.compile(r"事務所|オフィス")                       # オフィス系のシグナル
+_RE_RETAIL = re.compile(r"店舗|路面|物販|飲食|商店街|アーケード|ショップ|美容|物件種目.*店舗")  # 店舗系のシグナル
+
+
+def _usage(text: str) -> str | None:
+    m = _RE_USAGE.search(text or "")
+    return m.group(1).strip() if m else None
+
+
+def _office_only(text: str) -> bool:
+    """事務所・オフィス専用（店舗として出せない）と判断できるか。店舗シグナルがあれば残す。"""
+    t = text or ""
+    return bool(_RE_OFFICE.search(t)) and not bool(_RE_RETAIL.search(t))
+
+
 _RE_ROAD = re.compile(r"路面|幹線|国道|バイパス|ロードサイド")
 _RE_HASSPEC = re.compile(r"坪|㎡|m2|平米|賃料|家賃|万円|駐車")
 # 物件“個別”詳細ページらしいリンク（§9.1：一覧URLは不可。個別のみ拾う）
@@ -184,26 +207,33 @@ _MIN_AREA_SQM = 10.0   # これ未満は検索フィルタ枠/サンプル値の
                        #  店舗テナントは通常10㎡以上。小さすぎる値は採用せず「不明」にする（誤値より不明が正しい・§9.1.1）。
 
 
-def _area(text: str):
-    """(area_sqm, area_tsubo) を返す。ラベル付き面積を優先。
-
-    サイト共通の落とし穴として、詳細ページに検索フィルタ枠やサンプルの
-    「2.0坪(=6.61㎡)」等の極小固定値が混ざる。最初の一致を鵜呑みにせず、
-    ラベル付き一致を順に見て「10㎡以上」の最初の値を採用する（誤値を掴まない）。
-    """
-    for m in _RE_AREA_L.finditer(text or ""):
+def _area_from(rx, text):
+    """指定ラベル正規表現で「10㎡以上」の最初の面積を返す（極小のフィルタ/サンプル値は捨てる）。"""
+    for m in rx.finditer(text or ""):
         val = float(m.group(1).replace(",", ""))
         sqm = val * area_mod.UNIT_TO_SQM.get(m.group(2), 1.0)
         if sqm >= _MIN_AREA_SQM:
             return sqm, sqm / area_mod.TSUBO_TO_SQM
-    # ラベル付きが無い/全部極小 → 本文パースにフォールバック（単位不明なら None）
+    return None
+
+
+def _area(text: str):
+    """(area_sqm, area_tsubo) を返す。
+
+    優先順位: ①区画(テナント単位)面積 → ②建物面積等 → ③本文パース。
+    ①を優先することで、一棟全体の建物面積(例236坪)を掴んで実態とズレるのを防ぐ。
+    検索フィルタ枠やサンプルの「2.0坪(=6.61㎡)」等の極小固定値は各段で捨てる。
+    """
+    return (_area_from(_RE_AREA_UNIT, text) or _area_from(_RE_AREA_BLDG, text)
+            or _parse_area_min(text))
+
+
+def _parse_area_min(text: str):
     try:
         pa = area_mod.parse_area(text)
     except area_mod.ParseError:
         return None
-    if pa and pa[0] >= _MIN_AREA_SQM:
-        return pa
-    return None
+    return pa if (pa and pa[0] >= _MIN_AREA_SQM) else None
 
 
 def extract(html: str, source: str, city: str, base_url: str,
@@ -222,9 +252,13 @@ def extract(html: str, source: str, city: str, base_url: str,
         if not _RE_HASSPEC.search(text):
             continue                      # 物件っぽくない(ナビ等)は捨てる
         seen.add(url)
+        if _office_only(text):
+            continue                # 事務所・オフィス専用は店舗として出せないので除外
         # 面積(ラベル優先・単位必須)
         _a = _area(text)
         area_sqm, area_tsubo = _a if _a else (None, None)
+        if area_tsubo and area_tsubo > AREA_MAX_TSUBO:
+            continue                # 100坪超は建物全体の面積を誤取得の疑い（店舗区画として不採用）
         rent = _rent(text)
         parking = _int(_RE_PARK, text)
         floor = _int(_RE_FLOOR, text)
@@ -252,7 +286,7 @@ def extract(html: str, source: str, city: str, base_url: str,
             "area_tsubo": round(area_tsubo, 2) if area_tsubo else None,
             "area_sqm": round(area_sqm, 2) if area_sqm else None,
             "rent_yen": rent, "parking": parking, "floor": floor,
-            "station_name": None,
+            "station_name": None, "usage": _usage(text),
             "source": source, "detail_url": url, "success_flag": success,
             "note": note,
         }
@@ -281,11 +315,21 @@ def enrich(rec: dict) -> dict | None:
         if rtext:
             text = rtext          # 以降の抽出は描画後テキストで行う（家賃/駅等もより正確）
 
+    # 用途スクリーニング：事務所・オフィス専用（店舗として出せない）は除外
+    if _office_only(text):
+        return None
+    usage = _usage(text)
+    if usage:
+        rec["usage"] = usage
+
     r = _rent(text)
     if r is not None:
         rec["rent_yen"] = r
     a = _area(text)
     if a:
+        # 100坪超は一棟全体の面積を誤取得している疑い → 店舗区画として不採用（25〜50坪想定）
+        if a[1] > AREA_MAX_TSUBO:
+            return None
         rec["area_sqm"] = round(a[0], 2)
         rec["area_tsubo"] = round(a[1], 2)
     pk = _int(_RE_PARK, text)
