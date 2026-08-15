@@ -38,6 +38,7 @@ UA = f"notime-property-scout/0.1 (+{CONTACT})"
 REQUEST_GAP_SEC = 3.0          # §5.4 1リクエスト/3秒以上
 MAX_NEW_PER_RUN = 60           # 1回の総上限（暴走防止）
 PER_CITY = 8                   # 1市あたりの上限（1市で埋め尽くさず6市に散らす）
+ENRICH_EXISTING = 30           # 既存の家賃null行を1回あたり最大この数だけ詳細ページで補完
 PROP_COLS = ["id", "city", "name", "address", "area_tsubo", "area_sqm", "rent_yen",
              "parking", "floor", "source", "detail_url", "success_flag", "note"]
 
@@ -256,11 +257,31 @@ def main() -> int:
     got_rent = sum(1 for r in found if r.get("rent_yen"))
     print(f"  読み取り後 {len(found)} 件（家賃取得 {got_rent} 件）")
 
-    if found:
-        with FEED.open("a", encoding="utf-8") as f:
-            for r in found[:MAX_NEW_PER_RUN]:
-                f.write(json.dumps(r, ensure_ascii=False) + "\n")
-    print(f"\n合計 新規 {len(found)} 件を feed に追記")
+    # 既存feedの「家賃null」行も詳細ページで補完する（1回あたり上限・全体で徐々に埋まる）
+    existing = []
+    if FEED.exists():
+        existing = [json.loads(l) for l in FEED.read_text(encoding="utf-8").splitlines() if l.strip()]
+    budget = ENRICH_EXISTING
+    kept = []
+    for r in existing:
+        need = (not r.get("rent_yen")) and bool(re.search(r"detailPage|/detail[-/]|/bukken[-/]", r.get("detail_url") or ""))
+        if budget > 0 and need:
+            time.sleep(REQUEST_GAP_SEC)
+            e = enrich(r)
+            budget -= 1
+            if e is None:
+                continue            # 3階以上等で除外
+            kept.append(e)
+        else:
+            kept.append(r)
+    filled = ENRICH_EXISTING - budget
+    print(f"既存の家賃null行を補完: {filled} 件試行")
+
+    all_rows = kept + found            # 既存(補完済) + 新規
+    with FEED.open("w", encoding="utf-8") as f:
+        for r in all_rows:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    print(f"\n合計 新規 {len(found)} 件を追記（feed {len(all_rows)} 件）")
     gh = os.environ.get("GITHUB_OUTPUT")
     if gh:
         with open(gh, "a", encoding="utf-8") as f:
