@@ -98,6 +98,46 @@ async function boot(){ try{
 }catch(e){showError(e);} }
 async function ensureSupabase(){ if(window.supabase)return; await new Promise((res,rej)=>{const s=document.createElement("script");
   s.src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2";s.onload=res;s.onerror=()=>rej(new Error("ログイン部品を読み込めませんでした"));document.head.appendChild(s);}); }
+
+// 日別×店舗は data.json から外し、テーブル(dash_daily)から読む（2026-08-11〜）。
+//   このページはその切り替えに取り残されていて、DATA.daily が空のまま
+//   「データが空です」で止まっていた。dashboard.html と同じ読み方にそろえる。
+//   期間で切らずに全期間を取る：画面ごとに要る期間がばらばらで、切ると必ず
+//   どこかが足りなくなるため。RLS(can_view_store)が効くので、返るのは
+//   自分が見られる店の行だけ。
+async function loadDaily(){
+  const PAGE=1000, CONC=8;
+  const cols="date,store_id,sales_in,sales_ex,tx,items,visitors,bag_in,bag_ex,bag_qty,"+
+             "komono_ex,nocat_ex,coupon_qty,coupon_amount,"+
+             "sales_ex_unmanned,sales_ex_manned,visitors_staffed";
+  const out=[]; let page=0, done=false;
+  while(!done){
+    const jobs=[];
+    for(let i=0;i<CONC;i++,page++){
+      const off=page*PAGE;
+      jobs.push(SB.from("dash_daily").select(cols).order("date").range(off,off+PAGE-1));
+    }
+    const res=await Promise.all(jobs);
+    for(const {data,error} of res){
+      if(error)throw new Error("日別データを取得できませんでした（"+error.message+"）");
+      out.push(...(data||[]));
+      if(!data||data.length<PAGE)done=true;   // 最後まで来た
+    }
+  }
+  // data.json に入っていたのと同じ形にそろえる（画面側は一切変えない）。
+  // 該当しない店・日には付けない列（exU/exM/vm）は、null のときは付けない。
+  return out.map(r=>{
+    const o={d:r.date, s:r.store_id, in:r.sales_in, ex:r.sales_ex, tx:r.tx, it:r.items,
+             v:r.visitors, bag:r.bag_in, bagEx:r.bag_ex, bagq:r.bag_qty,
+             komEx:r.komono_ex, nocatEx:r.nocat_ex,
+             coup:r.coupon_qty, coupAmt:r.coupon_amount};
+    if(r.sales_ex_unmanned!=null)o.exU=r.sales_ex_unmanned;
+    if(r.sales_ex_manned!=null)o.exM=r.sales_ex_manned;
+    if(r.visitors_staffed!=null)o.vm=r.visitors_staffed;
+    return o;
+  });
+}
+
 async function authBoot(url,anon){ await ensureSupabase();
   SB=window.supabase.createClient(url,anon,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,flowType:"pkce",storageKey:"notime-auth"}});
   const {data:{session}}=await SB.auth.getSession();
@@ -108,6 +148,7 @@ async function authBoot(url,anon){ await ensureSupabase();
   const {data,error}=await SB.storage.from("dashboard-data").download("data.json");
   if(error)throw new Error("データを取得できませんでした（"+error.message+"）");
   DATA=JSON.parse(await data.text());
+  DATA.daily=await loadDaily();
   // バンドル名は bundle_master から最新を取り、集計済みの名前より優先（管理画面で足したら即反映）
   try{const {data:bm}=await SB.from("bundle_master").select("code,name");
     if(bm&&bm.length){DATA.bundleNames=DATA.bundleNames||{};bm.forEach(x=>{if(x.name)DATA.bundleNames[x.code]=x.name;});}}catch(e){}
