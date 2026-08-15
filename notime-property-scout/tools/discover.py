@@ -118,17 +118,30 @@ def _address(text: str) -> str:
     return m.group(0) if m else ""
 
 
+_MIN_AREA_SQM = 10.0   # これ未満は検索フィルタ枠/サンプル値の誤検出（例: goo詳細の固定「2.0坪＝6.61㎡」）。
+                       #  店舗テナントは通常10㎡以上。小さすぎる値は採用せず「不明」にする（誤値より不明が正しい・§9.1.1）。
+
+
 def _area(text: str):
-    """(area_sqm, area_tsubo) を返す。ラベル付き面積を優先、無ければ本文中の最初の面積。無ければ None。"""
-    m = _RE_AREA_L.search(text or "")
-    if m:
+    """(area_sqm, area_tsubo) を返す。ラベル付き面積を優先。
+
+    サイト共通の落とし穴として、詳細ページに検索フィルタ枠やサンプルの
+    「2.0坪(=6.61㎡)」等の極小固定値が混ざる。最初の一致を鵜呑みにせず、
+    ラベル付き一致を順に見て「10㎡以上」の最初の値を採用する（誤値を掴まない）。
+    """
+    for m in _RE_AREA_L.finditer(text or ""):
         val = float(m.group(1).replace(",", ""))
         sqm = val * area_mod.UNIT_TO_SQM.get(m.group(2), 1.0)
-        return sqm, sqm / area_mod.TSUBO_TO_SQM
+        if sqm >= _MIN_AREA_SQM:
+            return sqm, sqm / area_mod.TSUBO_TO_SQM
+    # ラベル付きが無い/全部極小 → 本文パースにフォールバック（単位不明なら None）
     try:
-        return area_mod.parse_area(text)
+        pa = area_mod.parse_area(text)
     except area_mod.ParseError:
         return None
+    if pa and pa[0] >= _MIN_AREA_SQM:
+        return pa
+    return None
 
 
 def extract(html: str, source: str, city: str, base_url: str,
