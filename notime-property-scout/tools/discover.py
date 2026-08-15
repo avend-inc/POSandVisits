@@ -61,6 +61,58 @@ _RE_HASSPEC = re.compile(r"坪|㎡|m2|平米|賃料|家賃|万円|駐車")
 _RE_DETAIL = re.compile(r"detailPage|/detail[-/]|/bukken[-/]|/property/[^/]*\d|/room/[^/]*\d", re.I)
 # 一覧・検索・カテゴリ等（=個別物件ではない）は除外する
 _RE_NOTDETAIL = re.compile(r"/result/|/list/|/search|/category|/area_|/grouping/|sp-tenannto", re.I)
+# 物件名/建物名ラベル（詳細ページからビル名を拾って「○○市のテナント」の代わりに使う）
+_RE_BLDG = re.compile(r"(?:物件名|建物名|ビル名|マンション名|建物名称)[：:\s　]{0,3}([^\s　/／|｜、。]{2,30})")
+
+# 面積等を JS で後読みするため静的取得では面積が取れないサイト。ここに host を足せば対象拡大。
+JS_HOSTS = {"house.goo.ne.jp"}
+_RENDER_BUDGET = int(os.environ.get("RENDER_BUDGET", "30"))   # 1回のヘッドレス取得の上限（実行時間の暴走防止）
+_render_used = 0
+
+
+def _host(url: str) -> str:
+    return urlsplit(url or "").netloc.lower()
+
+
+def fetch_rendered(url: str) -> str | None:
+    """ヘッドレスChromiumでJS描画後の本文テキストを返す。playwright未導入/失敗時はNone（§5.3）。"""
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception:
+        return None
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(args=["--no-sandbox"])
+            page = browser.new_page(user_agent=UA)
+            try:
+                page.goto(url, wait_until="networkidle", timeout=25000)
+            except Exception:
+                page.goto(url, wait_until="domcontentloaded", timeout=25000)
+            txt = page.inner_text("body")
+            browser.close()
+            return txt
+    except Exception as e:
+        print(f"  [render-skip] {type(e).__name__}: {url}")
+        return None
+
+
+def _building_name(text: str) -> str | None:
+    """本文から物件名/建物名を拾う（ラベル優先）。見つからなければ None。"""
+    m = _RE_BLDG.search(text or "")
+    if not m:
+        return None
+    name = m.group(1).strip()
+    # 住所や定型語だけの誤検出を弾く
+    if re.search(r"[都道府県].*[市区町村]|テナント|店舗|事務所|募集|賃貸|なし|無し", name):
+        return None
+    return name if len(name) >= 2 else None
+
+
+def _is_placeholder_name(rec: dict) -> bool:
+    """name が住所そのもの/「○○のテナント」等の仮名かどうか（=ビル名に差し替えたい状態）。"""
+    nm = rec.get("name") or ""
+    return (nm.endswith("のテナント") or nm == (rec.get("address") or "")
+            or bool(re.match(r"^[^\s]*[都道府県][^\s]*[市区町村]", nm)))
 
 
 def load_known():
@@ -204,10 +256,21 @@ def enrich(rec: dict) -> dict | None:
     一覧ページには家賃が無い/坪単価しか無いことが多いので、リンク先まで行って読む。
     3階以上と判明したら除外（None）。取得できなければ一覧由来の値を残す。
     """
+    global _render_used
     html = fetch(rec["detail_url"])
     if not html:
         return rec
     text = BeautifulSoup(html, "lxml").get_text(" ", strip=True)
+
+    # 面積が JS 後読みのサイト（例 goo）は静的取得で面積が取れない。
+    # 静的で面積が無く、対象host かつ budget が残っていればヘッドレスで描画後テキストを取り直す。
+    if (not _area(text) and _host(rec["detail_url"]) in JS_HOSTS
+            and _render_used < _RENDER_BUDGET):
+        _render_used += 1
+        rtext = fetch_rendered(rec["detail_url"])
+        if rtext:
+            text = rtext          # 以降の抽出は描画後テキストで行う（家賃/駅等もより正確）
+
     r = _rent(text)
     if r is not None:
         rec["rent_yen"] = r
@@ -226,6 +289,11 @@ def enrich(rec: dict) -> dict | None:
     sm = _RE_STATION.search(text)   # 最寄り駅（例「秋田駅 徒歩11分」）
     if sm:
         rec["station_name"] = f"{sm.group(1)} {sm.group(2) or ''}{sm.group(3)}分".strip()
+    # 物件名が仮名（住所/○○のテナント）のときは詳細ページからビル名を拾って差し替える
+    if _is_placeholder_name(rec):
+        bn = _building_name(text)
+        if bn:
+            rec["name"] = bn[:60]
     at, pk2 = rec.get("area_tsubo"), rec.get("parking")
     rec["success_flag"] = bool(at and at >= 25 and (pk2 is None or pk2 >= 2)
                                and _RE_ROAD.search(text))
