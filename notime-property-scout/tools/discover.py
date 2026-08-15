@@ -167,6 +167,39 @@ def extract(html: str, source: str, city: str, base_url: str,
     return out
 
 
+def enrich(rec: dict) -> dict | None:
+    """詳細ページ（個別物件URL）を開いて、家賃・面積・駐車・階を正確に読み直す。
+
+    一覧ページには家賃が無い/坪単価しか無いことが多いので、リンク先まで行って読む。
+    3階以上と判明したら除外（None）。取得できなければ一覧由来の値を残す。
+    """
+    html = fetch(rec["detail_url"])
+    if not html:
+        return rec
+    text = BeautifulSoup(html, "lxml").get_text(" ", strip=True)
+    r = _rent(text)
+    if r is not None:
+        rec["rent_yen"] = r
+    try:
+        sqm, tsubo = area_mod.parse_area(text)
+        rec["area_sqm"] = round(sqm, 2)
+        rec["area_tsubo"] = round(tsubo, 2)
+    except area_mod.ParseError:
+        pass
+    pk = _int(_RE_PARK, text)
+    if pk is not None:
+        rec["parking"] = pk
+    fl = _int(_RE_FLOOR, text)
+    if fl is not None:
+        if fl >= 3:
+            return None            # 1階・2階のみ（§2 G2）
+        rec["floor"] = fl
+    at, pk2 = rec.get("area_tsubo"), rec.get("parking")
+    rec["success_flag"] = bool(at and at >= 25 and (pk2 is None or pk2 >= 2)
+                               and _RE_ROAD.search(text))
+    return rec
+
+
 def sources() -> list[tuple[str, str, str]]:
     """(city, source_name, list_url)。semi(bot遮断)は除外。"""
     lst = []
@@ -210,6 +243,18 @@ def main() -> int:
             known_ids.add(r["id"]); known_urls.add(r["detail_url"])
             found.append(r); per_city[city] += 1; added += 1
         print(f"  抽出 新規 {added} 件（市計 {per_city[city]}）")
+
+    # 詳細ページを開いて家賃・面積・駐車・階を正確に読み直す（リンク先まで行って読む）
+    print(f"\n詳細ページ読み取り {len(found)} 件…")
+    enriched = []
+    for r in found:
+        time.sleep(REQUEST_GAP_SEC)
+        e = enrich(r)
+        if e is not None:
+            enriched.append(e)
+    found = enriched
+    got_rent = sum(1 for r in found if r.get("rent_yen"))
+    print(f"  読み取り後 {len(found)} 件（家賃取得 {got_rent} 件）")
 
     if found:
         with FEED.open("a", encoding="utf-8") as f:
