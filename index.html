@@ -2014,7 +2014,8 @@ function wireCommon(){
 function openBukken(){
   if(!BUKKEN_REPORT_URL){ alert("物件レビューページは準備中です。"); return; }
   if(/^https?:/i.test(BUKKEN_REPORT_URL)){ window.open(BUKKEN_REPORT_URL,"_blank","noopener"); }
-  else{ location.href=BUKKEN_REPORT_URL; }
+  // 相対パスは毎回 ?t=時刻 を付けて開き、古いキャッシュを掴まないようにする
+  else{ location.href=BUKKEN_REPORT_URL+(BUKKEN_REPORT_URL.includes("?")?"&":"?")+"t="+Date.now(); }
 }
 function renderMain(){
   syncAdminTab(); syncAdsTab();
