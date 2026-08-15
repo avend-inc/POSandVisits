@@ -42,10 +42,12 @@ PROP_COLS = ["id", "city", "name", "area_tsubo", "area_sqm", "rent_yen",
              "parking", "floor", "source", "detail_url", "success_flag", "note"]
 
 # カード本文からのスペック抽出（連合隊パーサと同じ二段構えの正規表現側）
-_RE_RENT = re.compile(r"(?:賃料|家賃)[^\d]{0,8}([\d,]+(?:\.\d+)?)\s*(万円|円)")
-_RE_RENT_ANY = re.compile(r"([\d,]+(?:\.\d+)?)\s*(万円)")
+# 賃料：月額。直後が「坪」のものは坪単価なので除外（負の先読み）。
+_RE_RENT = re.compile(r"(?:賃料|家賃)[^\d]{0,8}([\d,]+(?:\.\d+)?)\s*(万円|円)(?![\s/／]*坪)")
 _RE_PARK = re.compile(r"駐車[場車]?[^\d]{0,6}(\d+)\s*台")
-_RE_FLOOR = re.compile(r"(?:^|[^\d])(\d{1,2})\s*階")
+# 階数：「15階建」等の建物階数は拾わない（(?!建)）。物件の所在階のみ。
+_RE_FLOOR = re.compile(r"(\d{1,2})\s*階(?!建)")
+RENT_MIN = 30000   # これ未満は坪単価/管理費の拾い間違いとみなし採用しない
 _RE_ROAD = re.compile(r"路面|幹線|国道|バイパス|ロードサイド")
 _RE_HASSPEC = re.compile(r"坪|㎡|m2|平米|賃料|家賃|万円|駐車")
 # 物件“個別”詳細ページらしいリンク（§9.1：一覧URLは不可。個別のみ拾う）
@@ -82,13 +84,14 @@ def fetch(url: str) -> str | None:
 
 
 def _rent(text: str) -> int | None:
-    m = _RE_RENT.search(text) or _RE_RENT_ANY.search(text)
-    if not m:
-        return None
-    val = float(m.group(1).replace(",", ""))
-    if "万" in m.group(0):
-        val *= 10000
-    return int(round(val))
+    """月額賃料（税込目安）。坪単価・管理費・小額は採用しない。"""
+    for m in _RE_RENT.finditer(text):
+        val = float(m.group(1).replace(",", ""))
+        if "万" in m.group(2):
+            val *= 10000
+        if val >= RENT_MIN:      # 坪単価/管理費らしい小額は捨てる
+            return int(round(val))
+    return None
 
 
 def _int(rx, text):
@@ -125,6 +128,8 @@ def extract(html: str, source: str, city: str, base_url: str,
         rent = _rent(text)
         parking = _int(_RE_PARK, text)
         floor = _int(_RE_FLOOR, text)
+        if floor is not None and floor >= 3:
+            continue                # 1階・2階のみ（§2 G2。3階以上は除外）
         roadside = bool(_RE_ROAD.search(text))
         name = a.get_text(" ", strip=True)[:60] or (text[:40] if text else "（名称なし）")
         # 月極駐車場・駐輪場などテナントでない“物件名”は除外（本文の「駐車場15台」は正常なので見ない）
