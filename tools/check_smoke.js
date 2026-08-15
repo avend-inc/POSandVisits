@@ -296,6 +296,32 @@ for (const [name, query] of VIEWS) {
   }
 }
 
+// ---- サブページ（推移・予実・販促・分析AI・経営）------------------------
+//   日別×店舗は 2026-08-11 に data.json からテーブル(dash_daily)へ移した。
+//   dashboard.html だけ直され、他のページは DATA.daily が空のまま
+//   「データが空です」で止まっていた（1か月以上そのままだった）。
+//   同じ取り残しが起きないよう、DATA.daily を使うページは必ず
+//   dash_daily を読んでいること、を全ページで見る。
+{
+  const dir2 = path.join(__dirname, "..", "web");
+  const pages = fs.readdirSync(dir2).filter((f) => f.endsWith(".html"));
+  const ok = (label, cond, extra) => {
+    console.log(`  ${cond ? "OK " : "NG "} ${label}`);
+    if (!cond) { ng++; if (extra) console.log("      " + String(extra).slice(0, 300)); }
+  };
+  const missing = [], noStock = [];
+  for (const f of pages) {
+    const t = fs.readFileSync(path.join(dir2, f), "utf8");
+    if (/(?<![.\w$])DATA\.daily/.test(t) && !/dash_daily/.test(t)) missing.push(f);
+    if (/stock\.html/.test(t)) noStock.push(f);
+  }
+  ok(`日別を使うページは全部 dash_daily を読んでいる（${pages.length}ページ）`,
+    missing.length === 0, missing.join(", "));
+  // 棚卸は在庫アプリの /pos-stocktake に移した。売上アプリ側には残さない
+  ok("棚卸(stock.html)への導線が残っていない", noStock.length === 0, noStock.join(", "));
+  ok("棚卸のページ自体が残っていない", !pages.includes("stock.html"));
+}
+
 // ---- 触っているのに存在しない id が無いか ------------------------------
 //   パネルを消したときに、それを描く関数だけ残ることがある。呼ばれていないうちは
 //   無害だが、あとで誰かが呼ぶと null に .innerHTML して落ちる。
