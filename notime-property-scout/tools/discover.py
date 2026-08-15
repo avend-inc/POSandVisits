@@ -96,23 +96,33 @@ def fetch_rendered(url: str) -> str | None:
         return None
 
 
+# ビル名として不適格（＝隣接する項目ラベルや定型語を誤って拾った）と判断する語。
+# goo等は spec テーブルで「建物名称」の値が空だと次のラベル(築年月等)を拾ってしまうため広めに弾く。
+_RE_BLDG_BAD = re.compile(
+    r"築|年月|年数|間取|敷金|礼金|管理費|共益|所在地|交通|構造|階建|入居|保証|条件|"
+    r"種別|種類|情報|問合|お問|カテゴリ|検索|一覧|地図|物件|テナント|店舗|事務所|募集|"
+    r"賃貸|なし|無し|[()（）]|[都道府県].{0,10}[市区町村]")
+
+
 def _building_name(text: str) -> str | None:
-    """本文から物件名/建物名を拾う（ラベル優先）。見つからなければ None。"""
+    """本文から物件名/建物名を拾う（ラベル優先）。ラベルや定型語の誤検出は弾く。無ければ None。"""
     m = _RE_BLDG.search(text or "")
     if not m:
         return None
     name = m.group(1).strip()
-    # 住所や定型語だけの誤検出を弾く
-    if re.search(r"[都道府県].*[市区町村]|テナント|店舗|事務所|募集|賃貸|なし|無し", name):
+    if len(name) < 2 or _RE_BLDG_BAD.search(name):
         return None
-    return name if len(name) >= 2 else None
+    return name
 
 
 def _is_placeholder_name(rec: dict) -> bool:
-    """name が住所そのもの/「○○のテナント」等の仮名かどうか（=ビル名に差し替えたい状態）。"""
+    """name が仮名/誤値（住所・「○○のテナント」・ラベル拾い）かどうか（=ビル名に差し替えたい状態）。"""
     nm = rec.get("name") or ""
-    return (nm.endswith("のテナント") or nm == (rec.get("address") or "")
-            or bool(re.match(r"^[^\s]*[都道府県][^\s]*[市区町村]", nm)))
+    if not nm or nm.endswith("のテナント") or nm == (rec.get("address") or ""):
+        return True
+    if re.match(r"^[^\s]*[都道府県][^\s]*[市区町村]", nm):
+        return True
+    return bool(_RE_BLDG_BAD.search(nm))    # 既に誤ってラベルを拾っている名も差し替え対象に
 
 
 def load_known():
