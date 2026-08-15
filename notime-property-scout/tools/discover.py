@@ -36,7 +36,8 @@ FEED = ROOT / "feeds" / "bukken.jsonl"
 CONTACT = os.environ.get("SCOUT_CONTACT", "sho.nakano@avend.co.jp")
 UA = f"notime-property-scout/0.1 (+{CONTACT})"
 REQUEST_GAP_SEC = 3.0          # §5.4 1リクエスト/3秒以上
-MAX_NEW_PER_RUN = 40           # 暴走防止
+MAX_NEW_PER_RUN = 60           # 1回の総上限（暴走防止）
+PER_CITY = 8                   # 1市あたりの上限（1市で埋め尽くさず6市に散らす）
 PROP_COLS = ["id", "city", "name", "area_tsubo", "area_sqm", "rent_yen",
              "parking", "floor", "source", "detail_url", "success_flag", "note"]
 
@@ -126,6 +127,9 @@ def extract(html: str, source: str, city: str, base_url: str,
         floor = _int(_RE_FLOOR, text)
         roadside = bool(_RE_ROAD.search(text))
         name = a.get_text(" ", strip=True)[:60] or (text[:40] if text else "（名称なし）")
+        # 月極駐車場・駐輪場などテナントでない“物件名”は除外（本文の「駐車場15台」は正常なので見ない）
+        if re.search(r"駐車場|月極|パーキング|駐輪|コインパーク", name):
+            continue
         pid = f"{_slug(source)}-{hashlib.sha1(url.encode()).hexdigest()[:8]}"
         if pid in known_ids:
             continue
@@ -154,13 +158,19 @@ def sources() -> list[tuple[str, str, str]]:
 
 
 def main() -> int:
+    from collections import defaultdict
     known_ids, known_urls = load_known()
     found: list[dict] = []
-    for i, (city, name, url) in enumerate(sources()):
+    per_city = defaultdict(int)         # 市ごとの採用数（1市で埋め尽くさない）
+    fetched = 0
+    for city, name, url in sources():
         if len(found) >= MAX_NEW_PER_RUN:
             break
-        if i:
+        if per_city[city] >= PER_CITY:
+            continue                    # この市は充足。取得もしない（無駄打ち回避）
+        if fetched:
             time.sleep(REQUEST_GAP_SEC)
+        fetched += 1
         print(f"[{city}] {name}: {url}")
         html = fetch(url)
         if not html:
@@ -170,12 +180,15 @@ def main() -> int:
         except Exception as e:
             print(f"  [parse-fail] {type(e).__name__}: {e}")
             continue
+        added = 0
         for r in recs:
+            if per_city[city] >= PER_CITY:
+                break
             if r["id"] in known_ids or r["detail_url"] in known_urls:
                 continue
             known_ids.add(r["id"]); known_urls.add(r["detail_url"])
-            found.append(r)
-        print(f"  抽出 新規 {len(recs)} 件")
+            found.append(r); per_city[city] += 1; added += 1
+        print(f"  抽出 新規 {added} 件（市計 {per_city[city]}）")
 
     if found:
         with FEED.open("a", encoding="utf-8") as f:

@@ -69,6 +69,33 @@ def upsert(rows: list[dict], url: str, key: str) -> None:
             raise RuntimeError(f"upsert失敗 HTTP {resp.status}: {resp.read()[:300]!r}")
 
 
+def prune_placeholders(url: str, key: str) -> int:
+    """未判定(verdict is null)の「個別URLでない行」「駐車場行」をDBから削除する。
+
+    判定済み(OK/NG/保留)の行は絶対に消さない。プレースホルダ種や駐車場ノイズの掃除用。
+    """
+    from urllib.parse import quote
+    base = url.rstrip("/") + "/rest/v1/bukken?"
+    conds = [
+        # 個別URLでない（detail/bukken を含まない）未判定行
+        "verdict=is.null&detail_url=not.ilike.*detail*&detail_url=not.ilike.*bukken*",
+        # 駐車場・月極 の未判定行
+        "verdict=is.null&or=(name.ilike." + quote("*駐車場*") + ",name.ilike." + quote("*月極*") + ")",
+    ]
+    deleted = 0
+    for q in conds:
+        try:
+            req = urllib.request.Request(base + q, method="DELETE", headers={
+                "apikey": key, "Authorization": f"Bearer {key}",
+                "Prefer": "return=representation",
+            })
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                deleted += len(json.loads(resp.read().decode("utf-8") or "[]"))
+        except Exception as e:
+            print(f"  prune警告: {e}")
+    return deleted
+
+
 def _emit_output(new: list[dict], total: int) -> None:
     """GitHub Actions 用の出力（new_count / names / summary）を書き出す。"""
     gh = os.environ.get("GITHUB_OUTPUT")
@@ -97,7 +124,8 @@ def main() -> int:
     before = existing_ids(url, key)
     new = [r for r in rows if r["id"] not in before]
     upsert(rows, url, key)
-    print(f"bukken に {len(rows)} 件 upsert（新規 {len(new)} 件、verdict/reason は保持）。")
+    pruned = prune_placeholders(url, key)
+    print(f"bukken に {len(rows)} 件 upsert（新規 {len(new)} 件、verdict/reason は保持）。掃除 {pruned} 件。")
     for r in new:
         print(f"  + {r.get('city','')} {r.get('name','')}")
     _emit_output(new, len(rows))
