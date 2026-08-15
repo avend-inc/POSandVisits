@@ -48,6 +48,12 @@ jobs:
         id: disc
         run: python notime-property-scout/tools/discover.py
 
+      # 先に Supabase へ反映する（ユーザーが見るのはDB。pushが失敗してもDBは更新される）
+      - name: Supabaseへ upsert（新規判定つき）
+        id: sync
+        run: python notime-property-scout/tools/sync_bukken.py
+
+      # そのあとで feed を commit & push（並行マージでbranchが進んでいてもrebaseで追従＋リトライ）
       - name: feed に変更があれば commit & push（新規0でも補完分を確定）
         run: |
           git config user.name  "github-actions[bot]"
@@ -55,11 +61,17 @@ jobs:
           git add notime-property-scout/feeds/bukken.jsonl
           if git diff --cached --quiet; then echo "feed変更なし"; exit 0; fi
           git commit -m "discovery: feed更新（新規 ${{ steps.disc.outputs.new_count }} 件・補完含む）"
-          git push origin HEAD:feature/supabase-etl
-
-      - name: Supabaseへ upsert（新規判定つき）
-        id: sync
-        run: python notime-property-scout/tools/sync_bukken.py
+          for i in 1 2 3 4 5; do
+            if git push origin HEAD:feature/supabase-etl; then
+              echo "push成功"; exit 0
+            fi
+            echo "push失敗（$i回目）。remoteを取り込んでrebaseして再試行..."
+            git fetch origin feature/supabase-etl
+            # feed はDBが正なので衝突時はこちら（discovery結果）を優先
+            git rebase -X ours origin/feature/supabase-etl || git rebase --abort
+            sleep $((i * 3))
+          done
+          echo "pushはリトライしても失敗。DBは既にupsert済みなので致命的ではない。"; exit 0
 
       - name: Slack通知（新規のみ・店舗開発チャンネル）
         if: ${{ steps.sync.outputs.new_count != '0' && steps.sync.outputs.new_count != '' }}
