@@ -81,6 +81,10 @@ def prune_placeholders(url: str, key: str) -> int:
         "verdict=is.null&detail_url=not.ilike.*detail*&detail_url=not.ilike.*bukken*",
         # 駐車場・月極 の未判定行
         "verdict=is.null&or=(name.ilike." + quote("*駐車場*") + ",name.ilike." + quote("*月極*") + ")",
+        # 3階以上の未判定行（§2 G2：1階・2階のみ）
+        "verdict=is.null&floor=gte.3",
+        # 賃料が3万円未満の未判定行（坪単価/管理費の拾い間違い）
+        "verdict=is.null&rent_yen=lt.30000",
     ]
     deleted = 0
     for q in conds:
