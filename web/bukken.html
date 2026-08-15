@@ -26,6 +26,7 @@
   .top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px}
   .badge{font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;color:#fff}
   .badge.hit{background:var(--ok)} .badge.info{background:#888}
+  .badge.warn{background:#e8830c;font-size:10px;padding:2px 7px;margin-left:6px;vertical-align:middle}
   .city{font-size:12px;color:var(--ink2)}
   .name{font-size:16px;font-weight:700;margin:2px 0 6px}
   .specs{display:grid;grid-template-columns:1fr 1fr;gap:7px 12px;margin:6px 0}
@@ -167,6 +168,12 @@ function fArea(r){
   return r.area_tsubo.toFixed(1)+"坪"+(r.area_sqm!=null?"（"+r.area_sqm.toFixed(1)+"㎡）":"");
 }
 function fRent(r){ return r.rent_yen==null?'<span class="unk">不明</span>':YEN(r.rent_yen); }
+// 家賃の異常値検知：面積があれば坪単価、無ければ絶対額で「高すぎ（＝保証金/坪単価総額の拾い間違い疑い）」を判定
+function rentWarn(r){
+  if(r.rent_yen==null) return false;
+  if(r.area_tsubo) return (r.rent_yen / r.area_tsubo) > 40000;   // 4万円/坪超は地方店舗として高すぎ
+  return r.rent_yen > 800000;                                    // 面積不明時は月額80万円超を要確認
+}
 function fPark(r){
   if(r.parking==null) return '<span class="unk">不明</span>';
   if(r.parking===0)  return '<span class="none">なし(0台)</span>';
@@ -202,7 +209,7 @@ function render(){
       ${r.note?`<div class="note">${esc(r.note)}</div>`:""}
       <div class="specs">
         <div><label>坪数</label><b>${fArea(r)}</b></div>
-        <div><label>家賃</label><b>${fRent(r)}</b></div>
+        <div><label>家賃</label><b>${fRent(r)}${rentWarn(r)?' <span class="badge warn">⚠要確認</span>':''}</b></div>
         <div><label>駐車場</label><b>${fPark(r)}</b></div>
         <div><label>階数</label><b>${fFloor(r)}</b></div>
         <div><label>主要駅からの距離</label><b>${fStation(r)}</b></div>

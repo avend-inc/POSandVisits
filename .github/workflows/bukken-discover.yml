@@ -42,7 +42,10 @@ jobs:
         with:
           python-version: "3.12"
       - name: 依存インストール
-        run: python -m pip install --quiet requests beautifulsoup4 lxml
+        run: |
+          python -m pip install --quiet requests beautifulsoup4 lxml playwright
+          # goo等のJS後読みサイトの面積取得用にヘッドレスChromiumを入れる
+          python -m playwright install --with-deps chromium
 
       - name: 実サイトから新規物件を発見して feed に追記
         id: disc
