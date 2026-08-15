@@ -668,8 +668,12 @@ async function authBoot(url,anon){
 // RLS(can_view_store)が効くので、返るのは自分が見られる店の行だけ。
 async function loadDaily(){
   const PAGE=1000, CONC=8;
+  // komono_ex / nocat_ex を入れ忘れると、商品単価から小物と「明細なし」が
+  // 引かれないまま高く出る（下の map が r.komono_ex を読んでいるのに、
+  // 取ってきていないので毎回 undefined になっていた）。
   const cols="date,store_id,sales_in,sales_ex,tx,items,visitors,bag_in,bag_ex,bag_qty,"+
-             "coupon_qty,coupon_amount,sales_ex_unmanned,sales_ex_manned,visitors_staffed";
+             "komono_ex,nocat_ex,coupon_qty,coupon_amount,"+
+             "sales_ex_unmanned,sales_ex_manned,visitors_staffed";
   const out=[]; let page=0, done=false;
   while(!done){
     const jobs=[];
