@@ -38,7 +38,7 @@ UA = f"notime-property-scout/0.1 (+{CONTACT})"
 REQUEST_GAP_SEC = 3.0          # §5.4 1リクエスト/3秒以上
 MAX_NEW_PER_RUN = 60           # 1回の総上限（暴走防止）
 PER_CITY = 8                   # 1市あたりの上限（1市で埋め尽くさず6市に散らす）
-PROP_COLS = ["id", "city", "name", "area_tsubo", "area_sqm", "rent_yen",
+PROP_COLS = ["id", "city", "name", "address", "area_tsubo", "area_sqm", "rent_yen",
              "parking", "floor", "source", "detail_url", "success_flag", "note"]
 
 # カード本文からのスペック抽出（連合隊パーサと同じ二段構えの正規表現側）
@@ -103,6 +103,14 @@ def _slug(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:24] or "src"
 
 
+_RE_ADDR = re.compile(r"[^\s、。,，]{0,4}[都道府県][^\s、。,，]{1,8}[市区町村][^\s、。,，]{0,15}")
+
+
+def _address(text: str) -> str:
+    m = _RE_ADDR.search(text or "")
+    return m.group(0) if m else ""
+
+
 def extract(html: str, source: str, city: str, base_url: str,
             known_ids: set, known_urls: set) -> list[dict]:
     soup = BeautifulSoup(html, "lxml")
@@ -131,21 +139,29 @@ def extract(html: str, source: str, city: str, base_url: str,
         if floor is not None and floor >= 3:
             continue                # 1階・2階のみ（§2 G2。3階以上は除外）
         roadside = bool(_RE_ROAD.search(text))
-        name = a.get_text(" ", strip=True)[:60] or (text[:40] if text else "（名称なし）")
-        # 月極駐車場・駐輪場などテナントでない“物件名”は除外（本文の「駐車場15台」は正常なので見ない）
-        if re.search(r"駐車場|月極|パーキング|駐輪|コインパーク", name):
+        anchor = a.get_text(" ", strip=True)
+        # 月極駐車場等はテナントでないので除外
+        if re.search(r"駐車場|月極|パーキング|駐輪|コインパーク", anchor):
             continue
+        # 住所（都道府県…市区町村…）をアンカー/本文から拾う
+        address = _address(anchor) or _address(text)
+        # アンカーが短く句読点なし＝物件名/住所。長文＝説明文として分離する。
+        if len(anchor) <= 22 and not re.search(r"[。、！!？?]", anchor):
+            name, desc = anchor, ""
+        else:
+            name, desc = (address or f"{city}のテナント"), anchor
+        note = desc or "自動収集(GitHub Actions)・スペックはページ記載分のみ"
         pid = f"{_slug(source)}-{hashlib.sha1(url.encode()).hexdigest()[:8]}"
         if pid in known_ids:
             continue
         success = bool(area_tsubo and area_tsubo >= 25 and (parking is None or parking >= 2) and roadside)
         rec = {
-            "id": pid, "city": city, "name": name,
+            "id": pid, "city": city, "name": name[:60], "address": address,
             "area_tsubo": round(area_tsubo, 2) if area_tsubo else None,
             "area_sqm": round(area_sqm, 2) if area_sqm else None,
             "rent_yen": rent, "parking": parking, "floor": floor,
             "source": source, "detail_url": url, "success_flag": success,
-            "note": "自動収集(GitHub Actions)。スペックはページ記載分のみ・要確認",
+            "note": note,
         }
         out.append({k: rec[k] for k in PROP_COLS})
     return out
