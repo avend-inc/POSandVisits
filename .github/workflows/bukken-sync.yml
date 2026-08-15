@@ -46,14 +46,5 @@ jobs:
       - name: Supabaseへ upsert（新規判定つき）
         id: sync
         run: python notime-property-scout/tools/sync_bukken.py
-      # 新規物件があった時だけ、店舗開発チャンネルへ通知する
-      - name: Slack通知（新規のみ）
-        if: ${{ steps.sync.outputs.new_count != '0' && steps.sync.outputs.new_count != '' }}
-        env:
-          NEW_COUNT: ${{ steps.sync.outputs.new_count }}
-          NAMES: ${{ steps.sync.outputs.names }}
-        run: |
-          hook="${SLACK_WEBHOOK_BUKKEN:-$SLACK_WEBHOOK}"
-          if [ -z "$hook" ]; then echo "Slack webhook未設定。通知スキップ"; exit 0; fi
-          payload=$(python3 -c 'import json,os; print(json.dumps({"text":"🏢 新しい物件が "+os.environ["NEW_COUNT"]+" 件あります\n"+os.environ.get("NAMES","")+"\n▶ レビュー: https://avend-inc.github.io/POSandVisits/bukken.html"}))')
-          curl -sS -X POST -H 'content-type: application/json' --data "$payload" "$hook" || true
+      # 注意: Slack通知はここでは行わない。通知は毎朝の discovery ワークフロー1回だけに集約している
+      #       （feed push のたびにここでも通知すると1日に何度も鳴ってしまうため）。
