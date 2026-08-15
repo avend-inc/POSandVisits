@@ -24,7 +24,7 @@ FEED = Path(__file__).resolve().parent.parent / "feeds" / "bukken.jsonl"
 
 # bukken テーブルの「物件側」列だけを送る（判定列は触らない）。
 PROP_COLS = ["id", "city", "name", "address", "area_tsubo", "area_sqm",
-             "rent_yen", "parking", "floor", "source", "detail_url",
+             "rent_yen", "parking", "floor", "station_name", "source", "detail_url",
              "success_flag", "spec_note", "note", "first_seen"]
 
 
@@ -127,7 +127,13 @@ def main() -> int:
         return 0
     before = existing_ids(url, key)
     new = [r for r in rows if r["id"] not in before]
-    upsert(rows, url, key)
+    try:
+        upsert(rows, url, key)
+    except Exception as e:
+        # station_name 列が未追加等 → その列を落として再試行（家賃等は必ず反映させる）
+        print(f"upsert再試行（列不足の可能性）: {e}", file=sys.stderr)
+        rows2 = [{k: v for k, v in r.items() if k != "station_name"} for r in rows]
+        upsert(rows2, url, key)
     pruned = prune_placeholders(url, key)
     print(f"bukken に {len(rows)} 件 upsert（新規 {len(new)} 件、verdict/reason は保持）。掃除 {pruned} 件。")
     for r in new:
