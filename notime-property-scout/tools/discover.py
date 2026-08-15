@@ -150,7 +150,7 @@ def extract(html: str, source: str, city: str, base_url: str,
             name, desc = anchor, ""
         else:
             name, desc = (address or f"{city}のテナント"), anchor
-        note = desc or "自動収集(GitHub Actions)・スペックはページ記載分のみ"
+        note = desc            # 説明文のみ。無ければ空（カードに定型文を出さない）
         pid = f"{_slug(source)}-{hashlib.sha1(url.encode()).hexdigest()[:8]}"
         if pid in known_ids:
             continue
