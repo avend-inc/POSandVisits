@@ -42,12 +42,18 @@ ENRICH_EXISTING = 50           # 既存の家賃/面積が欠けた行を1回あ
 PROP_COLS = ["id", "city", "name", "address", "area_tsubo", "area_sqm", "rent_yen",
              "parking", "floor", "station_name", "source", "detail_url", "success_flag", "note"]
 
-# カード本文からのスペック抽出（連合隊パーサと同じ二段構えの正規表現側）
+# 全サイト共通の「ラベル基準」抽出。各不動産サイトはUIが違っても、賃料/面積/駐車場/
+# 階/駅という項目名(ラベル)は共通なので、ラベルの近くの数値を読む。ラベルの言い回しを広く取る。
 # 賃料：月額。直後が「坪」のものは坪単価なので除外（負の先読み）。
-_RE_RENT = re.compile(r"(?:賃料|家賃)[^\d]{0,8}([\d,]+(?:\.\d+)?)\s*(万円|円)(?![\s/／]*坪)")
-_RE_PARK = re.compile(r"駐車[場車]?[^\d]{0,6}(\d+)\s*台")
-# 階数：「15階建」等の建物階数は拾わない（(?!建)）。物件の所在階のみ。
-_RE_FLOOR = re.compile(r"(\d{1,2})\s*階(?!建)")
+_RE_RENT = re.compile(r"(?:賃料|家賃|月額賃料|月額|募集賃料)[^\d]{0,10}([\d,]+(?:\.\d+)?)\s*(万円|円)(?![\s/／]*坪)")
+# 面積：ラベル付き（土地面積は除く）を優先して拾う。
+_RE_AREA_L = re.compile(
+    r"(?:使用部分面積|使用面積|専有面積|賃貸面積|建物面積|延床面積|床面積|面積)[^\d]{0,8}"
+    r"([\d,]+(?:\.\d+)?)\s*(㎡|m2|m²|平米|坪|帖|畳)")
+_RE_PARK = re.compile(r"駐車[場車]?[^\d]{0,8}(\d+)\s*台")
+# 階数：「15階建」等の建物規模は拾わない（(?!建)）。物件の所在階のみ。
+_RE_FLOOR = re.compile(r"(?:所在階[^\d]{0,4})?(\d{1,2})\s*階(?!建)")
+_RE_STATION = re.compile(r"([^\s、。/／]{1,12}駅)\s*(徒歩|車|バス)?\s*(\d+)\s*分")
 RENT_MIN = 30000   # これ未満は坪単価/管理費の拾い間違いとみなし採用しない
 _RE_ROAD = re.compile(r"路面|幹線|国道|バイパス|ロードサイド")
 _RE_HASSPEC = re.compile(r"坪|㎡|m2|平米|賃料|家賃|万円|駐車")
@@ -112,6 +118,19 @@ def _address(text: str) -> str:
     return m.group(0) if m else ""
 
 
+def _area(text: str):
+    """(area_sqm, area_tsubo) を返す。ラベル付き面積を優先、無ければ本文中の最初の面積。無ければ None。"""
+    m = _RE_AREA_L.search(text or "")
+    if m:
+        val = float(m.group(1).replace(",", ""))
+        sqm = val * area_mod.UNIT_TO_SQM.get(m.group(2), 1.0)
+        return sqm, sqm / area_mod.TSUBO_TO_SQM
+    try:
+        return area_mod.parse_area(text)
+    except area_mod.ParseError:
+        return None
+
+
 def extract(html: str, source: str, city: str, base_url: str,
             known_ids: set, known_urls: set) -> list[dict]:
     soup = BeautifulSoup(html, "lxml")
@@ -128,12 +147,9 @@ def extract(html: str, source: str, city: str, base_url: str,
         if not _RE_HASSPEC.search(text):
             continue                      # 物件っぽくない(ナビ等)は捨てる
         seen.add(url)
-        # 面積(単位必須)
-        area_sqm = area_tsubo = None
-        try:
-            area_sqm, area_tsubo = area_mod.parse_area(text)
-        except area_mod.ParseError:
-            pass
+        # 面積(ラベル優先・単位必須)
+        _a = _area(text)
+        area_sqm, area_tsubo = _a if _a else (None, None)
         rent = _rent(text)
         parking = _int(_RE_PARK, text)
         floor = _int(_RE_FLOOR, text)
@@ -182,12 +198,10 @@ def enrich(rec: dict) -> dict | None:
     r = _rent(text)
     if r is not None:
         rec["rent_yen"] = r
-    try:
-        sqm, tsubo = area_mod.parse_area(text)
-        rec["area_sqm"] = round(sqm, 2)
-        rec["area_tsubo"] = round(tsubo, 2)
-    except area_mod.ParseError:
-        pass
+    a = _area(text)
+    if a:
+        rec["area_sqm"] = round(a[0], 2)
+        rec["area_tsubo"] = round(a[1], 2)
     pk = _int(_RE_PARK, text)
     if pk is not None:
         rec["parking"] = pk
@@ -196,8 +210,7 @@ def enrich(rec: dict) -> dict | None:
         if fl >= 3:
             return None            # 1階・2階のみ（§2 G2）
         rec["floor"] = fl
-    # 最寄り駅（例「秋田駅 徒歩11分」）を詳細ページから拾う
-    sm = re.search(r"([^\s、。/／]{1,12}駅)\s*(徒歩|車|バス)?\s*(\d+)\s*分", text)
+    sm = _RE_STATION.search(text)   # 最寄り駅（例「秋田駅 徒歩11分」）
     if sm:
         rec["station_name"] = f"{sm.group(1)} {sm.group(2) or ''}{sm.group(3)}分".strip()
     at, pk2 = rec.get("area_tsubo"), rec.get("parking")
