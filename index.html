@@ -410,6 +410,13 @@
   .daykpi th,.daykpi td{padding:5px 4px}
   .daykpi .wx{font-size:12px;margin-left:2px}
   .daykpi .wxt{font-size:9px;color:var(--ink2);font-weight:600;margin-left:1px}
+  /* 「ホーム」ボタン。どのページでも同じ見た目にするため、
+     ページごとに違う .navlink には頼らず自前で持つ */
+  .homebtn{display:inline-flex;align-items:center;gap:4px;white-space:nowrap;margin-left:auto;
+    border:1px solid var(--border);background:var(--surface);color:var(--accent);
+    border-radius:9px;padding:7px 11px;font-size:12px;font-weight:700;
+    text-decoration:none;cursor:pointer;}
+  .homebtn:hover{border-color:var(--accent);}
 </style>
 </head>
 <body>
@@ -793,6 +800,8 @@ function renderFranchiseeHome(){
       <h1>売上KPI管理 <span class="gbadge">加盟店</span></h1>
       <button class="themebtn" id="themebtn" style="margin-left:auto">◐</button>
       ${SB?'<button class="themebtn" id="logoutbtn" style="margin-left:6px">ログアウト</button>':''}
+    
+      <a class="navlink homebtn" href="../" title="アプリのトップへ">🏠 ホーム</a>
     </header>
     <div class="sub" style="margin:8px 0 12px">ご覧になる店舗を選んでください。</div>
     <div class="frhome">${ids.map(id=>`<button class="frcard" data-sid="${id}"><span class="nm">${esc((storeMeta(id)||{}).name||("店舗"+id))}</span><span class="go">›</span></button>`).join("")||'<span class="sub">表示できる店舗がありません。管理者にお問い合わせください。</span>'}</div>`;
@@ -1260,6 +1269,10 @@ function adVal(k,p){
   return m.calc?m.calc(p):p[k];
 }
 function renderAds(){
+  // タブの出し分けは renderMain / renderDetail と同じにそろえる。
+  // ここだけ呼んでいなかったので、広告ページを開くと広告・経営・管理の
+  // タブが消えていた（＝ページごとにメニューの中身が違って見えていた）
+  syncAdminTab(); syncAdsTab();
   // 初回だけ期間を決める。前に押した期間があればそれ、無ければ直近4週
   if(!AD_PERIOD_INIT){
     const r=adPeriodRestore("notime-adtab-period");
@@ -1280,6 +1293,8 @@ function renderAds(){
       <h1>Meta広告 <span class="gbadge">広告</span></h1>
       <button class="themebtn" id="themebtn" style="margin-left:auto">◐</button>
       ${SB?'<button class="themebtn" id="logoutbtn" style="margin-left:6px">ログアウト</button>':''}
+    
+      <a class="navlink homebtn" href="../" title="アプリのトップへ">🏠 ホーム</a>
     </header>
     <div class="sub" style="margin:2px 0 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
       最新 <b style="color:var(--ink)">${last?mdShort(last):"—"}</b>｜更新 ${genShort(DATA.generated_at)}
@@ -2032,6 +2047,8 @@ function renderMain(){
       <button class="themebtn" id="reportbtn" style="margin-left:${(GROUP==="own"&&!window.FRANCHISEE)?'6px':'auto'};width:auto;padding:0 12px;gap:5px">📊 レポート</button>
       <button class="themebtn" id="themebtn" style="margin-left:6px">◐</button>
       ${SB?'<button class="themebtn" id="logoutbtn" style="margin-left:6px">ログアウト</button>':''}
+    
+      <a class="navlink homebtn" href="../" title="アプリのトップへ">🏠 ホーム</a>
     </header>
     <div class="sub" style="margin:2px 0 6px">
       最新データ 売上:<b style="color:var(--ink)">${DATA._salesMax}</b>／来店:<b style="color:var(--ink)">${DATA._visitMax}</b>　更新:${(DATA.generated_at||"").replace("T"," ").slice(5,16)}
@@ -2131,6 +2148,8 @@ function renderDetail(){
       ${FRAN?'':'<button class="themebtn" id="storereportbtn" style="margin-left:auto;width:auto;padding:0 12px;gap:5px">📊 レポート</button>'}
       <button class="themebtn" id="themebtn" style="margin-left:${FRAN?'auto':'6px'}">◐</button>
       ${SB?'<button class="themebtn" id="logoutbtn" style="margin-left:6px">ログアウト</button>':''}
+    
+      <a class="navlink homebtn" href="../" title="アプリのトップへ">🏠 ホーム</a>
     </header>
     <div class="sub" style="margin:2px 0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
       最新 売上<b style="color:var(--ink)">${mdShort(DATA._salesMax)}</b>・来店<b style="color:var(--ink)">${mdShort(DATA._visitMax)}</b>｜更新 ${genShort(DATA.generated_at)}
