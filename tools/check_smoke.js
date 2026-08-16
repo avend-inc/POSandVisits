@@ -209,6 +209,12 @@ for (const [name, query] of VIEWS) {
       /<div class="wrap adsview"/.test(view), (/<div class="wrap[^"]*"/.exec(view) || [])[0]);
     ok("広告ページの段からカードの装いが外してある",
       /\.adsview \.panel\{[^}]*background:none;border:0/.test(src));
+    // 広告は売上アプリのタブではなく独立したページにした。
+    // 売上のタブバーが出ていると「売上の中の1タブ」に見えてしまう。
+    // 要素は残るので、実際に display:none が当たっているかで見る
+    ok(`${name}：売上のタブバーを出していない`,
+      /<nav class="tabbar" style="display: none;">/.test(view),
+      (/<nav class="tabbar"[^>]*>/.exec(view) || [])[0]);
     // 集計期間・日別・週次・月次・クリエイティブ別・未紐付けの6つ。
     // 下限を緩くすると、1つ付け忘れても気づけない
     const en = (view.match(/<h2 data-en="/g) || []).length;
@@ -421,6 +427,12 @@ for (const [name, query] of VIEWS) {
       if (hit.length) dirty.push(`${f}（${[...new Set(hit)].join("")}）`);
     }
     ok("タブと見出しのボタンに絵文字を使っていない", dirty.length === 0, dirty);
+    // 表の中の「この店舗を非表示にする」ボタンも絵文字（👁）をやめて × にした。
+    // 本文の記号は対象外にしているので、ここは名指しで見る
+    const t = fs.readFileSync(path.join(dir2, "dashboard.html"), "utf8");
+    ok("店舗を非表示にするボタンが絵文字ではない",
+      /class="eye" data-hide="\$\{esc\(nm\)\}" title="[^"]*">×</.test(t),
+      (/class="eye"[^>]*>./.exec(t) || [])[0]);
   }
 
   // 選んだ項目のチップを、その項目の色で塗りつぶさない。

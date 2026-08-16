@@ -77,6 +77,19 @@
   .panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px 16px 12px;margin:14px 0;}
   .panel h2{font-size:14px;margin:0 0 2px;font-weight:700;}
   .panel .note{font-size:11.5px;color:var(--muted);margin:0 0 8px;}
+  /* 注記の「くわしく」。ふだんは畳んでおいて、開けば読める。
+     消してしまうと、書いてある理由ごと失われる */
+  .notemore{display:inline;margin-left:4px;}
+  .notemore>summary{display:inline;cursor:pointer;color:var(--accent);font-weight:700;
+    list-style:none;-webkit-tap-highlight-color:transparent;}
+  .notemore>summary::-webkit-details-marker{display:none;}
+  .notemore>summary::after{content:" ▾";font-size:9px;}
+  .notemore[open]>summary::after{content:" ▴";}
+  .notemore[open]{display:block;margin:6px 0 0;}
+  /* 店舗を非表示にするボタン。目の絵文字をやめて、細い×にした */
+  .eye{appearance:none;border:0;background:none;cursor:pointer;color:var(--muted);
+    font-size:13px;line-height:1;padding:0 6px 0 0;-webkit-tap-highlight-color:transparent;}
+  .eye:hover{color:var(--ink);}
 
   /* ---- 広告ページだけ、トップページと同じ見た目にする ----------------
      アプリのトップ（在庫アプリ側の /）で、カード（枠・角丸・影）をやめて
@@ -85,6 +98,8 @@
      ただし表とグラフには手を入れない。ここは数字を読む画面なので、
      見出しの装いだけ変えて、中身の読みやすさは動かさない。
      効くのは #app.adsview の中だけ。店舗一覧・店舗ページは今までどおり */
+  /* タブバーを出さないので、そのぶんの余白（88px）は要らない */
+  .wrap.adsview{padding-bottom:28px;}
   .adsview .panel{
     background:none;border:0;border-radius:0;box-shadow:none;
     padding:0;margin:0 0 34px;
@@ -461,7 +476,6 @@
   <a href="trends.html">推移</a>
   <a href="promo.html">販促</a>
   <a href="ask.html">分析AI</a>
-  <a href="index.html?view=ads&amp;g=own" id="tab-ads" style="display:none">広告</a>
   <a href="keiei.html" id="tab-keiei" style="display:none">経営</a>
   <a href="admin.html" id="tab-admin" style="display:none">管理</a>
 </div></nav>
@@ -965,12 +979,8 @@ function rptBrand3(sid){const s=storeMeta(sid);const n=(s&&s.name)||"";
   return "その他";}
 function visibleOf(sid){const s=storeMeta(sid);return s?(s.visible!==false):true;}
 // 管理タブは管理者のときだけ出す（認証モードでロール確定後に呼ぶ）
-function syncAdsTab(){
-  // 広告は加盟店(社外)には見せない。data.jsonごと配っていないので画面も出さない。
-  const t=document.getElementById("tab-ads"); if(!t)return;
-  t.style.display=window.FRANCHISEE?"none":"";
-  t.classList.toggle("on",VIEW==="ads");
-}
+// ※ syncAdsTab は消した。広告は売上アプリのタブではなくなり、
+//   タブバーに出す対象そのものが無くなったため
 function syncAdminTab(){const ad=!!(ME&&ME.role==="admin");const t=document.getElementById("tab-admin");if(t)t.style.display=ad?"":"none";const k=document.getElementById("tab-keiei");if(k)k.style.display=ad?"":"none";}
 // いま見ているグループ（直営／FC）のタブを点灯する
 function syncGroupTab(){
@@ -1323,10 +1333,14 @@ function renderAds(){
   // トップページと同じ見た目にする範囲を、この画面だけに閉じるための印。
   // 店舗一覧・店舗ページの .panel は今までどおり
   document.getElementById("app").classList.add("adsview");
+  // 広告は売上アプリの中のタブではなく、独立したページとして扱う。
+  // 下の売上用タブバーを出すと「売上の中の1タブ」に見えてしまうので隠す。
+  // 戻り先は見出しの「ホーム」（アプリのトップ）。
+  {const tb=document.querySelector(".tabbar"); if(tb)tb.style.display="none";}
   // タブの出し分けは renderMain / renderDetail と同じにそろえる。
   // ここだけ呼んでいなかったので、広告ページを開くと広告・経営・管理の
   // タブが消えていた（＝ページごとにメニューの中身が違って見えていた）
-  syncAdminTab(); syncAdsTab();
+  syncAdminTab();
   // 初回だけ期間を決める。前に押した期間があればそれ、無ければ直近4週
   if(!AD_PERIOD_INIT){
     const r=adPeriodRestore("notime-adtab-period");
@@ -1669,7 +1683,7 @@ function drawAds(){
     const blank="<td></td>".repeat(TCOLS.length);
     const rowsOf=(nm,e)=>
       `<tr class="adparent"><td style="text-align:left">`+
-        (byStore?`<button class="eye" data-hide="${esc(nm)}" title="この店舗を非表示にする">👁</button>`:"")+
+        (byStore?`<button class="eye" data-hide="${esc(nm)}" title="この店舗を非表示にする">×</button>`:"")+
         (nm===UNMAPPED?`<b style="color:#b8860b">${nm}</b>`:esc(shortName(nm)))+`</td>`+
         (showTot?cells(e.tot):blank)+`</tr>`+
       [...e.bk.keys()].sort().map(b=>
@@ -1705,10 +1719,10 @@ function drawAds(){
   }
   // 合計から外した店を、名前と広告費つきで知らせる文（黙って外さない）
   const exNote=ex=>!ex.length?"":
-    `<br><b style="color:#b8860b">段の合計から ${ex.length}店を除いています：`+
+    `<br><b style="color:#b8860b">合計から除外：`+
     ex.map(x=>`${esc(x.n)}（${YEN(x.sp)}円）`).join("・")+`</b>`+
-    `。売上がまだ無い店（オープン前）や、もう無い店（閉店）です。`+
-    `広告費だけを足すと売上比率が実態より高く出るため外しました（店の行は下に残しています）。`;
+    adMore("",`売上がまだ無い店（オープン前）か、もう無い店（閉店）です。`+
+      `広告費だけを足すと売上比率が実態より高く出るため外しました。店の行は下に残しています。`);
   // 週次：選んでいる期間を月曜〜日曜で刻む。期間の端に掛かる週は集計した範囲だけを出す。
   const weekRange=mon=>{
     const sun=addDays(mon,6);
@@ -1765,12 +1779,12 @@ function drawAds(){
     &&!AD_HIDE.has(r.st||UNMAPPED)&&!r.st));
   const note=document.getElementById("adnote");
   if(note)note.innerHTML=
-    `CTR＝クリック÷表示回数、CPC＝広告費÷クリック、FQ＝表示回数÷リーチ、売上比率＝広告費÷税抜売上`+
-    (adHas("fl")?`、CPF＝広告費÷フォロー数`:"")+(adHas(["fl","pv"])?`、フォロー率＝フォロー数÷プロフアクセス数`:"")+
-    `。`+
-    `<b>売上</b>は、広告を出している店のその期間の税抜売上です`+
-    `（広告を止めていた日も含むので、店舗ページ・予実タブの売上と一致します）。`+
-    `期間をまたぐときも実額どうしで割り直しています（比率の平均はしていません）。`+
+    adMore(
+      `CTR＝クリック÷表示回数／CPC＝広告費÷クリック／FQ＝表示回数÷リーチ／売上比率＝広告費÷税抜売上`+
+      (adHas("fl")?`／CPF＝広告費÷フォロー数`:"")+(adHas(["fl","pv"])?`／フォロー率＝フォロー数÷プロフアクセス数`:""),
+      `<b>売上</b>は、広告を出している店のその期間の税抜売上です`+
+      `（広告を止めていた日も含むので、店舗ページ・予実タブの売上と一致します）。`+
+      `期間をまたぐときも実額どうしで割り直しています（比率の平均はしていません）。`)+
     exNote(wEx)+
     (nomap.sp>0?`<br><b style="color:#b8860b">店舗に紐付いていない広告費が ${YEN(nomap.sp)}円あります。</b>区分が決まらないので、直営・FCどちらの集計にも入っていません（下の「未紐付けキャンペーン」で店舗に割り当てると入ります）。`:"");
 }
@@ -1916,22 +1930,25 @@ function adDrawCreatives(shortName){
     adDrawCreatives(shortName);
   });
   if(note)note.innerHTML=
-    `<b>${sc.name}が${sc.best||"多い"}順</b>に${AD_CR_TOP}位まで。`+
-    (all.length>top.length?`（対象 ${all.length}種）`:"")+
-    `ボタンか列見出しで並べ替えできます。`+
-    `<br>1日あたりの広告費が <b>${YEN(AD_CR_MINSPEND)}円未満</b> のものは外しています`+
-    (weak.length?`（${weak.length}種）`:"")+
-    `。少額の広告はクリックが数回しかなく、CTRやクリック単価が偶然で大きく振れるためです。`+
-    `<br><b>CPC</b>は 広告費÷（プロフアクセス数＋リンク遷移数）で、この画面のどこでも同じ定義です。`+
-    `隣の<b>クリック単価</b>は 広告費÷クリック数 で、<b>別の指標</b>です`+
-    `（キャンペーンの最適化目標に左右されないので、広告どうしの見比べにはこちらが使えます）。`+
-    `<br>CPCは、その広告の分母が取り込めた日のぶんで出します（まだの広告は「—」。0にはしません）。`+
+    adMore(
+      // ふだん要るのはここまで。並び順と、外している広告があるかどうか
+      `<b>${sc.name}が${sc.best||"多い"}順</b>に${AD_CR_TOP}位まで`+
+      (all.length>top.length?`（対象 ${all.length}種）`:"")+
+      `。1日あたり ${YEN(AD_CR_MINSPEND)}円未満は除外`+
+      (weak.length?`（${weak.length}種）`:"")+`。`,
+      // 以下は「なぜそうしているか」。毎回は要らないので畳む
+      `少額の広告はクリックが数回しかなく、CTRやクリック単価が偶然で大きく振れるため外しています。`+
+      `<br><b>CPC</b>は 広告費÷（プロフアクセス数＋リンク遷移数）で、この画面のどこでも同じ定義です。`+
+      `隣の<b>クリック単価</b>は 広告費÷クリック数 で、<b>別の指標</b>です`+
+      `（キャンペーンの最適化目標に左右されないので、広告どうしの見比べにはこちらが使えます）。`+
+      `<br>CPCは、その広告の分母が取り込めた日のぶんで出します（まだの広告は「—」。0にはしません）。`+
+      `<br>1行＝<b>1店の1広告</b>です（広告は店舗のキャンペーンの中で走るため）。`+
+      `店舗の絞り込みには連動しませんが、直営／FCの区分では絞られます。`+
+      `<br>並べ替えは、ボタンか列見出しでできます。`)+
+    // 取り込み待ちの案内は、畳まずそのまま出す（いまの状態の話なので）
     // 列は sql/030 で足したので「列が無い」ではない。値がまだ来ていないだけ
-    (hasVT?"":`<br><b>平均視聴時間</b>は Meta から取れます（<code>video_avg_time_watched_actions</code>）。`+
-      `DBの列は用意済みで、取り込みが走ると値が入ります（いまは「—」）。`)+
-    `<br>1行＝<b>1店の1広告</b>です（広告は店舗のキャンペーンの中で走るため）。`+
-    `店舗の絞り込みには連動しませんが、直営／FCの区分では絞られます。`+
-    (DATA.metaAds&&DATA.metaAds.length?"":`<br>広告単位のデータが data.json に入っていません（データ更新後に出ます）。`);
+    (hasVT?"":`<br><b>平均視聴時間</b>は取り込みが走ると値が入ります（いまは「—」）。`)+
+    (DATA.metaAds&&DATA.metaAds.length?"":`<br>広告単位のデータがまだ入っていません（データ更新後に出ます）。`);
 }
 
 // ============================================================
@@ -2091,9 +2108,10 @@ function openBukken(){
   else{ location.href=BUKKEN_REPORT_URL+(BUKKEN_REPORT_URL.includes("?")?"&":"?")+"t="+Date.now(); }
 }
 function renderMain(){
-  syncAdminTab(); syncAdsTab();
+  syncAdminTab();
   syncGroupTab();
   document.getElementById("app").classList.remove("detail","adsview");
+  {const tb=document.querySelector(".tabbar"); if(tb)tb.style.display="";}
   document.getElementById("app").innerHTML=`
     <header>
       <h1>売上KPI管理 <span class="gbadge">${GROUP_LABEL}</span></h1>
@@ -2188,11 +2206,12 @@ function renderMain(){
 
 // 店舗専用ページ（一覧の店名タップで ?store=<id> に遷移して表示。①店舗選択は出さない）
 function renderDetail(){
-  syncAdminTab(); syncAdsTab(); syncGroupTab();
+  syncAdminTab(); syncGroupTab();
   const FRAN=!!window.FRANCHISEE;
   if(FRAN){const tb=document.querySelector(".tabbar"); if(tb)tb.style.display="none";}   // 加盟店は他タブに行けない
   const s=storeMeta(state.detail); const nm=(s&&s.name)||("店舗"+state.detail);
   document.getElementById("app").classList.remove("adsview");
+  {const tb=document.querySelector(".tabbar"); if(tb)tb.style.display="";}
   document.getElementById("app").classList.add("detail");
   const navrow=FRAN
     ? ((window.FR_STORES||[]).length>1 ? `<div style="margin:2px 0 8px"><button class="chip" id="fr-home">◀ 店舗一覧</button></div>` : "")
@@ -4691,6 +4710,13 @@ function adSpendByDay(id){
   return m;
 }
 // その店に広告データがあるか。無い店には列も段も出さない（空欄で幅を取らない）
+// 注記の書き方をそろえる。ふだん読むのは前半だけでよく、
+// 「なぜそうしているか」は開いたときに読めればいい。
+// 隠すのではなく畳む（読めなくすると、書いてある理由ごと失われる）。
+// 週次KPI・クリエイティブ別など複数の場所から使うので、ここに置く
+function adMore(head,more){
+  return head+(more?`<details class="notemore"><summary>くわしく</summary>${more}</details>`:"");
+}
 function adStoreHas(id){ const a=adBySid().get(id); return !!(a&&a.length); }
 // 店舗ページに広告を出すか。出す・出さないの判定はここ1か所に集める。
 //   ①加盟店ログイン（社外）には出さない … 他店と並べた比較を含むため。
