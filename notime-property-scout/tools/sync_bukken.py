@@ -32,18 +32,24 @@ OPTIONAL_COLS = ["station_name", "usage"]
 
 
 def load_feed(path: Path = FEED) -> list[dict]:
-    rows, seen = [], {}
+    raw = []
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
         obj = json.loads(line)
-        rec = {k: obj[k] for k in PROP_COLS if k in obj}
-        if "id" not in rec:
+        if "id" not in obj:
             raise ValueError(f"id がありません: {line[:80]}")
+        raw.append(obj)
+    # PostgREST の一括upsertは「全オブジェクトのキー集合が一致」必須(PGRST102)。
+    # 送る列 = PROP_COLS のうち feed のどれかに実在した列だけに絞り（存在しないDB列を送らない）、
+    # 全行をその列でそろえる（無い行は None 埋め）。これで usage/station_name も欠けず送れる。
+    present = [c for c in PROP_COLS if any(c in o for o in raw)]
+    seen = {}
+    for obj in raw:
+        rec = {k: obj.get(k) for k in present}
         seen[rec["id"]] = rec   # 同一idは後勝ち（最新の追記を採用）
-    rows = list(seen.values())
-    return rows
+    return list(seen.values())
 
 
 def existing_ids(url: str, key: str) -> set[str]:
