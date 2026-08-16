@@ -37,8 +37,8 @@
   .links{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 10px;align-items:center}
   .links a{font-size:13px;text-decoration:none;color:#1558d6;border:1px solid #ccd;border-radius:8px;padding:6px 10px}
   .linkbtn{font-size:13px;color:var(--ink2);background:#fafafa;border:1px solid var(--border);border-radius:8px;padding:6px 10px;cursor:pointer}
-  .mapbox{display:flex;gap:6px;margin:0 0 10px}
-  .mapbox input{flex:1;min-width:0;border:1px solid var(--border);border-radius:9px;padding:9px;font-size:13px}
+  .mapbox{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
+  .mapbox input{flex:1 1 100%;min-width:0;border:1px solid var(--border);border-radius:9px;padding:9px;font-size:13px}
   .mapbox button{border:1px solid var(--border);background:#fafafa;border-radius:9px;padding:0 12px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap}
   .mapbox button[data-mapsave]{background:var(--accent);color:#fff;border-color:var(--accent)}
   .verdicts{display:flex;gap:8px;margin:8px 0}
@@ -228,8 +228,8 @@ function render(){
     const isDetail=/detailPage|\/detail[-\/]|\/bukken[-\/]|\/property\/[^\/]*\d/i.test(r.detail_url||"");
     const link=r.detail_url?'<a href="'+esc(r.detail_url)+'" target="_blank" rel="noopener">'+(isDetail?'物件ページ':'掲載元サイト（一覧）')+' ›</a>':'';
     const mapCustom=!!(r.map_url && /^https?:\/\//i.test(r.map_url));
-    const gmap='<a data-gmap href="'+esc(gmapUrl(r))+'" target="_blank" rel="noopener">🗺 地図'+(mapCustom?'（指定）':'')+'</a>';
-    const mapedit='<button class="linkbtn" data-mapedit>✏ 地図リンク貼り直し</button>';
+    // 「🗺 地図」ボタンを押すと、今入っているリンクが編集欄に出て、書き換え→保存できる
+    const gmap='<button class="linkbtn" data-maptoggle>🗺 地図'+(mapCustom?'（指定）':'')+'</button>';
     return `<div class="card v-${esc(v)}" data-id="${esc(r.id)}">
       <div class="top">${badge}<span class="city">${esc(r.city)}</span></div>
       <div class="name">${esc(r.name||"（名称なし）")}</div>
@@ -242,9 +242,10 @@ function render(){
         <div><label>階数</label><b>${fFloor(r)}</b></div>
         <div><label>主要駅からの距離</label><b>${fStation(r)}</b></div>
       </div>
-      <div class="links">${link}${gmap}${mapedit}<span class="city" style="align-self:center">出典：${esc(r.source||"")}</span></div>
+      <div class="links">${link}${gmap}<span class="city" style="align-self:center">出典：${esc(r.source||"")}</span></div>
       <div class="mapbox" data-mapbox style="display:none">
-        <input type="url" inputmode="url" data-mapinput placeholder="正しいGoogle MapのURLを貼り付け" value="${esc(r.map_url||"")}">
+        <input type="url" inputmode="url" data-mapinput placeholder="Google MapのURL" value="${esc(r.map_url||gmapUrl(r))}">
+        <button data-mapopen>開く</button>
         <button data-mapsave>保存</button>
         <button data-mapclear>既定に戻す</button>
       </div>
@@ -268,19 +269,21 @@ function bind(){
       if(verdict==="保留"){ save(id,card,{verdict:"保留",reason:(ROWS.find(r=>r.id===id)||{}).reason||null}); }
       else openReason(id,card,verdict);      // OK/NG は理由ポップアップ
     });
-    // 地図リンクの貼り直し（自動生成リンクがズレる物件を手で直せるように）
+    // 「🗺 地図」ボタン → 今のリンクを編集欄に表示。書き換えて保存でDBへ。開くで確認。
     const mb=card.querySelector("[data-mapbox]");
-    const eb=card.querySelector("[data-mapedit]");
-    if(eb&&mb) eb.onclick=()=>{ mb.style.display=(mb.style.display==="none"?"flex":"none"); };
+    const tg=card.querySelector("[data-maptoggle]");
+    if(tg&&mb) tg.onclick=()=>{ mb.style.display=(mb.style.display==="none"?"flex":"none"); };
     if(mb){
+      const inp=mb.querySelector("[data-mapinput]");
+      mb.querySelector("[data-mapopen]").onclick=()=>{
+        const u=inp.value.trim(); if(u)window.open(u,"_blank","noopener");
+      };
       mb.querySelector("[data-mapsave]").onclick=()=>{
-        const url=mb.querySelector("[data-mapinput]").value.trim();
+        const url=inp.value.trim();
         if(url && !/^https?:\/\//i.test(url)){ alert("http(s)から始まるURLを貼り付けてください"); return; }
         saveMap(id,card,url||null);
       };
-      mb.querySelector("[data-mapclear]").onclick=()=>{
-        mb.querySelector("[data-mapinput]").value=""; saveMap(id,card,null);
-      };
+      mb.querySelector("[data-mapclear]").onclick=()=>{ saveMap(id,card,null); };
     }
   });
 }
@@ -293,8 +296,10 @@ async function saveMap(id,card,url){
   if(error){ saved.textContent="保存に失敗："+error.message; saved.style.color="var(--ng)"; return; }
   saved.style.color="var(--ok)"; saved.textContent=url?"✓ 地図リンクを保存しました":"✓ 既定の地図に戻しました";
   const row=ROWS.find(r=>r.id===id); if(row)row.map_url=url;
-  const a=card.querySelector("[data-gmap]");
-  if(a&&row){ a.href=gmapUrl(row); a.textContent="🗺 地図"+(url?"（指定）":""); }
+  const tg=card.querySelector("[data-maptoggle]");
+  if(tg) tg.textContent="🗺 地図"+(url?"（指定）":"");
+  const inp=card.querySelector("[data-mapinput]");
+  if(inp&&row) inp.value=row.map_url||gmapUrl(row);   // 既定に戻した時は自動生成URLを再表示
   const mb=card.querySelector("[data-mapbox]"); if(mb)mb.style.display="none";
 }
 
