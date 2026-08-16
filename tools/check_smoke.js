@@ -131,6 +131,7 @@ const VIEWS = [
   ["店舗ページ（2レジの店）", "?g=own&store=5"],
   ["広告タブ（直営）", "?view=ads&g=own"],
   ["広告タブ（FC）", "?view=ads&g=fc"],
+  ["Instagram（枠だけ）", "?view=ig"],
 ];
 // 店舗ページに広告の段が出るか。店名では決めず、その店に広告データがあるかで決まる。
 // 直営でもFCでも、2レジの店でも、同じように出ること。
@@ -219,6 +220,24 @@ for (const [name, query] of VIEWS) {
     // 下限を緩くすると、1つ付け忘れても気づけない
     const en = (view.match(/<h2 data-en="/g) || []).length;
     ok(`${name}：見出し6つすべてに英字の小見出しが付いている（${en}件）`, en === 6);
+    // マーケティングの下に Meta広告 と Instagram を並べた。
+    // どちらの画面からも行き来できること
+    ok(`${name}：マーケティングの見出しと切り替えが出ている`,
+      /マーケティング/.test(view) && /class="seg mktseg"/.test(view)
+      && /view=ig/.test(view) && /view=ads/.test(view));
+    // 項目のチップは13個ある。開いたまま並べると画面の上半分が選択肢で埋まる
+    ok(`${name}：表示する項目は畳んである`, /<details class="pickbox"/.test(view)
+      && !/<details class="pickbox" id="adpickbox" open/.test(view));
+  }
+  // Instagram はまだ枠だけだが、枠が出ていることは確かめる。
+  // 振り分けを外すと店舗一覧が出てしまい、「中身が描かれている」だけでは通る
+  if (name.startsWith("Instagram")) {
+    ok(`${name}：Instagram の枠が出ている`,
+      /フォロワー/.test(view) && /class="igskel"/.test(view));
+    ok(`${name}：マーケティングの切り替えから来ている`,
+      /class="seg mktseg"/.test(view) && /view=ads/.test(view));
+    ok(`${name}：売上のタブバーを出していない`,
+      /<nav class="tabbar" style="display: none;">/.test(view));
   }
   if (name.startsWith("広告タブ")) {
     const t = /<table class="kmat" id="adcrtbl">([\s\S]*?)<\/table>/.exec(view);
