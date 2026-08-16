@@ -199,6 +199,21 @@ for (const [name, query] of VIEWS) {
     ok(`${name}：無人／有人の内訳の説明が残っている`, /無人営業（SIPOS）/.test(body));
     ok(`${name}：「有人来店を入力」ボタンが残っている`, /id="stf-btn"/.test(body));
   }
+  // 広告ページだけ、アプリのトップと同じ見た目にそろえてある。
+  // カード（枠・影）をやめて罫と余白で区切り、見出しに英字の小見出しを付ける。
+  // 表とグラフには手を入れていない（数字を読む画面なので、そこは動かさない）
+  if (name.startsWith("広告タブ")) {
+    // CSS(<style>)にも "adsview" の文字列は出るので、実際に付いた class を見る。
+    // 文字列の有無で見ていたときは、印を外しても検査が通ってしまった
+    ok(`${name}：この画面だけに効く印(adsview)が付いている`,
+      /<div class="wrap adsview"/.test(view), (/<div class="wrap[^"]*"/.exec(view) || [])[0]);
+    ok("広告ページの段からカードの装いが外してある",
+      /\.adsview \.panel\{[^}]*background:none;border:0/.test(src));
+    // 集計期間・日別・週次・月次・クリエイティブ別・未紐付けの6つ。
+    // 下限を緩くすると、1つ付け忘れても気づけない
+    const en = (view.match(/<h2 data-en="/g) || []).length;
+    ok(`${name}：見出し6つすべてに英字の小見出しが付いている（${en}件）`, en === 6);
+  }
   if (name.startsWith("広告タブ")) {
     const t = /<table class="kmat" id="adcrtbl">([\s\S]*?)<\/table>/.exec(view);
     const rows = t ? (t[1].match(/<tr>/g) || []).length : 0;
