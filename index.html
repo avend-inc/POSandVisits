@@ -77,6 +77,38 @@
   .panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px 16px 12px;margin:14px 0;}
   .panel h2{font-size:14px;margin:0 0 2px;font-weight:700;}
   .panel .note{font-size:11.5px;color:var(--muted);margin:0 0 8px;}
+
+  /* ---- 広告ページだけ、トップページと同じ見た目にする ----------------
+     アプリのトップ（在庫アプリ側の /）で、カード（枠・角丸・影）をやめて
+     1pxの罫と余白だけで区切る形にした。広告ページもそれに合わせる。
+
+     ただし表とグラフには手を入れない。ここは数字を読む画面なので、
+     見出しの装いだけ変えて、中身の読みやすさは動かさない。
+     効くのは #app.adsview の中だけ。店舗一覧・店舗ページは今までどおり */
+  .adsview .panel{
+    background:none;border:0;border-radius:0;box-shadow:none;
+    padding:0;margin:0 0 34px;
+  }
+  /* 段の区切りは、枠ではなく上の罫1本と余白で出す。
+     最初の段（集計期間）には罫を引かない＝見出しのすぐ下から始める */
+  .adsview .panel + .panel{
+    border-top:1px solid var(--border);
+    padding-top:26px;
+  }
+  /* 英字の小見出し。トップの SEGMENTS / ADMIN と同じ役回り。
+     data-en を持つ見出しにだけ出るので、付け忘れた段は今までどおり */
+  .adsview .panel h2{
+    font-size:17px;font-weight:800;letter-spacing:-.01em;margin:0 0 8px;
+  }
+  .adsview .panel h2[data-en]::before{
+    content:attr(data-en);
+    display:block;
+    font-size:10px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--muted);
+    margin-bottom:6px;
+  }
+  /* 見出しの中の補足（「（今月を含む3か月）」など）は、見出しより一段落とす */
+  .adsview .panel h2 .sub{font-size:11px;font-weight:500;letter-spacing:0;}
   .row2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
   @media (max-width:760px){.row2{grid-template-columns:1fr;}}
   .chart{position:relative;width:100%;}
@@ -1269,6 +1301,9 @@ function adVal(k,p){
   return m.calc?m.calc(p):p[k];
 }
 function renderAds(){
+  // トップページと同じ見た目にする範囲を、この画面だけに閉じるための印。
+  // 店舗一覧・店舗ページの .panel は今までどおり
+  document.getElementById("app").classList.add("adsview");
   // タブの出し分けは renderMain / renderDetail と同じにそろえる。
   // ここだけ呼んでいなかったので、広告ページを開くと広告・経営・管理の
   // タブが消えていた（＝ページごとにメニューの中身が違って見えていた）
@@ -1312,7 +1347,7 @@ function renderAds(){
     </div>
     <p class="note" id="adsegwarn" style="margin:0 2px 10px"></p>
     <div class="panel">
-      <div class="sub" style="font-weight:700;margin:2px 0 4px">集計期間</div>
+      <h2 data-en="Period">集計期間</h2>
       <div class="adperiod">
         <button class="chip" id="ad4w">直近4週</button>
         <button class="chip pchip" data-preset="thismonth">今月</button>
@@ -1347,11 +1382,11 @@ function renderAds(){
       <div class="dtop four" id="adcards"></div>
     </div>
     <div class="panel">
-      <h2>日別の推移 <span class="sub" style="font-weight:500">（選んだ項目ぶん）</span></h2>
+      <h2 data-en="Daily">日別の推移 <span class="sub" style="font-weight:500">（選んだ項目ぶん）</span></h2>
       <div id="adtrend"></div>
     </div>
     <div class="panel">
-      <h2>週次KPI
+      <h2 data-en="Weekly">週次KPI
         <span style="margin-left:auto;display:flex;gap:6px;flex-wrap:nowrap">
           ${AD_GROUPS.map(([k,n])=>`<button class="chip adgrp${AD_GROUP===k?" on":""}" data-g="${k}">${n}</button>`).join("")}
         </span></h2>
@@ -1360,18 +1395,18 @@ function renderAds(){
       <p class="note" id="adnote"></p>
     </div>
     <div class="panel">
-      <h2>月次KPI <span class="sub" style="font-weight:500">（今月を含む3か月）</span></h2>
+      <h2 data-en="Monthly">月次KPI <span class="sub" style="font-weight:500">（今月を含む3か月）</span></h2>
       <div class="tblwrap"><table class="kmat" id="admtbl"></table></div>
       <p class="note" id="admnote"></p>
     </div>
     <div class="panel">
-      <h2>クリエイティブ別 <span class="sub" style="font-weight:500">（${adSegLabel()}・1行＝1店の1広告）</span></h2>
+      <h2 data-en="Creatives">クリエイティブ別 <span class="sub" style="font-weight:500">（${adSegLabel()}・1行＝1店の1広告）</span></h2>
       <div id="adcrbtns"></div>
       <div class="tblwrap"><table class="kmat" id="adcrtbl"></table></div>
       <p class="note" id="adcrnote"></p>
     </div>
     <div class="panel" id="admappanel" style="display:none">
-      <h2>未紐付けキャンペーン</h2>
+      <h2 data-en="Unlinked">未紐付けキャンペーン</h2>
       <div id="admap"></div>
       <p class="note">ここで割り当てた内容は、取り込みが上書きしても消えません（取り込みの値の上からかぶせています）。<br>
         店舗に割り当てるまでは、直営・FCどちらの集計にも入りません（区分が決まらないため）。</p>
@@ -2039,7 +2074,7 @@ function openBukken(){
 function renderMain(){
   syncAdminTab(); syncAdsTab();
   syncGroupTab();
-  document.getElementById("app").classList.remove("detail");
+  document.getElementById("app").classList.remove("detail","adsview");
   document.getElementById("app").innerHTML=`
     <header>
       <h1>売上KPI管理 <span class="gbadge">${GROUP_LABEL}</span></h1>
@@ -2138,6 +2173,7 @@ function renderDetail(){
   const FRAN=!!window.FRANCHISEE;
   if(FRAN){const tb=document.querySelector(".tabbar"); if(tb)tb.style.display="none";}   // 加盟店は他タブに行けない
   const s=storeMeta(state.detail); const nm=(s&&s.name)||("店舗"+state.detail);
+  document.getElementById("app").classList.remove("adsview");
   document.getElementById("app").classList.add("detail");
   const navrow=FRAN
     ? ((window.FR_STORES||[]).length>1 ? `<div style="margin:2px 0 8px"><button class="chip" id="fr-home">◀ 店舗一覧</button></div>` : "")
