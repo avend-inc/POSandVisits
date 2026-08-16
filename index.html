@@ -137,10 +137,11 @@
   .navlink:hover{border-color:var(--accent);}
   .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:60;background:var(--surface);border-top:1px solid var(--border);box-shadow:0 -2px 12px rgba(0,0,0,.07);padding-bottom:env(safe-area-inset-bottom);}
   .tabbar-in{max-width:600px;margin:0 auto;display:flex;}
-  .tabbar a{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 2px 9px;text-decoration:none;color:var(--ink2);font-size:11px;font-weight:700;letter-spacing:.02em;-webkit-tap-highlight-color:transparent;}
-  .tabbar a .ic{font-size:19px;line-height:1;filter:grayscale(.25) opacity(.85);}
+  /* 絵文字をやめたので、アイコンと文字を縦に積む必要がなくなった。
+     文字だけを1行で置き、押している所は下の罫と色で示す */
+  .tabbar a{flex:1;display:flex;align-items:center;justify-content:center;padding:13px 2px;text-decoration:none;color:var(--ink2);font-size:11.5px;font-weight:700;letter-spacing:.02em;-webkit-tap-highlight-color:transparent;border-top:2px solid transparent;}
+  .tabbar a.on{border-top-color:var(--accent);}
   .tabbar a.on{color:var(--accent);}
-  .tabbar a.on .ic{filter:none;}
   .gbadge{display:inline-block;font-size:12px;font-weight:800;vertical-align:middle;
     padding:2px 9px;border-radius:999px;background:var(--accent);color:#fff;letter-spacing:.03em;}
   .tabbar a:active{opacity:.55;}
@@ -454,15 +455,15 @@
 <body>
 <div class="wrap" id="app"><div class="sub" style="padding:40px 0">読み込み中…</div></div>
 <nav class="tabbar"><div class="tabbar-in">
-  <a href="index.html?g=own" id="tab-own"><span class="ic">🏢</span>直営</a>
-  <a href="index.html?g=fc" id="tab-fc"><span class="ic">🏬</span>FC</a>
-  <a href="pl.html"><span class="ic">📋</span>予実</a>
-  <a href="trends.html"><span class="ic">📈</span>推移</a>
-  <a href="promo.html"><span class="ic">🏷️</span>販促</a>
-  <a href="ask.html"><span class="ic">🔍</span>分析AI</a>
-  <a href="index.html?view=ads&amp;g=own" id="tab-ads" style="display:none"><span class="ic">📣</span>広告</a>
-  <a href="keiei.html" id="tab-keiei" style="display:none"><span class="ic">🧮</span>経営</a>
-  <a href="admin.html" id="tab-admin" style="display:none"><span class="ic">⚙️</span>管理</a>
+  <a href="index.html?g=own" id="tab-own">直営</a>
+  <a href="index.html?g=fc" id="tab-fc">FC</a>
+  <a href="pl.html">予実</a>
+  <a href="trends.html">推移</a>
+  <a href="promo.html">販促</a>
+  <a href="ask.html">分析AI</a>
+  <a href="index.html?view=ads&amp;g=own" id="tab-ads" style="display:none">広告</a>
+  <a href="keiei.html" id="tab-keiei" style="display:none">経営</a>
+  <a href="admin.html" id="tab-admin" style="display:none">管理</a>
 </div></nav>
 
 <script>
@@ -833,7 +834,7 @@ function renderFranchiseeHome(){
       <button class="themebtn" id="themebtn" style="margin-left:auto">◐</button>
       ${SB?'<button class="themebtn" id="logoutbtn" style="margin-left:6px">ログアウト</button>':''}
     
-      <a class="navlink homebtn" href="../" title="アプリのトップへ">🏠 ホーム</a>
+      <a class="navlink homebtn" href="../" title="アプリのトップへ">ホーム</a>
     </header>
     <div class="sub" style="margin:8px 0 12px">ご覧になる店舗を選んでください。</div>
     <div class="frhome">${ids.map(id=>`<button class="frcard" data-sid="${id}"><span class="nm">${esc((storeMeta(id)||{}).name||("店舗"+id))}</span><span class="go">›</span></button>`).join("")||'<span class="sub">表示できる店舗がありません。管理者にお問い合わせください。</span>'}</div>`;
@@ -1158,6 +1159,24 @@ let AD_GOFF=(function(){
   return adGoffDefault();
 })();
 function adSaveGoff(){ try{localStorage.setItem("notime-adgoff2",JSON.stringify([...AD_GOFF]));}catch(e){} }
+// ---- グラフに出すのは最大3つ ------------------------------------------
+//   線が増えるほど色が増え、どれがどれだか分からなくなる（軸も2本しか無い）。
+//   店舗ページの推移グラフ（state.trendSel）が前から3つ止まりなので、そちらに
+//   そろえる。4つめを選んだら、いちばん古い1つを自動で外す。
+//   AD_GOFF は「隠している項目」なので、順番はこの配列のほうで持つ。
+//   ページを開き直すと順番は並び順に戻る（保存するほどのものではない）。
+const AD_GMAX=3;
+let AD_GORDER=AD_COLS.filter(k=>!AD_GOFF.has(k));
+// 3つに増やす前の選択が保存されていることがあるので、読み込んだ時点で収める
+while(AD_GORDER.length>AD_GMAX)AD_GOFF.add(AD_GORDER.shift());
+function adGraphToggle(k){
+  if(AD_GOFF.has(k)){
+    AD_GOFF.delete(k); AD_GORDER.push(k);
+    while(AD_GORDER.length>AD_GMAX)AD_GOFF.add(AD_GORDER.shift());
+  }else{
+    AD_GOFF.add(k); AD_GORDER=AD_GORDER.filter(x=>x!==k);
+  }
+}
 // ---- 押した期間を画面ごとに覚える ------------------------------------
 //   広告タブと店舗ページの広告の段では、見たい期間が違う（全社は4週、
 //   1店は28日、など）。1つの値を共有すると片方を変えたらもう片方も変わるので、
@@ -1329,7 +1348,7 @@ function renderAds(){
       <button class="themebtn" id="themebtn" style="margin-left:auto">◐</button>
       ${SB?'<button class="themebtn" id="logoutbtn" style="margin-left:6px">ログアウト</button>':''}
     
-      <a class="navlink homebtn" href="../" title="アプリのトップへ">🏠 ホーム</a>
+      <a class="navlink homebtn" href="../" title="アプリのトップへ">ホーム</a>
     </header>
     <div class="sub" style="margin:2px 0 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
       最新 <b style="color:var(--ink)">${last?mdShort(last):"—"}</b>｜更新 ${genShort(DATA.generated_at)}
@@ -1375,7 +1394,7 @@ function renderAds(){
           const on=AD_COLS.includes(m.k), ready=adHas(m.need);
           const tip=(m.note?m.note:"")+(ready?"":(m.note?" / ":"")+"元データ（フォロー数・プロフアクセス数）がDBに入ると値が出ます");
           return `<button class="chip adcol${on?" on":""}${ready?"":" nodata"}" data-k="${m.k}"${tip?` title="${esc(tip)}"`:""}`+
-                 ` style="${on?`background:${c};border-color:${c};color:#fff`:""}">`+
+                 ` style="${on?"background:var(--ink);border-color:var(--ink);color:var(--surface)":""}">`+
                  `<i class="dot" style="background:${c}"></i>${m.name}</button>`;}).join("")}
       </div>
       <div id="adwarn" class="adwarn" style="display:none"></div>
@@ -1571,7 +1590,7 @@ function drawAds(){
   }).join("");
   if(cards)cards.querySelectorAll(".adcard").forEach(c2=>c2.onclick=()=>{
     const k=c2.dataset.k;
-    if(AD_GOFF.has(k))AD_GOFF.delete(k); else AD_GOFF.add(k);
+    adGraphToggle(k);
     adSaveGoff(); drawAds();
   });
   // 選んだ項目のうち、元データがまだDBに無いものをまとめて知らせる
@@ -2064,7 +2083,7 @@ function wireCommon(){
   on("storereportbtn","onclick",openStoreReportDialog);
   if(SB)on("logoutbtn","onclick",doLogout);
 }
-// 直営タブ右上「🏢 物件一覧」→ 物件レビューページを開く。相対パスは同タブ遷移、絶対URLは別タブ。
+// 直営タブ右上「物件一覧」→ 物件レビューページを開く。相対パスは同タブ遷移、絶対URLは別タブ。
 function openBukken(){
   if(!BUKKEN_REPORT_URL){ alert("物件レビューページは準備中です。"); return; }
   if(/^https?:/i.test(BUKKEN_REPORT_URL)){ window.open(BUKKEN_REPORT_URL,"_blank","noopener"); }
@@ -2078,12 +2097,12 @@ function renderMain(){
   document.getElementById("app").innerHTML=`
     <header>
       <h1>売上KPI管理 <span class="gbadge">${GROUP_LABEL}</span></h1>
-      ${(GROUP==="own"&&!window.FRANCHISEE)?'<button class="themebtn" id="bukkenbtn" style="margin-left:auto;width:auto;padding:0 12px;gap:5px">🏢 物件一覧</button>':''}
-      <button class="themebtn" id="reportbtn" style="margin-left:${(GROUP==="own"&&!window.FRANCHISEE)?'6px':'auto'};width:auto;padding:0 12px;gap:5px">📊 レポート</button>
+      ${(GROUP==="own"&&!window.FRANCHISEE)?'<button class="themebtn" id="bukkenbtn" style="margin-left:auto;width:auto;padding:0 12px;gap:5px">物件一覧</button>':''}
+      <button class="themebtn" id="reportbtn" style="margin-left:${(GROUP==="own"&&!window.FRANCHISEE)?'6px':'auto'};width:auto;padding:0 12px;gap:5px">レポート</button>
       <button class="themebtn" id="themebtn" style="margin-left:6px">◐</button>
       ${SB?'<button class="themebtn" id="logoutbtn" style="margin-left:6px">ログアウト</button>':''}
     
-      <a class="navlink homebtn" href="../" title="アプリのトップへ">🏠 ホーム</a>
+      <a class="navlink homebtn" href="../" title="アプリのトップへ">ホーム</a>
     </header>
     <div class="sub" style="margin:2px 0 6px">
       最新データ 売上:<b style="color:var(--ink)">${DATA._salesMax}</b>／来店:<b style="color:var(--ink)">${DATA._visitMax}</b>　更新:${(DATA.generated_at||"").replace("T"," ").slice(5,16)}
@@ -2181,11 +2200,11 @@ function renderDetail(){
   document.getElementById("app").innerHTML=`
     <header>
       <h1>${esc(nm)} <span class="gbadge">店舗別</span></h1>
-      ${FRAN?'':'<button class="themebtn" id="storereportbtn" style="margin-left:auto;width:auto;padding:0 12px;gap:5px">📊 レポート</button>'}
+      ${FRAN?'':'<button class="themebtn" id="storereportbtn" style="margin-left:auto;width:auto;padding:0 12px;gap:5px">レポート</button>'}
       <button class="themebtn" id="themebtn" style="margin-left:${FRAN?'auto':'6px'}">◐</button>
       ${SB?'<button class="themebtn" id="logoutbtn" style="margin-left:6px">ログアウト</button>':''}
     
-      <a class="navlink homebtn" href="../" title="アプリのトップへ">🏠 ホーム</a>
+      <a class="navlink homebtn" href="../" title="アプリのトップへ">ホーム</a>
     </header>
     <div class="sub" style="margin:2px 0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
       最新 売上<b style="color:var(--ink)">${mdShort(DATA._salesMax)}</b>・来店<b style="color:var(--ink)">${mdShort(DATA._visitMax)}</b>｜更新 ${genShort(DATA.generated_at)}
@@ -2199,7 +2218,7 @@ function renderDetail(){
     </div>
     <div class="panel">
       <h2>日別推移 <span class="sub" style="font-weight:500">（下スクロールで過去）</span>
-        ${posMixed(state.detail)?'<button class="chip" id="stf-btn" style="margin-left:auto;flex:none;white-space:nowrap">👥 有人来店を入力<span id="stf-badge"></span></button>':''}</h2>
+        ${posMixed(state.detail)?'<button class="chip" id="stf-btn" style="margin-left:auto;flex:none;white-space:nowrap">有人来店を入力<span id="stf-badge"></span></button>':''}</h2>
       <div class="tblwrap daywrap"><table class="kmat daykpi" id="daykpi"></table></div>
       <p class="note" style="margin:7px 0 0"><b>青字＝土日祝</b>／気温は最高・最低<span id="dk-adnote"></span></p>
     </div>
@@ -2468,7 +2487,7 @@ function openReportDialog(){
   ov.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:9999;";
   const box=document.createElement("div");
   box.style.cssText="background:var(--surface,#fff);color:var(--ink,#1a1d21);border:1px solid var(--border,#e2e6ea);border-radius:12px;padding:22px 24px;min-width:300px;max-width:92vw;box-shadow:0 12px 44px rgba(0,0,0,.35);";
-  box.innerHTML='<div style="font-size:16px;font-weight:700;margin-bottom:6px">📊 レポート出力</div>'+
+  box.innerHTML='<div style="font-size:16px;font-weight:700;margin-bottom:6px">レポート出力</div>'+
     '<div style="font-size:13px;color:var(--muted,#8a929b);margin-bottom:14px">対象の年月を選んでください（前月比などは自動でその前月と比較します）。</div>'+
     '<label style="font-size:13px;font-weight:600">対象年月　<input type="month" id="rpt-ym" value="'+def+'"'+(minYm?' min="'+minYm+'"':'')+(maxYm?' max="'+maxYm+'"':'')+' style="padding:7px 10px;font-size:14px;border:1px solid var(--border,#ccc);border-radius:8px;background:var(--surface,#fff);color:var(--ink,#111)"></label>'+
     '<div style="margin-top:18px;display:flex;gap:10px;justify-content:flex-end">'+
@@ -3898,7 +3917,7 @@ function drawStoreAds(){
   }).join("");
   cards.querySelectorAll(".adcard").forEach(c2=>c2.onclick=()=>{
     const k=c2.dataset.k;
-    if(ST_AD_GOFF.has(k))ST_AD_GOFF.delete(k); else ST_AD_GOFF.add(k);
+    stAdGraphToggle(k);
     try{localStorage.setItem("notime-stadgoff2",JSON.stringify([...ST_AD_GOFF]));}catch(e){}
     drawStoreAds();
   });
@@ -4459,7 +4478,7 @@ function staffedMissingCount(id){
   }
   return n;
 }
-// 「👥 有人来店を入力」ボタンに未入力件数のバッジを出す（0件なら消す）。
+// 「有人来店を入力」ボタンに未入力件数のバッジを出す（0件なら消す）。
 function drawStaffedBadge(){
   const el=document.getElementById("stf-badge"); if(!el)return;
   const n=staffedMissingCount(state.detail);
@@ -4654,6 +4673,17 @@ let ST_AD_GOFF=(function(){
     if(Array.isArray(s))return new Set(s.filter(k=>AD_METRICS.some(m=>m.k===k)));}catch(e){}
   return adGoffDefault();
 })();
+// 店舗ページの広告の段も、広告タブと同じく最大3つ（AD_GMAX）にそろえる
+let ST_AD_GORDER=ST_AD_COLS.filter(k=>!ST_AD_GOFF.has(k));
+while(ST_AD_GORDER.length>AD_GMAX)ST_AD_GOFF.add(ST_AD_GORDER.shift());
+function stAdGraphToggle(k){
+  if(ST_AD_GOFF.has(k)){
+    ST_AD_GOFF.delete(k); ST_AD_GORDER.push(k);
+    while(ST_AD_GORDER.length>AD_GMAX)ST_AD_GOFF.add(ST_AD_GORDER.shift());
+  }else{
+    ST_AD_GOFF.add(k); ST_AD_GORDER=ST_AD_GORDER.filter(x=>x!==k);
+  }
+}
 // 日付 → 広告費（日別推移の列と、平日/土日祝の平均に使う）
 function adSpendByDay(id){
   const m=new Map();
