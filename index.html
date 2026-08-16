@@ -98,6 +98,35 @@
      ただし表とグラフには手を入れない。ここは数字を読む画面なので、
      見出しの装いだけ変えて、中身の読みやすさは動かさない。
      効くのは #app.adsview の中だけ。店舗一覧・店舗ページは今までどおり */
+  /* ---- マーケティング（広告・Instagram）の見出し ---- */
+  .adsview header{align-items:center;gap:8px;margin-bottom:14px;}
+  .mktttl{margin-right:auto;min-width:0;}
+  .mktttl h1{margin:2px 0 0;font-size:24px;font-weight:800;letter-spacing:-.01em;}
+  .avtop-lab{display:block;font-size:10px;font-weight:700;letter-spacing:.16em;
+    text-transform:uppercase;color:var(--muted);}
+  /* 見出しの右のボタンは、大きさと形をそろえる。
+     以前は ◐ だけ小さい正方形で、ログアウトとホームは別の形をしていた */
+  .adsview header .themebtn{border:1px solid var(--border);background:var(--surface);
+    color:var(--ink2);border-radius:9px;padding:7px 11px;font-size:12px;font-weight:700;
+    cursor:pointer;text-decoration:none;line-height:1.2;white-space:nowrap;}
+  .adsview header .themebtn:hover{border-color:var(--accent);}
+  /* Meta広告 / Instagram の切り替え */
+  .mktseg{margin:0 0 14px;}
+  .mktseg a{padding:7px 14px;font-size:12.5px;}
+  /* 表示する項目。ふだんは畳む */
+  .pickbox{margin:2px 0 10px;}
+  .pickbox>summary{display:inline-flex;align-items:center;gap:7px;cursor:pointer;
+    font-size:12px;font-weight:700;color:var(--ink2);list-style:none;
+    -webkit-tap-highlight-color:transparent;}
+  .pickbox>summary::-webkit-details-marker{display:none;}
+  .pickbox>summary::after{content:"▾";font-size:9px;color:var(--muted);}
+  .pickbox[open]>summary::after{content:"▴";}
+  .pickbox>summary .cnt{font-weight:700;color:var(--muted);font-size:11px;
+    font-variant-numeric:tabular-nums;}
+  /* Instagram はまだ枠だけ。中身が入る場所を、薄い帯で示しておく */
+  .igskel{height:96px;border-radius:10px;margin:10px 0 2px;
+    background:repeating-linear-gradient(135deg,var(--surface2),var(--surface2) 10px,
+      transparent 10px,transparent 20px);border:1px solid var(--border);}
   /* タブバーを出さないので、そのぶんの余白（88px）は要らない */
   .wrap.adsview{padding-bottom:28px;}
   .adsview .panel{
@@ -1067,7 +1096,7 @@ function loadSel(){
   return new Set(allIds);
 }
 
-function render(){ if(VIEW==="ads")renderAds(); else if(state.detail)renderDetail(); else renderMain(); }
+function render(){ if(VIEW==="ads")renderAds(); else if(VIEW==="ig")renderIg(); else if(state.detail)renderDetail(); else renderMain(); }
 
 // ============================================================
 //  広告タブ（Meta広告）
@@ -1329,6 +1358,62 @@ function adVal(k,p){
   const m=AD_METRICS.find(x=>x.k===k);
   return m.calc?m.calc(p):p[k];
 }
+// ============================================================
+// マーケティング
+//   広告（Meta）と Instagram を、この下にぶら下げる。
+//   売上アプリのタブバーは出さない＝売上の中の1タブではない。
+//   戻り先はアプリのトップ（ホーム）。
+// ============================================================
+// 選んだ項目のチップは開いたまま覚えておく。押すたびに描き直すので、
+// 覚えておかないと1つ選ぶたびに畳まれて、続けて選べない
+let AD_PICK_OPEN=false;
+function mktHead(active){
+  return `
+    <header>
+      <div class="mktttl">
+        <span class="avtop-lab">Marketing</span>
+        <h1>マーケティング</h1>
+      </div>
+      <button class="themebtn" id="themebtn">表示</button>
+      ${SB?'<button class="themebtn" id="logoutbtn">ログアウト</button>':''}
+      <a class="themebtn" href="../" title="アプリのトップへ">ホーム</a>
+    </header>
+    <div class="seg mktseg">
+      <a href="index.html?view=ads&g=own"${active==="ads"?' class="on"':""}>Meta広告</a>
+      <a href="index.html?view=ig"${active==="ig"?' class="on"':""}>Instagram</a>
+    </div>`;
+}
+// Instagram。取り込みの土台（sql/023）はあるが、まだ画面に出していない。
+// 何を並べるかは後から決めるので、いまは型だけ置いておく。
+function renderIg(){
+  document.getElementById("app").classList.add("adsview");
+  {const tb=document.querySelector(".tabbar"); if(tb)tb.style.display="none";}
+  document.getElementById("app").innerHTML=mktHead("ig")+`
+    <div class="panel">
+      <h2 data-en="Followers">フォロワー</h2>
+      <p class="note">日々のフォロワー数と、その増減。</p>
+      <div class="igskel"></div>
+    </div>
+    <div class="panel">
+      <h2 data-en="Reach">リーチ・プロフィール表示</h2>
+      <p class="note">投稿がどれだけ届いて、どれだけプロフィールを見られたか。</p>
+      <div class="igskel"></div>
+    </div>
+    <div class="panel">
+      <h2 data-en="Audience">フォロワーの属性</h2>
+      <p class="note">年齢・性別・地域。</p>
+      <div class="igskel"></div>
+    </div>
+    <p class="note" style="margin-top:18px">
+      <b>この画面はまだ枠だけです。</b>
+      ためる側（<code>ig_accounts</code>・フォロワーの日次・インサイト・属性）は
+      用意してありますが、画面に出す中身はこれから決めます。
+      ${adMore("", `フォロワー数は Instagram の API で過去に遡れないため、毎日1回ずつ貯めています。`+
+        `店舗との紐付けは広告と同じ持ち方（destination_id）なので、`+
+        `広告費とフォロワーの増減を店舗単位で並べられます。`)}
+    </p>`;
+  wireCommon();
+}
 function renderAds(){
   // トップページと同じ見た目にする範囲を、この画面だけに閉じるための印。
   // 店舗一覧・店舗ページの .panel は今までどおり
@@ -1357,18 +1442,7 @@ function renderAds(){
   const sync=DATA.metaSync||{};
   const last=(DATA.meta||[]).reduce((a,r)=>r.d>a?r.d:a,"");
   document.getElementById("app").innerHTML=`
-    <header>
-      <h1>Meta広告 <span class="gbadge">広告</span></h1>
-      <button class="themebtn" id="themebtn" style="margin-left:auto">◐</button>
-      ${SB?'<button class="themebtn" id="logoutbtn" style="margin-left:6px">ログアウト</button>':''}
-    
-      <a class="navlink homebtn" href="../" title="アプリのトップへ">ホーム</a>
-    </header>
-    <div class="sub" style="margin:2px 0 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-      最新 <b style="color:var(--ink)">${last?mdShort(last):"—"}</b>｜更新 ${genShort(DATA.generated_at)}
-      ${sync.status?`｜同期 ${esc(String(sync.status))}`:""}
-      ${sync.unmapped?`｜<b style="color:#b8860b">未紐付け ${NUM(sync.unmapped)}件</b>`:""}
-    </div>
+    ${mktHead("ads")}
     <!-- 広告の下の階層。URLが分かれた別ページなので、そのまま共有・再読み込みできる。
          広告は店舗のキャンペーンの中で走るので、クリエイティブもこの区分で割れる -->
     <div class="segrow">
@@ -1376,11 +1450,13 @@ function renderAds(){
         <a href="index.html?view=ads&g=own"${adSeg()==="own"?' class="on"':""}>直営</a>
         <a href="index.html?view=ads&g=fc"${adSeg()==="fc"?' class="on"':""}>FC</a>
       </div>
-      <span class="sub segnote">${adSegLabel()}のぶんだけを集計しています</span>
+      <span class="sub segnote">${adSegLabel()}のぶんだけ</span>
     </div>
-    <p class="note" id="adsegwarn" style="margin:0 2px 10px"></p>
+    <p class="note" id="adsegwarn" style="margin:0 0 10px"></p>
     <div class="panel">
-      <h2 data-en="Period">集計期間</h2>
+      <h2 data-en="Filter">条件</h2>
+      <!-- 期間・店舗・項目を1つの段にまとめる。以前はそれぞれ別の見出しを持って
+           いて、画面の上半分が操作だけで埋まっていた -->
       <div class="adperiod">
         <button class="chip" id="ad4w">直近4週</button>
         <button class="chip pchip" data-preset="thismonth">今月</button>
@@ -1402,8 +1478,12 @@ function renderAds(){
           ${adStoreList().map(n=>`<option value="${esc(n)}"${AD_STORE===n?" selected":""}>${esc(n)}</option>`).join("")}
         </select>
       </div>
-      <div class="sub" style="font-weight:700;margin:6px 0 4px">表示する項目</div>
-      <div id="adpick" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">
+      <!-- 項目は13個あり、そのまま並べると画面の上半分が選択肢で埋まる。
+           ふだんは畳んでおいて、変えたいときだけ開く。
+           押すたびに描き直すので、開いているかどうかは AD_PICK_OPEN で覚える -->
+      <details class="pickbox" id="adpickbox"${AD_PICK_OPEN?" open":""}>
+        <summary>表示する項目<span class="cnt">${AD_COLS.length}／${adMetrics().length}</span></summary>
+      <div id="adpick" style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 4px">
         ${adMetrics().map(m=>{const c=AD_COLOR[m.k]||"var(--accent)";
           const on=AD_COLS.includes(m.k), ready=adHas(m.need);
           const tip=(m.note?m.note:"")+(ready?"":(m.note?" / ":"")+"元データ（フォロー数・プロフアクセス数）がDBに入ると値が出ます");
@@ -1411,6 +1491,7 @@ function renderAds(){
                  ` style="${on?"background:var(--ink);border-color:var(--ink);color:var(--surface)":""}">`+
                  `<i class="dot" style="background:${c}"></i>${m.name}</button>`;}).join("")}
       </div>
+      </details>
       <div id="adwarn" class="adwarn" style="display:none"></div>
       <div class="dtop four" id="adcards"></div>
     </div>
@@ -1445,6 +1526,8 @@ function renderAds(){
         店舗に割り当てるまでは、直営・FCどちらの集計にも入りません（区分が決まらないため）。</p>
     </div>`;
   wireCommon();
+  {const pb=document.getElementById("adpickbox");
+   if(pb)pb.ontoggle=()=>{AD_PICK_OPEN=pb.open;};}
   document.querySelectorAll(".adcol").forEach(b=>b.onclick=()=>{
     const k=b.dataset.k, i=AD_COLS.indexOf(k);
     if(i>=0){ if(AD_COLS.length<=1)return; AD_COLS.splice(i,1); } else AD_COLS.push(k);
