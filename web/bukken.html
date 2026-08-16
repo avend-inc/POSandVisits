@@ -79,6 +79,15 @@
     border-radius:9px;padding:7px 11px;font-size:12px;font-weight:700;
     text-decoration:none;cursor:pointer;}
   .homebtn:hover{border-color:var(--accent);}
+  /* 下のタブバー。他のページと同じ形にそろえる。
+     ここにCSSが無く、ナビだけ足してあって当たっていなかった */
+  .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:60;background:var(--surface);border-top:1px solid var(--border);box-shadow:0 -2px 12px rgba(0,0,0,.07);padding-bottom:env(safe-area-inset-bottom);}
+  .tabbar-in{max-width:600px;margin:0 auto;display:flex;}
+  .tabbar a{flex:1;display:flex;align-items:center;justify-content:center;padding:13px 2px;text-decoration:none;color:var(--ink2);font-size:11.5px;font-weight:700;letter-spacing:.02em;-webkit-tap-highlight-color:transparent;border-top:2px solid transparent;}
+  .tabbar a.on{border-top-color:var(--accent);color:var(--accent);}
+  .tabbar a:active{opacity:.55;}
+  /* タブバーのぶん、本文の下に余白を作る（最後の行が隠れないように） */
+  body{padding-bottom:76px;}
 </style></head>
 <body>
 <header>
@@ -86,7 +95,7 @@
   <h1>物件レビュー</h1>
   <button class="hbtn" id="logoutbtn" style="display:none">ログアウト</button>
 
-      <a class="navlink homebtn" href="../" title="アプリのトップへ">🏠 ホーム</a>
+      <a class="navlink homebtn" href="../" title="アプリのトップへ">ホーム</a>
     </header>
 <main>
   <div class="filters" id="filters" style="display:none">
@@ -399,14 +408,14 @@ document.querySelectorAll(".chip").forEach(c=>c.onclick=()=>{
 boot();
 </script>
 <nav class="tabbar"><div class="tabbar-in">
-  <a href="index.html?g=own" id="tab-own"><span class="ic">🏢</span>直営</a>
-  <a href="index.html?g=fc" id="tab-fc"><span class="ic">🏬</span>FC</a>
-  <a href="pl.html"><span class="ic">📋</span>予実</a>
-  <a href="trends.html"><span class="ic">📈</span>推移</a>
-  <a href="promo.html"><span class="ic">🏷️</span>販促</a>
-  <a href="ask.html"><span class="ic">🔍</span>分析AI</a>
-  <a href="index.html?view=ads&amp;g=own" id="tab-ads"><span class="ic">📣</span>広告</a>
-  <a href="keiei.html" id="tab-keiei" style="display:none"><span class="ic">🧮</span>経営</a>
-  <a href="admin.html" id="tab-admin" style="display:none"><span class="ic">⚙️</span>管理</a>
+  <a href="index.html?g=own" id="tab-own">直営</a>
+  <a href="index.html?g=fc" id="tab-fc">FC</a>
+  <a href="pl.html">予実</a>
+  <a href="trends.html">推移</a>
+  <a href="promo.html">販促</a>
+  <a href="ask.html">分析AI</a>
+  <a href="index.html?view=ads&amp;g=own" id="tab-ads">広告</a>
+  <a href="keiei.html" id="tab-keiei" style="display:none">経営</a>
+  <a href="admin.html" id="tab-admin" style="display:none">管理</a>
 </div></nav>
 </body></html>
