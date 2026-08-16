@@ -277,6 +277,41 @@ for (const [name, query] of VIEWS) {
     ok(`「${label}」に切り替わる`, d.grain === g && d.on === g, JSON.stringify(d));
     ok(`「${label}」では◀▶が押せる`, d.pager === "on/on", d.pager);
   }
+  // グラフに出すのは最大3つ。カードを順に押して、4つめで古いのが外れるか見る。
+  // 線が増えるほど色が増え、どれがどれだか分からなくなる（軸も2本しか無い）
+  {
+    const p2 = `window.addEventListener('load',function(){setTimeout(function(){
+      var out={}, seen=[];
+      try{
+        var shown=function(){return document.querySelectorAll('#adcards .adcard:not(.goff)').length;};
+        out.cards=document.querySelectorAll('#adcards .adcard').length;
+        seen.push(shown());
+        for(var i=0;i<8;i++){
+          var c=document.querySelectorAll('#adcards .adcard.goff')[0];
+          if(!c)break; c.click(); seen.push(shown());
+        }
+        out.seen=seen; out.max=Math.max.apply(null,seen);
+      }catch(e){ out.err=String(e&&e.message||e); }
+      var d=document.createElement('div');d.id='g';d.style.display='none';
+      d.textContent='__G__'+JSON.stringify(out)+'__END__';document.body.appendChild(d);},2200);});`;
+    const f3 = path.join(dir, "gmax.html");
+    fs.writeFileSync(f3, src.replace("<script>",
+      "<script>\nwindow.__DATA__=" + JSON.stringify(DATA) + ";\n" + p2 + "\n</script>\n<script>", 1));
+    const dom = execFileSync(CHROME, [...(IS_SHELL ? [] : ["--headless"]), "--no-sandbox",
+      "--disable-gpu", "--window-size=393,900", "--virtual-time-budget=9000",
+      "--dump-dom", "file://" + f3 + "?view=ads&g=own"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 64 << 20 });
+    const m3 = /__G__(.*?)__END__/.exec(dom.replace(/<script[\s\S]*?<\/script>/g, ""));
+    const g = m3 ? JSON.parse(m3[1]) : null;
+    if (!g) { console.log("  NG  グラフの本数を測れませんでした"); ng++; }
+    else {
+      ok(`グラフに出すのは最大3つ（押すたび ${(g.seen || []).join("→")}）`,
+        g.max <= 3 && !g.err, JSON.stringify(g));
+      ok("カードを何度押しても3つを超えない", (g.seen || []).slice(-3).every((n2) => n2 === 3),
+        JSON.stringify(g.seen));
+    }
+  }
+
   const da = run("all");
   if (!da) { console.log("  NG  「全期間」に切り替えられませんでした"); ng++; }
   else {
@@ -370,6 +405,32 @@ for (const [name, query] of VIEWS) {
   // 棚卸は在庫アプリの /pos-stocktake に移した。売上アプリ側には残さない
   ok("棚卸(stock.html)への導線が残っていない", noStock.length === 0, noStock.join(", "));
   ok("棚卸のページ自体が残っていない", !pages.includes("stock.html"));
+
+  // 画面の枠（下のタブと、見出しの右のボタン）に絵文字を使わない。
+  //   OSごとに絵が変わるうえ、色がばらけて騒がしくなる。
+  // 本文の中の記号（天気の☀🌧、保存の✓、順位の★など）は意味を持って
+  // 働いているので対象外。ここで一緒に禁じると、天気の列まで消すことになる
+  {
+    const EMOJI = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/u;
+    const dirty = [];
+    for (const f of pages) {
+      const t = fs.readFileSync(path.join(dir2, f), "utf8");
+      const chrome = [...t.matchAll(/<nav class="tabbar">[\s\S]*?<\/nav>/g),
+                      ...t.matchAll(/<header>[\s\S]*?<\/header>/g)].map((m) => m[0]).join("");
+      const hit = [...chrome].filter((ch) => EMOJI.test(ch));
+      if (hit.length) dirty.push(`${f}（${[...new Set(hit)].join("")}）`);
+    }
+    ok("タブと見出しのボタンに絵文字を使っていない", dirty.length === 0, dirty);
+  }
+
+  // 選んだ項目のチップを、その項目の色で塗りつぶさない。
+  // 5つ選ぶと5色のベタ塗りが並んで、画面がひどく騒がしくなっていた。
+  // 色は左の丸（グラフの線の色）だけが持ち、チップ自体は1色にそろえる
+  {
+    const t = fs.readFileSync(path.join(dir2, "dashboard.html"), "utf8");
+    ok("選んだ項目のチップを項目の色で塗っていない",
+      !/on\?`background:\$\{c\};border-color:\$\{c\}/.test(t));
+  }
 }
 
 // ---- 触っているのに存在しない id が無いか ------------------------------

@@ -257,6 +257,9 @@ eq("集計し直すと前回の売上は消える", acc.ex, 100000);
       // グラフの既定（広告費＋プロフアクセス数）はここでは関係ないので空で置く
       function adGoffDefault(){ return new Set(); }
     `
+      // グラフに出せる本数の上限。切り出す範囲の外で決めているので持ってくる。
+      // 値をここに書き写すと、本体を変えたときに気づけなくなる
+      + `var AD_GMAX=${(/const AD_GMAX=(\d+)/.exec(src) || [, "3"])[1]};\n`
       // 実物の adZero / adAdd も入れる（店舗ページの集計はこれを使っている）
       + src.slice(src.indexOf("function adZero()"), src.indexOf("function adSales("))
       + src.slice(f2, t2), ctx2);

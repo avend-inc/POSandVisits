@@ -42,9 +42,11 @@
   .actions{position:sticky;bottom:64px;background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);padding:10px 14px;margin-top:16px;display:flex;gap:10px;align-items:center;justify-content:flex-end;flex-wrap:wrap;}
   .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:60;background:var(--surface);border-top:1px solid var(--border);box-shadow:0 -2px 12px rgba(0,0,0,.07);padding-bottom:env(safe-area-inset-bottom);}
   .tabbar-in{max-width:720px;margin:0 auto;display:flex;}
-  .tabbar a{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 1px 9px;text-decoration:none;color:var(--ink2);font-size:10.5px;font-weight:700;}
-  .tabbar a .ic{font-size:18px;line-height:1;filter:grayscale(.25) opacity(.85);}
-  .tabbar a.on{color:var(--accent);} .tabbar a.on .ic{filter:none;}
+  /* 絵文字をやめたので、アイコンと文字を縦に積む必要がなくなった。
+     文字だけを1行で置き、押している所は上の罫と色で示す */
+  .tabbar a{flex:1;display:flex;align-items:center;justify-content:center;padding:13px 2px;text-decoration:none;color:var(--ink2);font-size:11.5px;font-weight:700;letter-spacing:.02em;-webkit-tap-highlight-color:transparent;border-top:2px solid transparent;}
+  .tabbar a.on{border-top-color:var(--accent);}
+  .tabbar a.on{color:var(--accent);}
   .gate{max-width:440px;margin:14vh auto;text-align:center;padding:0 22px;}
   .gate .logo{font-size:22px;font-weight:750;} .gate .t{font-size:16px;font-weight:700;margin:18px 0 6px;} .gate .m{color:var(--ink2);font-size:14px;line-height:1.8;}
   .gbtn{display:inline-flex;align-items:center;gap:10px;background:var(--surface);color:var(--ink);border:1px solid var(--border);border-radius:11px;padding:12px 20px;font-size:15px;font-weight:700;cursor:pointer;box-shadow:var(--shadow);margin-top:18px;}
@@ -63,15 +65,15 @@
 <body>
 <div class="wrap" id="app"><div class="sub" style="padding:40px 0">読み込み中…</div></div>
 <nav class="tabbar"><div class="tabbar-in">
-  <a href="index.html?g=own" id="tab-own"><span class="ic">🏢</span>直営</a>
-  <a href="index.html?g=fc" id="tab-fc"><span class="ic">🏬</span>FC</a>
-  <a href="pl.html"><span class="ic">📋</span>予実</a>
-  <a href="trends.html"><span class="ic">📈</span>推移</a>
-  <a href="promo.html"><span class="ic">🏷️</span>販促</a>
-  <a href="ask.html"><span class="ic">🔍</span>分析AI</a>
-  <a href="index.html?view=ads&amp;g=own" id="tab-ads"><span class="ic">📣</span>広告</a>
-  <a href="keiei.html" id="tab-keiei" class="on"><span class="ic">🧮</span>経営</a>
-  <a href="admin.html" id="tab-admin"><span class="ic">⚙️</span>管理</a>
+  <a href="index.html?g=own" id="tab-own">直営</a>
+  <a href="index.html?g=fc" id="tab-fc">FC</a>
+  <a href="pl.html">予実</a>
+  <a href="trends.html">推移</a>
+  <a href="promo.html">販促</a>
+  <a href="ask.html">分析AI</a>
+  <a href="index.html?view=ads&amp;g=own" id="tab-ads">広告</a>
+  <a href="keiei.html" id="tab-keiei" class="on">経営</a>
+  <a href="admin.html" id="tab-admin">管理</a>
 </div></nav>
 <script>
 "use strict";
@@ -199,7 +201,7 @@ async function boot(){
   try{
     if(window.__DATA__){DATA=window.__DATA__;prep();ME.role="admin";await loadTargets();renderKeiei();return;}
     let cfg=null; try{cfg=await (await fetch(CONFIG_URL,{cache:"no-store"})).json();}catch(e){}
-    if(!cfg||cfg.mode!=="auth"){ screen('<div class="gate"><div class="logo">🧮 経営レポート</div><div class="t">ログインが必要です</div><div class="m">この画面は管理者専用です。Googleログインの設定が完了すると利用できます。</div><div style="margin-top:14px"><a class="navlink" href="index.html">← ダッシュボードへ</a></div></div>'); return; }
+    if(!cfg||cfg.mode!=="auth"){ screen('<div class="gate"><div class="logo">経営レポート</div><div class="t">ログインが必要です</div><div class="m">この画面は管理者専用です。Googleログインの設定が完了すると利用できます。</div><div style="margin-top:14px"><a class="navlink" href="index.html">← ダッシュボードへ</a></div></div>'); return; }
     await ensureSupabase();
     SB=window.supabase.createClient(cfg.url,cfg.anon,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,flowType:"pkce",storageKey:"notime-auth"}});
     const {data:{session}}=await SB.auth.getSession();
@@ -255,9 +257,9 @@ async function loadDaily(){
   });
 }
 
-function showLogin(){ screen('<div class="gate"><div class="logo">🧮 経営レポート</div><div class="t">ログイン</div><div class="m">管理者の Google アカウントでログインしてください。</div><button class="gbtn" id="gl"><span class="g"></span>Google でログイン</button></div>');
+function showLogin(){ screen('<div class="gate"><div class="logo">経営レポート</div><div class="t">ログイン</div><div class="m">管理者の Google アカウントでログインしてください。</div><button class="gbtn" id="gl"><span class="g"></span>Google でログイン</button></div>');
   document.getElementById("gl").onclick=async()=>{const redirectTo=location.origin+location.pathname; await SB.auth.signInWithOAuth({provider:"google",options:{redirectTo,queryParams:{prompt:"select_account"}}});}; }
-function showDenied(msg){ screen('<div class="gate"><div class="logo">🧮 経営レポート</div><div class="t">アクセスできません</div><div class="m">'+esc(msg)+'</div><button class="gbtn" id="lo"><span class="g"></span>別のアカウントでログイン</button><div style="margin-top:14px"><a class="navlink" href="index.html">← ダッシュボードへ</a></div></div>');
+function showDenied(msg){ screen('<div class="gate"><div class="logo">経営レポート</div><div class="t">アクセスできません</div><div class="m">'+esc(msg)+'</div><button class="gbtn" id="lo"><span class="g"></span>別のアカウントでログイン</button><div style="margin-top:14px"><a class="navlink" href="index.html">← ダッシュボードへ</a></div></div>');
   document.getElementById("lo").onclick=async()=>{try{await SB.auth.signOut();}catch(e){}location.reload();}; }
 
 // ---- 本体：経営レポート ----
@@ -332,8 +334,8 @@ async function renderKeiei(){
   const niY=(k,v)=>`<span class="yenin">¥${ni(k,v)}</span>`;   // 円マーク付き入力
   const WH=[["NOTIME","NOTIME"],["SELFURUGI","SELFURUGI"],["GARAGE","SELFURUGI GARAGE"],["NEW","新店"]];
   let h='';
-  h+=`<header><h1>🧮 経営レポート</h1><span class="sub">対象 <b>${cur}</b>（前月 ${ml(prev)}／当月 ${ml(cur)}／来月 ${ml(next)}）${elapsed?`　当月は ${elapsed}/${daysIn}日で日割り換算`:'　当月データなし'}</span><a class="navlink" href="index.html" style="margin-left:auto">← ダッシュボード</a>
-      <a class="navlink homebtn" href="../" title="アプリのトップへ">🏠 ホーム</a>
+  h+=`<header><h1>経営レポート</h1><span class="sub">対象 <b>${cur}</b>（前月 ${ml(prev)}／当月 ${ml(cur)}／来月 ${ml(next)}）${elapsed?`　当月は ${elapsed}/${daysIn}日で日割り換算`:'　当月データなし'}</span><a class="navlink" href="index.html" style="margin-left:auto">← ダッシュボード</a>
+      <a class="navlink homebtn" href="../" title="アプリのトップへ">ホーム</a>
     </header>`;
   h+=`<div class="note">前月＝実績確定／当月＝<b>ダッシュボードと同じ着地見込み（①②③）</b>／翌月以降＝<b>予算（事業計画 bizplan）</b>を着地見込みに（予算が無い店のみ前年同月比で推定）。自動入力ですが編集できます（「保存する」で全員に共有）。</div>`;
   // ■ 予算達成の見込み（目標 vs 着地）※月次予実Excelから取込んだ目標を店舗に紐付け

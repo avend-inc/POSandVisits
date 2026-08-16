@@ -35,10 +35,11 @@
   .navlink:hover{border-color:var(--accent);}
   .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:60;background:var(--surface);border-top:1px solid var(--border);box-shadow:0 -2px 12px rgba(0,0,0,.07);padding-bottom:env(safe-area-inset-bottom);}
   .tabbar-in{max-width:600px;margin:0 auto;display:flex;}
-  .tabbar a{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 2px 9px;text-decoration:none;color:var(--ink2);font-size:11px;font-weight:700;letter-spacing:.02em;-webkit-tap-highlight-color:transparent;}
-  .tabbar a .ic{font-size:19px;line-height:1;filter:grayscale(.25) opacity(.85);}
+  /* 絵文字をやめたので、アイコンと文字を縦に積む必要がなくなった。
+     文字だけを1行で置き、押している所は下の罫と色で示す */
+  .tabbar a{flex:1;display:flex;align-items:center;justify-content:center;padding:13px 2px;text-decoration:none;color:var(--ink2);font-size:11.5px;font-weight:700;letter-spacing:.02em;-webkit-tap-highlight-color:transparent;border-top:2px solid transparent;}
+  .tabbar a.on{border-top-color:var(--accent);}
   .tabbar a.on{color:var(--accent);}
-  .tabbar a.on .ic{filter:none;}
   .tabbar a:active{opacity:.55;}
   .themebtn{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:9px;padding:7px 10px;font-size:12px;cursor:pointer;}
   .chip{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:8px;padding:7px 11px;font-size:12px;font-weight:600;cursor:pointer;}
@@ -126,15 +127,15 @@
 <body>
 <div class="wrap" id="app"><div class="sub" style="padding:40px 0">読み込み中…</div></div>
 <nav class="tabbar"><div class="tabbar-in">
-  <a href="index.html?g=own" id="tab-own"><span class="ic">🏢</span>直営</a>
-  <a href="index.html?g=fc" id="tab-fc"><span class="ic">🏬</span>FC</a>
-  <a href="pl.html" class="on"><span class="ic">📋</span>予実</a>
-  <a href="trends.html"><span class="ic">📈</span>推移</a>
-  <a href="promo.html"><span class="ic">🏷️</span>販促</a>
-  <a href="ask.html"><span class="ic">🔍</span>分析AI</a>
-  <a href="index.html?view=ads&amp;g=own" id="tab-ads"><span class="ic">📣</span>広告</a>
-  <a href="keiei.html" id="tab-keiei" style="display:none"><span class="ic">🧮</span>経営</a>
-  <a href="admin.html" id="tab-admin" style="display:none"><span class="ic">⚙️</span>管理</a>
+  <a href="index.html?g=own" id="tab-own">直営</a>
+  <a href="index.html?g=fc" id="tab-fc">FC</a>
+  <a href="pl.html" class="on">予実</a>
+  <a href="trends.html">推移</a>
+  <a href="promo.html">販促</a>
+  <a href="ask.html">分析AI</a>
+  <a href="index.html?view=ads&amp;g=own" id="tab-ads">広告</a>
+  <a href="keiei.html" id="tab-keiei" style="display:none">経営</a>
+  <a href="admin.html" id="tab-admin" style="display:none">管理</a>
 </div></nav>
 <script>
 "use strict";
@@ -506,10 +507,10 @@ function render(){
   const top=`
     <header>
       <h1>売上KPI管理</h1>
-      <span class="closebadge" title="取り込み済みの最新データ日（締日）">📅 締日 <b>${DATA._salesMax?fmtMD(DATA._salesMax):"—"}</b></span>
+      <span class="closebadge" title="取り込み済みの最新データ日（締日）">締日 <b>${DATA._salesMax?fmtMD(DATA._salesMax):"—"}</b></span>
       <button class="themebtn" id="themebtn" style="margin-left:8px">◐ 表示切替</button>
     
-      <a class="navlink homebtn" href="../" title="アプリのトップへ">🏠 ホーム</a>
+      <a class="navlink homebtn" href="../" title="アプリのトップへ">ホーム</a>
     </header>
     <div class="controls">
       <label class="lbl">店舗</label>
