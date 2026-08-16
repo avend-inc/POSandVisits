@@ -21,7 +21,11 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-FEED = Path(__file__).resolve().parent.parent / "feeds" / "bukken.jsonl"
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+from src import criteria as criteria_mod   # noqa: E402
+
+FEED = ROOT / "feeds" / "bukken.jsonl"
 
 # bukken テーブルの「物件側」列だけを送る（判定列は触らない）。
 PROP_COLS = ["id", "city", "name", "address", "area_tsubo", "area_sqm",
@@ -87,27 +91,32 @@ def upsert(rows: list[dict], url: str, key: str) -> None:
         raise RuntimeError(f"HTTP {e.code}: {detail[:400]}") from None
 
 
-def prune_placeholders(url: str, key: str) -> int:
-    """未判定(verdict is null)の「個別URLでない行」「駐車場行」をDBから削除する。
+def prune_placeholders(url: str, key: str, crit: dict | None = None) -> int:
+    """未判定(verdict is null)の「個別URLでない行」「駐車場行」「条件レンジ外の行」をDBから削除する。
 
     判定済み(OK/NG/保留)の行は絶対に消さない。プレースホルダ種や駐車場ノイズの掃除用。
+    条件レンジ（面積・家賃・階数・駐車場）はレビュー画面の⚙設定に追従する。
     """
     from urllib.parse import quote
+    crit = crit or dict(criteria_mod.DEFAULTS)
     base = url.rstrip("/") + "/rest/v1/bukken?"
     conds = [
         # 個別URLでない（detail/bukken を含まない）未判定行
         "verdict=is.null&detail_url=not.ilike.*detail*&detail_url=not.ilike.*bukken*",
         # 駐車場・月極 の未判定行
         "verdict=is.null&or=(name.ilike." + quote("*駐車場*") + ",name.ilike." + quote("*月極*") + ")",
-        # 3階以上の未判定行（§2 G2：1階・2階のみ）
-        "verdict=is.null&floor=gte.3",
-        # 賃料が3万円未満の未判定行（坪単価/管理費の拾い間違い）
-        "verdict=is.null&rent_yen=lt.30000",
-        # 面積が判明して25〜50坪レンジ外の未判定行（狭い/広い＝条件不一致が確定）。
-        #  ※ 面積不明(null)は比較が真にならないので残る（＝確認で変わりうる物件だけ残す）。
-        "verdict=is.null&area_tsubo=gt.50",
-        "verdict=is.null&area_tsubo=lt.25",
+        # 面積が判明して条件レンジ外の未判定行（狭い/広い）。※不明(null)は真にならず残る。
+        f"verdict=is.null&area_tsubo=gt.{crit['area_max']}",
+        f"verdict=is.null&area_tsubo=lt.{crit['area_min']}",
+        # 家賃が判明して条件レンジ外の未判定行（高すぎ/安すぎ）。
+        f"verdict=is.null&rent_yen=gt.{crit['rent_max']}",
+        f"verdict=is.null&rent_yen=lt.{crit['rent_min']}",
+        # 所在階が上限超の未判定行。
+        f"verdict=is.null&floor=gt.{crit['floor_max']}",
     ]
+    if crit.get("parking_min"):
+        # 駐車場が判明して下限未満の未判定行。
+        conds.append(f"verdict=is.null&parking=lt.{crit['parking_min']}")
     deleted = 0
     for q in conds:
         try:
@@ -191,8 +200,9 @@ def main() -> int:
         rows2 = [{k: v for k, v in r.items() if k not in OPTIONAL_COLS} for r in rows]
         upsert(rows2, url, key)
     feed_ids = {r["id"] for r in rows}
-    removed = prune_not_in_feed(url, key, feed_ids)   # 除外(事務所/100坪超等)された未判定行をDBからも削除
-    pruned = prune_placeholders(url, key)
+    removed = prune_not_in_feed(url, key, feed_ids)   # 除外(事務所/レンジ外等)された未判定行をDBからも削除
+    crit = criteria_mod.fetch(url, key)               # レビュー画面の⚙設定に追従して掃除
+    pruned = prune_placeholders(url, key, crit)
     print(f"bukken に {len(rows)} 件 upsert（新規 {len(new)} 件、verdict/reason は保持）。"
           f"feed外削除 {removed} 件・掃除 {pruned} 件。")
     for r in new:

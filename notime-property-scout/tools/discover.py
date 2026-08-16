@@ -31,6 +31,11 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from src import area as area_mod            # noqa: E402
 from src import linksheet                   # noqa: E402
+from src import criteria as criteria_mod    # noqa: E402
+
+# 検索条件（面積・家賃・階数・駐車場のしきい値）。main() で Supabase から読み込む。
+# レビュー画面の⚙設定で変えた値を収集にも反映する。取得失敗時は既定値。
+CRIT = dict(criteria_mod.DEFAULTS)
 
 FEED = ROOT / "feeds" / "bukken.jsonl"
 CONTACT = os.environ.get("SCOUT_CONTACT", "sho.nakano@avend.co.jp")
@@ -59,12 +64,9 @@ _RE_PARK = re.compile(r"駐車[場車]?[^\d]{0,8}(\d+)\s*台")
 # 階数：「15階建」等の建物規模は拾わない（(?!建)）。物件の所在階のみ。
 _RE_FLOOR = re.compile(r"(?:所在階[^\d]{0,4})?(\d{1,2})\s*階(?!建)")
 _RE_STATION = re.compile(r"([^\s、。/／]{1,12}駅)\s*(徒歩|車|バス)?\s*(\d+)\s*分")
-RENT_MIN = 30000   # これ未満は坪単価/管理費の拾い間違いとみなし採用しない
-# 想定坪数レンジ 25〜50坪。面積が判明していてこのレンジ外の物件は「条件に合致しないと確定」＝候補から除外。
-# 面積が不明の物件は、ユーザーが実地確認すればレンジ内に収まる可能性があるので残す。
-AREA_KEEP_MIN = 25      # これ未満（＝狭いと確定）は除外
-AREA_KEEP_MAX = 50      # これ超（＝広い/建物全体の誤取得と確定）は除外
-AREA_MAX_TSUBO = 100    # （旧・建物全体の誤取得しきい値。実質 AREA_KEEP_MAX に包含）
+RENT_MIN = 30000   # 面積抽出時の下限（これ未満は坪単価/管理費の拾い間違いとみなさない）。
+# ※ 候補の採否レンジ（面積・家賃・階数・駐車場）は CRIT（＝Supabaseの検索条件）で判定する。
+#   「判明していてレンジ外」の物件は candidate から除外し、不明の物件は残す（確認で変わりうるため）。
 # 用途/種目（事務所かテナント店舗か）。店舗として出せない事務所・オフィス専用を弾くために使う。
 # 値は店舗/事務所/テナント等で始まるものだけ採用（「用途地域→地域」等のノイズを拾わない）。
 _RE_USAGE = re.compile(
@@ -265,13 +267,13 @@ def extract(html: str, source: str, city: str, base_url: str,
         # 面積(ラベル優先・単位必須)
         _a = _area(text)
         area_sqm, area_tsubo = _a if _a else (None, None)
-        if area_tsubo and (area_tsubo < AREA_KEEP_MIN or area_tsubo > AREA_KEEP_MAX):
-            continue                # 面積判明かつ25〜50坪レンジ外は「条件不一致が確定」→ 候補にしない
         rent = _rent(text)
         parking = _int(_RE_PARK, text)
         floor = _int(_RE_FLOOR, text)
-        if floor is not None and floor >= 3:
-            continue                # 1階・2階のみ（§2 G2。3階以上は除外）
+        # 面積・家賃・階数・駐車場が「判明していて条件レンジ外」なら候補にしない（不明なら残す）
+        if criteria_mod.out_of_range(
+                {"area_tsubo": area_tsubo, "rent_yen": rent, "floor": floor, "parking": parking}, CRIT):
+            continue
         roadside = bool(_RE_ROAD.search(text))
         anchor = a.get_text(" ", strip=True)
         # 月極駐車場等はテナントでないので除外
@@ -288,7 +290,7 @@ def extract(html: str, source: str, city: str, base_url: str,
         pid = f"{_slug(source)}-{hashlib.sha1(url.encode()).hexdigest()[:8]}"
         if pid in known_ids:
             continue
-        success = bool(area_tsubo and area_tsubo >= 25 and (parking is None or parking >= 2) and roadside)
+        success = bool(area_tsubo and area_tsubo >= CRIT["area_min"] and (parking is None or parking >= 2) and roadside)
         rec = {
             "id": pid, "city": city, "name": name[:60], "address": address,
             "area_tsubo": round(area_tsubo, 2) if area_tsubo else None,
@@ -335,9 +337,6 @@ def enrich(rec: dict) -> dict | None:
         rec["rent_yen"] = r
     a = _area(text)
     if a:
-        # 面積が判明して25〜50坪レンジ外なら「条件不一致が確定」→ 候補から除外（狭い/広い/建物全体の誤取得）
-        if a[1] < AREA_KEEP_MIN or a[1] > AREA_KEEP_MAX:
-            return None
         rec["area_sqm"] = round(a[0], 2)
         rec["area_tsubo"] = round(a[1], 2)
     pk = _int(_RE_PARK, text)
@@ -345,19 +344,20 @@ def enrich(rec: dict) -> dict | None:
         rec["parking"] = pk
     fl = _int(_RE_FLOOR, text)
     if fl is not None:
-        if fl >= 3:
-            return None            # 1階・2階のみ（§2 G2）
         rec["floor"] = fl
     sm = _RE_STATION.search(text)   # 最寄り駅（例「秋田駅 徒歩11分」）
     if sm:
         rec["station_name"] = f"{sm.group(1)} {sm.group(2) or ''}{sm.group(3)}分".strip()
+    # 判明した面積・家賃・階数・駐車場が条件レンジ外なら候補から除外（不明の属性は判定しない）
+    if criteria_mod.out_of_range(rec, CRIT):
+        return None
     # 物件名が仮名（住所/○○のテナント）のときは詳細ページからビル名を拾って差し替える
     if _is_placeholder_name(rec):
         bn = _building_name(text)
         if bn:
             rec["name"] = bn[:60]
     at, pk2 = rec.get("area_tsubo"), rec.get("parking")
-    rec["success_flag"] = bool(at and at >= 25 and (pk2 is None or pk2 >= 2)
+    rec["success_flag"] = bool(at and at >= CRIT["area_min"] and (pk2 is None or pk2 >= 2)
                                and _RE_ROAD.search(text))
     return rec
 
@@ -365,12 +365,11 @@ def enrich(rec: dict) -> dict | None:
 def _feed_screen_out(r: dict) -> bool:
     """feedに残すべきでない行（未判定の想定）を落とす。
 
-    方針: 「条件に合致しないと判明している」物件は除外し、確認で変わりうるもの（面積不明など）だけ残す。
-    - 面積が判明していて 25〜50坪レンジ外（狭い/広い/建物全体の誤取得）→ 除外
+    方針: 「条件に合致しないと判明している」物件は除外し、確認で変わりうるもの（面積・家賃不明など）だけ残す。
+    - 面積・家賃・階数・駐車場が判明していて条件レンジ外 → 除外
     - 事務所・オフィス専用 → 除外
     """
-    at = r.get("area_tsubo")
-    if at is not None and (at < AREA_KEEP_MIN or at > AREA_KEEP_MAX):
+    if criteria_mod.out_of_range(r, CRIT):
         return True
     hay = " ".join(str(r.get(k) or "") for k in ("usage", "name", "note"))
     return _office_only(hay)
@@ -389,6 +388,10 @@ def sources() -> list[tuple[str, str, str]]:
 
 def main() -> int:
     from collections import defaultdict
+    global CRIT
+    CRIT = criteria_mod.fetch()          # レビュー画面の⚙設定（Supabase）を読み込む。失敗時は既定値。
+    print(f"検索条件: 面積{CRIT['area_min']}〜{CRIT['area_max']}坪 / 家賃{CRIT['rent_min']}〜{CRIT['rent_max']}円 "
+          f"/ 階数≤{CRIT['floor_max']} / 駐車≥{CRIT['parking_min']}")
     known_ids, known_urls = load_known()
     found: list[dict] = []
     per_city = defaultdict(int)         # 市ごとの採用数（1市で埋め尽くさない）
