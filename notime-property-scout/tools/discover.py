@@ -60,7 +60,11 @@ _RE_PARK = re.compile(r"駐車[場車]?[^\d]{0,8}(\d+)\s*台")
 _RE_FLOOR = re.compile(r"(?:所在階[^\d]{0,4})?(\d{1,2})\s*階(?!建)")
 _RE_STATION = re.compile(r"([^\s、。/／]{1,12}駅)\s*(徒歩|車|バス)?\s*(\d+)\s*分")
 RENT_MIN = 30000   # これ未満は坪単価/管理費の拾い間違いとみなし採用しない
-AREA_MAX_TSUBO = 100    # これ超は「建物全体の面積を誤取得」の疑いが濃いので不採用（NOTIME/SELFURUGIは25〜50坪想定）
+# 想定坪数レンジ 25〜50坪。面積が判明していてこのレンジ外の物件は「条件に合致しないと確定」＝候補から除外。
+# 面積が不明の物件は、ユーザーが実地確認すればレンジ内に収まる可能性があるので残す。
+AREA_KEEP_MIN = 25      # これ未満（＝狭いと確定）は除外
+AREA_KEEP_MAX = 50      # これ超（＝広い/建物全体の誤取得と確定）は除外
+AREA_MAX_TSUBO = 100    # （旧・建物全体の誤取得しきい値。実質 AREA_KEEP_MAX に包含）
 # 用途/種目（事務所かテナント店舗か）。店舗として出せない事務所・オフィス専用を弾くために使う。
 # 値は店舗/事務所/テナント等で始まるものだけ採用（「用途地域→地域」等のノイズを拾わない）。
 _RE_USAGE = re.compile(
@@ -261,8 +265,8 @@ def extract(html: str, source: str, city: str, base_url: str,
         # 面積(ラベル優先・単位必須)
         _a = _area(text)
         area_sqm, area_tsubo = _a if _a else (None, None)
-        if area_tsubo and area_tsubo > AREA_MAX_TSUBO:
-            continue                # 100坪超は建物全体の面積を誤取得の疑い（店舗区画として不採用）
+        if area_tsubo and (area_tsubo < AREA_KEEP_MIN or area_tsubo > AREA_KEEP_MAX):
+            continue                # 面積判明かつ25〜50坪レンジ外は「条件不一致が確定」→ 候補にしない
         rent = _rent(text)
         parking = _int(_RE_PARK, text)
         floor = _int(_RE_FLOOR, text)
@@ -331,8 +335,8 @@ def enrich(rec: dict) -> dict | None:
         rec["rent_yen"] = r
     a = _area(text)
     if a:
-        # 100坪超は一棟全体の面積を誤取得している疑い → 店舗区画として不採用（25〜50坪想定）
-        if a[1] > AREA_MAX_TSUBO:
+        # 面積が判明して25〜50坪レンジ外なら「条件不一致が確定」→ 候補から除外（狭い/広い/建物全体の誤取得）
+        if a[1] < AREA_KEEP_MIN or a[1] > AREA_KEEP_MAX:
             return None
         rec["area_sqm"] = round(a[0], 2)
         rec["area_tsubo"] = round(a[1], 2)
@@ -359,9 +363,14 @@ def enrich(rec: dict) -> dict | None:
 
 
 def _feed_screen_out(r: dict) -> bool:
-    """feedに残すべきでない行（未判定の想定）: 100坪超 or 事務所・オフィス専用。"""
+    """feedに残すべきでない行（未判定の想定）を落とす。
+
+    方針: 「条件に合致しないと判明している」物件は除外し、確認で変わりうるもの（面積不明など）だけ残す。
+    - 面積が判明していて 25〜50坪レンジ外（狭い/広い/建物全体の誤取得）→ 除外
+    - 事務所・オフィス専用 → 除外
+    """
     at = r.get("area_tsubo")
-    if at and at > AREA_MAX_TSUBO:
+    if at is not None and (at < AREA_KEEP_MIN or at > AREA_KEEP_MAX):
         return True
     hay = " ".join(str(r.get(k) or "") for k in ("usage", "name", "note"))
     return _office_only(hay)
