@@ -103,8 +103,10 @@ def prune_placeholders(url: str, key: str) -> int:
         "verdict=is.null&floor=gte.3",
         # 賃料が3万円未満の未判定行（坪単価/管理費の拾い間違い）
         "verdict=is.null&rent_yen=lt.30000",
-        # 100坪超の未判定行（建物全体の面積を誤取得の疑い・店舗区画として不適）
-        "verdict=is.null&area_tsubo=gt.100",
+        # 面積が判明して25〜50坪レンジ外の未判定行（狭い/広い＝条件不一致が確定）。
+        #  ※ 面積不明(null)は比較が真にならないので残る（＝確認で変わりうる物件だけ残す）。
+        "verdict=is.null&area_tsubo=gt.50",
+        "verdict=is.null&area_tsubo=lt.25",
     ]
     deleted = 0
     for q in conds:
