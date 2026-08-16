@@ -26,6 +26,7 @@
   .top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px}
   .badge{font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;color:#fff}
   .badge.hit{background:var(--ok)} .badge.info{background:#888}
+  .badge.road{background:#0f766e}   /* ロードサイド（路面・幹線沿い） */
   .badge.warn{background:#e8830c;font-size:10px;padding:2px 7px;margin-left:6px;vertical-align:middle}
   .city{font-size:12px;color:var(--ink2)}
   .name{font-size:16px;font-weight:700;margin:2px 0 6px}
@@ -105,6 +106,7 @@
 <main>
   <div class="filters" id="filters" style="display:none">
     <button class="chip on" data-f="todo">条件一致</button>
+    <button class="chip" data-f="road">🛣 ロードサイド</button>
     <button class="chip" data-f="info">要確認</button>
     <button class="chip" data-f="OK">OK</button>
     <button class="chip" data-f="NG">NG</button>
@@ -217,7 +219,8 @@ async function load(){
       +'<small>'+esc(error.message)+'</small></div>');
     return;
   }
-  const rank=r=>(r.success_flag?0:1)*10+(r.verdict?1:0);
+  // 並び順: ロードサイド優先 → 成功パターン → 未判定を先に
+  const rank=r=>(isRoadside(r)?0:1)*100+(r.success_flag?0:1)*10+(r.verdict?1:0);
   ROWS=(data||[]).sort((a,b)=>rank(a)-rank(b)
     || String(a.city).localeCompare(String(b.city))
     || String(b.first_seen||"").localeCompare(String(a.first_seen||"")));
@@ -230,12 +233,19 @@ async function load(){
 function fits(r){
   return r.area_tsubo!=null && r.rent_yen!=null && !outOfRange(r);
 }
+// ロードサイド（路面・幹線沿い・独立店舗）らしさ。説明文/名称/住所のキーワードで判定。
+// ビルインのテナントより優先したいので、バッジ表示・並び順・専用チップに使う。
+const _RE_ROAD=/路面|幹線|国道|県道|バイパス|ロードサイド|通り沿い|沿い|独立店舗|ドライブスルー|角地/;
+function isRoadside(r){
+  return _RE_ROAD.test((r.note||"")+" "+(r.name||"")+" "+(r.address||""));
+}
 function pass(r){
   // 未判定で条件レンジ外（＝合致しないと確定）は隠す。判定済み(OK/NG/保留)は残す。
   if(!r.verdict && outOfRange(r)) return false;
   if(FILTER==="all")   return true;
   if(FILTER==="todo")  return !r.verdict && fits(r);   // 条件一致（面積・家賃が判明して範囲内）
   if(FILTER==="info")  return !r.verdict && !fits(r);  // 要確認（面積/家賃が不明などで確定できない）
+  if(FILTER==="road")  return !r.verdict && fits(r) && isRoadside(r);  // ロードサイドかつ条件一致
   return r.verdict===FILTER;
 }
 
@@ -287,12 +297,14 @@ function render(){
   if(!rows.length){
     let hint="該当なし";
     if(FILTER==="todo") hint='条件一致（面積・家賃が判明して範囲内）の未判定はありません。<br>面積や家賃が不明の候補は「要確認」タブにあります。';
+    else if(FILTER==="road") hint='ロードサイド（路面・幹線沿い）で条件一致の未判定はありません。<br>「条件一致」タブにビルインのテナントも含めて出ます。';
     else if(FILTER==="info") hint='要確認（情報が不足している未判定）はありません。';
     screen('<div class="msg">'+hint+'</div>');return;
   }
   document.getElementById("list").innerHTML=rows.map(r=>{
     const v=r.verdict||"";
-    const badge=r.success_flag?'<span class="badge hit">成功パターン</span>':'<span class="badge info">要確認</span>';
+    const badge=(isRoadside(r)?'<span class="badge road">🛣 ロードサイド</span> ':'')
+      +(r.success_flag?'<span class="badge hit">成功パターン</span>':'<span class="badge info">要確認</span>');
     const isDetail=/detailPage|\/detail[-\/]|\/bukken[-\/]|\/property\/[^\/]*\d/i.test(r.detail_url||"");
     const link=r.detail_url?'<a href="'+esc(r.detail_url)+'" target="_blank" rel="noopener">'+(isDetail?'物件ページ':'掲載元サイト（一覧）')+' ›</a>':'';
     const mapCustom=!!(r.map_url && /^https?:\/\//i.test(r.map_url));
