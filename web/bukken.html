@@ -104,7 +104,8 @@
     </header>
 <main>
   <div class="filters" id="filters" style="display:none">
-    <button class="chip on" data-f="todo">未判定</button>
+    <button class="chip on" data-f="todo">条件一致</button>
+    <button class="chip" data-f="info">要確認</button>
     <button class="chip" data-f="OK">OK</button>
     <button class="chip" data-f="NG">NG</button>
     <button class="chip" data-f="保留">保留</button>
@@ -224,11 +225,17 @@ async function load(){
   render();
 }
 
+// 条件にハマる＝面積も家賃も「判明」していて、条件レンジ内（階・駐車も判明分は範囲内）。
+// 面積や家賃が不明の物件は「確定はできない」ので、条件一致には入れず『要確認』に回す。
+function fits(r){
+  return r.area_tsubo!=null && r.rent_yen!=null && !outOfRange(r);
+}
 function pass(r){
   // 未判定で条件レンジ外（＝合致しないと確定）は隠す。判定済み(OK/NG/保留)は残す。
   if(!r.verdict && outOfRange(r)) return false;
-  if(FILTER==="all")return true;
-  if(FILTER==="todo")return !r.verdict;
+  if(FILTER==="all")   return true;
+  if(FILTER==="todo")  return !r.verdict && fits(r);   // 条件一致（面積・家賃が判明して範囲内）
+  if(FILTER==="info")  return !r.verdict && !fits(r);  // 要確認（面積/家賃が不明などで確定できない）
   return r.verdict===FILTER;
 }
 
@@ -277,7 +284,12 @@ function gmapUrl(r){
 
 function render(){
   const rows=ROWS.filter(pass);
-  if(!rows.length){screen('<div class="msg">該当なし</div>');return;}
+  if(!rows.length){
+    let hint="該当なし";
+    if(FILTER==="todo") hint='条件一致（面積・家賃が判明して範囲内）の未判定はありません。<br>面積や家賃が不明の候補は「要確認」タブにあります。';
+    else if(FILTER==="info") hint='要確認（情報が不足している未判定）はありません。';
+    screen('<div class="msg">'+hint+'</div>');return;
+  }
   document.getElementById("list").innerHTML=rows.map(r=>{
     const v=r.verdict||"";
     const badge=r.success_flag?'<span class="badge hit">成功パターン</span>':'<span class="badge info">要確認</span>';
@@ -416,7 +428,8 @@ async function save(id,card,patch){
   });
   const rs=card.querySelector("[data-reason]");
   if(rs)rs.innerHTML=patch.reason?('理由：<b>'+esc(patch.reason)+'</b>'):'';
-  if(FILTER!=="all" && (FILTER==="todo")===!!patch.verdict){ setTimeout(render,700); }
+  // 絞り込み表示中は、判定するとその行が条件から外れることがあるので少し後に再描画
+  if(FILTER!=="all"){ setTimeout(render,700); }
 }
 
 document.querySelectorAll(".chip").forEach(c=>c.onclick=()=>{
