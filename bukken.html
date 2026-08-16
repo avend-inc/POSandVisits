@@ -68,6 +68,10 @@
   .otherrow{display:flex;gap:8px;margin:10px 0}
   .otherrow input{flex:1;border:1px solid var(--border);border-radius:10px;padding:10px;font-size:14px}
   .otherrow button{border:1px solid var(--border);background:#fafafa;border-radius:10px;padding:0 14px;font-weight:700;cursor:pointer}
+  .setgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:6px 0}
+  .setgrid label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink2)}
+  .setgrid input{border:1px solid var(--border);border-radius:10px;padding:10px;font-size:15px;color:var(--ink)}
+  @media(max-width:420px){.setgrid{grid-template-columns:1fr}}
   .mfoot{display:flex;gap:10px;margin-top:14px;position:sticky;bottom:0;background:var(--surface);padding-top:8px}
   .mfoot button{flex:1;border-radius:11px;padding:13px 0;font-size:15px;font-weight:700;cursor:pointer;border:1px solid var(--border)}
   #rsave{background:var(--accent);color:#fff;border-color:var(--accent)}
@@ -93,6 +97,7 @@
 <header>
   <a class="hbtn" href="index.html?g=own">‹ 戻る</a>
   <h1>物件レビュー</h1>
+  <button class="hbtn" id="setbtn" style="display:none" title="検索条件の設定">⚙ 条件</button>
   <button class="hbtn" id="logoutbtn" style="display:none">ログアウト</button>
 
       <a class="navlink homebtn" href="../" title="アプリのトップへ">ホーム</a>
@@ -116,11 +121,48 @@
   <div class="mfoot"><button id="rcancel">キャンセル</button><button id="rsave">保存</button></div>
 </div></div>
 
+<!-- 検索条件の設定（面積・家賃・階数・駐車場のしきい値）。ここを変えると表示も次回収集も変わる -->
+<div class="overlay" id="setov"><div class="modal">
+  <div class="mhead">検索条件の設定</div>
+  <div class="msub">判明していてこの範囲外の物件は候補から外れます。不明の物件は残ります（確認で変わりうるため）。</div>
+  <div class="setgrid">
+    <label>面積 下限（坪）<input type="number" id="c_area_min" inputmode="decimal" step="1"></label>
+    <label>面積 上限（坪）<input type="number" id="c_area_max" inputmode="decimal" step="1"></label>
+    <label>家賃 下限（月額・円）<input type="number" id="c_rent_min" inputmode="numeric" step="1000"></label>
+    <label>家賃 上限（月額・円）<input type="number" id="c_rent_max" inputmode="numeric" step="1000"></label>
+    <label>所在階 上限<input type="number" id="c_floor_max" inputmode="numeric" step="1"></label>
+    <label>駐車場 下限（台・0=不問）<input type="number" id="c_parking_min" inputmode="numeric" step="1"></label>
+  </div>
+  <div class="saved" id="setmsg" style="text-align:center"></div>
+  <div class="mfoot"><button id="setcancel">キャンセル</button><button id="setsave">保存</button></div>
+</div></div>
+
 <script>
 "use strict";
 // POSandVisits ダッシュボードと同じ Supabase / 同じログイン(notime-auth)を共有する。
 const CONFIG_URL="https://qcdxhsrnlsgpntbiellh.supabase.co/storage/v1/object/public/dashboard/config.json";
 let SB=null, ME={email:""}, ROWS=[], FILTER="todo";
+// 検索条件（面積・家賃・階数・駐車場のしきい値）。⚙設定で編集し bukken_criteria に保存する。
+// 収集(discover)・同期(sync)も同じ値を読むので、ここを変えると次回収集にも反映される。
+const CRIT_DEFAULT={area_min:25,area_max:50,rent_min:30000,rent_max:500000,floor_max:2,parking_min:0};
+let CRIT={...CRIT_DEFAULT};
+
+// 判明している属性が条件レンジ外なら true（＝条件に合致しないと確定）。不明の属性は判定しない。
+function outOfRange(r){
+  if(r.area_tsubo!=null && (r.area_tsubo<CRIT.area_min || r.area_tsubo>CRIT.area_max)) return true;
+  if(r.rent_yen!=null   && (r.rent_yen<CRIT.rent_min   || r.rent_yen>CRIT.rent_max))   return true;
+  if(r.floor!=null      &&  r.floor>CRIT.floor_max) return true;
+  if(CRIT.parking_min   &&  r.parking!=null && r.parking<CRIT.parking_min) return true;
+  return false;
+}
+async function loadCriteria(){
+  try{
+    const {data,error}=await SB.from("bukken_criteria").select("*").limit(1);
+    if(!error && data && data[0]){
+      for(const k of Object.keys(CRIT_DEFAULT)){ const v=data[0][k]; if(v!=null) CRIT[k]=Number(v); }
+    }
+  }catch(e){ /* テーブル未作成等 → 既定値のまま */ }
+}
 
 // 市→主要駅（cities.yaml の main_station）。駅距離が未取得でも駅名は出す。
 const STATION={福島市:"福島駅",秋田市:"秋田駅",富士市:"富士駅",大分市:"大分駅",宮崎市:"宮崎駅",長崎市:"長崎駅"};
@@ -159,11 +201,14 @@ async function boot(){
     ME.email=(session.user&&session.user.email||"").toLowerCase();
     document.getElementById("logoutbtn").style.display="";
     document.getElementById("logoutbtn").onclick=async()=>{try{await SB.auth.signOut();}catch(e){}location.reload();};
+    document.getElementById("setbtn").style.display="";
+    document.getElementById("setbtn").onclick=openSettings;
     await load();
   }catch(e){ screen('<div class="msg">読み込みに失敗しました：'+esc(e.message||e)+'</div>'); }
 }
 
 async function load(){
+  await loadCriteria();
   const {data,error}=await SB.from("bukken").select("*");
   if(error){
     screen('<div class="msg">物件テーブルを読めませんでした。<br>'
@@ -180,6 +225,8 @@ async function load(){
 }
 
 function pass(r){
+  // 未判定で条件レンジ外（＝合致しないと確定）は隠す。判定済み(OK/NG/保留)は残す。
+  if(!r.verdict && outOfRange(r)) return false;
   if(FILTER==="all")return true;
   if(FILTER==="todo")return !r.verdict;
   return r.verdict===FILTER;
@@ -376,6 +423,34 @@ document.querySelectorAll(".chip").forEach(c=>c.onclick=()=>{
   document.querySelectorAll(".chip").forEach(x=>x.classList.remove("on"));
   c.classList.add("on");FILTER=c.dataset.f;render();
 });
+
+// ---- 検索条件の設定 ----
+const SETOV=document.getElementById("setov");
+const CFIELDS=["area_min","area_max","rent_min","rent_max","floor_max","parking_min"];
+function openSettings(){
+  for(const k of CFIELDS){ document.getElementById("c_"+k).value = CRIT[k]; }
+  document.getElementById("setmsg").textContent="";
+  SETOV.classList.add("on");
+}
+function closeSettings(){ SETOV.classList.remove("on"); }
+async function saveSettings(){
+  const v={};
+  for(const k of CFIELDS){ const n=Number(document.getElementById("c_"+k).value); v[k]=isFinite(n)?n:CRIT[k]; }
+  if(v.area_min>v.area_max || v.rent_min>v.rent_max){
+    const m=document.getElementById("setmsg"); m.style.color="var(--ng)"; m.textContent="下限が上限を超えています。ご確認ください。"; return;
+  }
+  const msg=document.getElementById("setmsg"); msg.style.color="var(--ink2)"; msg.textContent="保存中…";
+  const payload=Object.assign({id:1},v,{updated_by:ME.email,updated_at:new Date().toISOString()});
+  const {error}=await SB.from("bukken_criteria").upsert(payload,{onConflict:"id"});
+  if(error){ msg.style.color="var(--ng)"; msg.textContent="保存に失敗："+error.message+"（bukken_criteria テーブル未作成の可能性）"; return; }
+  CRIT={...CRIT,...v};
+  msg.style.color="var(--ok)"; msg.textContent="✓ 保存しました。次回の物件収集にも反映されます。";
+  render();                            // 新しい条件で即フィルタし直す
+  setTimeout(closeSettings,900);
+}
+document.getElementById("setcancel").onclick=closeSettings;
+document.getElementById("setsave").onclick=saveSettings;
+SETOV.addEventListener("click",e=>{ if(e.target===SETOV)closeSettings(); });
 
 // 画面を「グイーン」と強く引っ張った時だけ更新（pull-to-refresh）
 (function(){
