@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -66,9 +67,18 @@ def upsert(rows: list[dict], url: str, key: str) -> None:
         # merge-duplicates: 既存行は送った列だけ更新（verdict/reason は保持）
         "Prefer": "resolution=merge-duplicates,return=minimal",
     })
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        if resp.status not in (200, 201, 204):
-            raise RuntimeError(f"upsert失敗 HTTP {resp.status}: {resp.read()[:300]!r}")
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            if resp.status not in (200, 201, 204):
+                raise RuntimeError(f"upsert失敗 HTTP {resp.status}: {resp.read()[:400]!r}")
+    except urllib.error.HTTPError as e:
+        # PostgREST の本当のエラー本文（どの列/制約が原因か）を見えるようにする
+        detail = ""
+        try:
+            detail = e.read().decode("utf-8", "replace")
+        except Exception:
+            pass
+        raise RuntimeError(f"HTTP {e.code}: {detail[:400]}") from None
 
 
 def prune_placeholders(url: str, key: str) -> int:
