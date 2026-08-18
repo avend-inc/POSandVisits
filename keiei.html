@@ -130,15 +130,14 @@ function fcOvGet(id,ym){const o=FC_OV[String(id)+"|"+ym];return (o&&Number.isFin
 // 着地見込み（税抜・複数店の合算）＝ landing.js の唯一実装に委譲。ページ独自ロジックは持たない＝全ページ同じ数字。
 function landingExForIds(ids,ym){ return NL.salesEx(DATA.daily, ids, ym, id=>fcOvGet(id,ym)) || 0; }
 
-// 単店の着地（税抜ex・税込in・商品販売数it）。売上は landing.js（手入力or自動）、点数は同定義の自動平均。
+// 単店の着地（税抜ex・税込in・商品販売数it）＝ landing.js の唯一実装に委譲。
+// 売上を手入力で変えると点数itも同じ倍率で連動＝商品単価(ex/it)は現状維持。
 // 戻り: {ex:税抜売上着地, inLand:税込着地, it:商品販売数着地, closing}
 function fcLandingEx(storeId,ym){
+  const L=NL.landingFull(DATA.daily, storeId, ym, fcOvGet(storeId,ym), function(){return true;});
+  if(!L) return {ex:0, inLand:0, it:0, closing:null};
   const C=NL.components(DATA.daily, new Set([storeId]), ym, function(){return true;});
-  const ex=NL.salesEx(DATA.daily, new Set([storeId]), ym, id=>fcOvGet(id,ym));
-  const exV=(ex!=null)?ex:(C.actual.ex + C.remWk*C.avg.ex.wk + C.remWe*C.avg.ex.we);
-  const it=C.actual.it + C.remWk*C.avg.it.wk + C.remWe*C.avg.it.we;
-  const inLand=(C.exRatio>0)?exV/C.exRatio:C.actual.in;
-  return {ex:Math.round(exV), inLand:Math.round(inLand), it:Math.round(it), closing:C.closing};
+  return {ex:Math.round(L.ex), inLand:Math.round(L.in), it:Math.round(L.it), closing:C.closing};
 }
 
 // ---- 保存（mgmt_report：月ごとJSON。サーバー未整備時は端末にフォールバック）----
