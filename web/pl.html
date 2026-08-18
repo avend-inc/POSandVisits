@@ -431,14 +431,10 @@ async function loadFcData(){
 function saveFc(){ planSave("fc",state.store,state.ym,fc); }
 function resetFc(){ planDelete("fc",state.store,state.ym); reload(); }
 function landing(){
-  const L={};
-  // 売上(税抜ex/税込in)は landing.js の唯一実装＝手入力(fcavg)または自動。ページ独自計算は持たない＝全ページ同じ数字。
-  const exLand=NL.salesEx(DATA.daily, idsForScope(state.store), state.ym, id=>fcOvGet(id));
-  L.ex=(exLand!=null)?exLand:(AUTO.td.ex + fc.remWk*((AUTO.avg.ex&&AUTO.avg.ex.wk)||0) + fc.remWe*((AUTO.avg.ex&&AUTO.avg.ex.we)||0));
-  L.in=(AUTO.exRatio>0)?L.ex/AUTO.exRatio:(AUTO.td.in + fc.remWk*((fc.avg.in&&fc.avg.in.wk)||0) + fc.remWe*((fc.avg.in&&fc.avg.in.we)||0));
-  // 取引・来店・点数は予実タブの見込み平均(fc.avg)で（この店の打ち手計画。売上着地の数字には影響しない）。
-  ["tx","txv","it","v"].forEach(k=>{ const a=(fc.avg&&fc.avg[k])||(AUTO.avg&&AUTO.avg[k])||{wk:0,we:0}; L[k]=AUTO.td[k] + fc.remWk*(a.wk||0) + fc.remWe*(a.we||0); });
-  return L;
+  // 着地見込みは landing.js の唯一実装に委譲。売上(税抜)を手入力で変えると、数量系（税込売上・
+  // 取引・来店・販売点数）は同じ倍率でスケールし、比率系（客単価・購入率・平均購入数・商品単価）は不変。
+  return NL.aggFull(DATA.daily, idsForScope(state.store), state.ym, id=>fcOvGet(id), kvOf)
+      || {ex:0,in:0,it:0,tx:0,txv:0,v:0};
 }
 // 主要KPI(key)＝売上を動かす3要素、その他(sub)＝参考。売上(KGI)はヒーローに別表示。
 // tk=targets.json（予算）の対応キー。予算列・達成率の表示に使う。
@@ -658,7 +654,7 @@ function fcBody(monthLabel,storeName){
         <div class="field"><label>目標（税込予算）</label><input class="num" id="budget" type="number" min="0" step="10000" value="${fc.budget||""}" placeholder="未登録"${CANEDIT?"":" disabled"}></div>
         ${CANEDIT?'<button class="chip" id="fcreset">自動見込みに戻す</button>':'<span class="note">閲覧のみ（編集は権限者）</span>'}
       </div>
-      <p class="note"><b>売上（税込/税抜）の着地見込みは、店舗ページの「⚙ 見込設定」で手入力した平日/土日祝 平均売上（税抜）を全ページ共通で使用</b>します（未入力なら自動＝平日直近10日・土日祝直近6日の平均）。ここでは<b>取引数・来店数・販売点数</b>の見込み平均だけ調整できます（この店の打ち手計画。売上着地の数字は変わりません）。残日数は締日から自動。目標（税込予算）は月次予実シートから自動表示、違えば上書き可。</p>
+      <p class="note"><b>着地見込みの売上（税抜/税込）は、店舗ページの「⚙ 見込設定」で手入力した平日/土日祝 平均売上（税抜）を全ページ共通で使用</b>します（未入力なら自動＝平日直近10日・土日祝直近6日の平均）。売上を手入力で変えると、<b>販売点数・取引数・来店客数</b>も同じ倍率で連動して動きます。<b>客単価・購入率・平均購入数・商品単価は現状維持</b>（自動見込みの比率のまま）です。残日数は締日から自動。目標（税込予算）は月次予実シートから自動表示、違えば上書き可。</p>
       <div class="tblwrap"><table id="driver"></table></div>
     </div>
     <div class="panel">
@@ -676,22 +672,13 @@ function bindFc(){
 function bindFcInput(id,setter){const el=document.getElementById(id);if(!el)return;
   el.oninput=()=>{const v=Number(el.value); if(el.value===""){setter(0);}else if(Number.isFinite(v)){setter(v);} el.classList.remove("saved");el.classList.add("editing"); markDirty(); fcRecompute();};}
 function drawDriver(){
-  const head=`<thead><tr><th>指標</th><th>締日まで(実績)</th><th>平日 見込/日</th><th>土日祝 見込/日</th><th>着地見込み</th></tr></thead>`;
-  const rows=DRIVERS.map(d=>{
-    const lock=(d.k==="in");   // 税込売上の見込みは「売上着地(landing.js)」を使う＝ここでは編集不可（全ページ同じ数字）
-    const dis=(lock||!CANEDIT)?" disabled":"";
-    const tip=lock?' title="売上の着地は店舗ページの「⚙ 見込設定」（平日/土日祝 平均売上）を全ページ共通で使用中"':"";
-    return `<tr>
-    <td>${d.name}${lock?' <span class="sub" style="font-weight:500;color:var(--accent)">見込設定</span>':''}</td>
+  const head=`<thead><tr><th>指標</th><th>締日まで(実績)</th><th>着地見込み</th></tr></thead>`;
+  const rows=DRIVERS.map(d=>`<tr>
+    <td>${d.name}</td>
     <td>${d.fmt(AUTO.td[d.k])}${d.unit}</td>
-    <td><input class="num edit" data-k="${d.k}" data-t="wk" type="number" min="0" step="${d.step}" value="${Math.round(fc.avg[d.k].wk)}"${dis}${tip}></td>
-    <td><input class="num edit" data-k="${d.k}" data-t="we" type="number" min="0" step="${d.step}" value="${Math.round(fc.avg[d.k].we)}"${dis}${tip}></td>
     <td id="dland-${d.k}">—</td>
-  </tr>`;}).join("");
+  </tr>`).join("");
   document.getElementById("driver").innerHTML=head+"<tbody>"+rows+"</tbody>";
-  document.querySelectorAll('#driver input.edit').forEach(el=>{
-    el.oninput=()=>{const v=Number(el.value);const k=el.dataset.k,t=el.dataset.t;
-      fc.avg[k][t]=(el.value===""||!Number.isFinite(v))?0:Math.max(0,v); el.classList.remove("saved");el.classList.add("editing"); markDirty(); fcRecompute();};});
 }
 function fcRecompute(){
   const L=landing(), td=AUTO.td;

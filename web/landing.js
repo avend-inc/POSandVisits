@@ -104,6 +104,39 @@
     return any ? total : null;
   }
 
+  // 単店の自動（手入力なし）全指標着地。① 経過実績 ＋ 各区分の1日平均 × 残日数。
+  function storeMetricsAuto(daily, id, ym, kvOf) {
+    var C = components(daily, new Set([id]), ym, kvOf);
+    if (!C.hasData) return null;
+    var L = {};
+    for (var i = 0; i < METS.length; i++) { var k = METS[i]; L[k] = C.actual[k] + C.remWk * C.avg[k].wk + C.remWe * C.avg[k].we; }
+    L.exRatio = C.exRatio;
+    return L;
+  }
+  // 単店の全指標の着地。手入力(ov)で税抜売上が変わると、数量系(税込in・点数it・取引tx・来店v・txv)は
+  // 「同じ倍率 k = 上書き税抜売上 ÷ 自動税抜売上」でスケールする。
+  //   ⇒ 客単価(in/tx)・商品単価(ex/it)・平均購入数(it/tx)・購入率(txv/v) は k で不変＝現状維持。
+  function landingFull(daily, id, ym, ov, kvOf) {
+    var auto = storeMetricsAuto(daily, id, ym, kvOf);
+    if (!auto) return null;
+    var ex = auto.ex, k = 1;
+    if (ov && Number.isFinite(ov.wkEx) && Number.isFinite(ov.weEx)) {
+      var p = storeParts(daily, id, ym, ov);
+      if (p) { ex = p.value; k = auto.ex > 0 ? ex / auto.ex : 1; }
+    }
+    return { ex: ex, in: auto.in * k, it: auto.it * k, tx: auto.tx * k, txv: auto.txv * k, v: auto.v * k, k: k, exRatio: auto.exRatio };
+  }
+  // 複数店の全指標着地＝各店を（各店の倍率で）合算。ovGet(店id)->{wkEx,weEx}|null。
+  function aggFull(daily, ids, ym, ovGet, kvOf) {
+    if (!ids || !ids.size) return null;
+    var sum = { ex: 0, in: 0, it: 0, tx: 0, txv: 0, v: 0 }, any = false;
+    ids.forEach(function (id) {
+      var L = landingFull(daily, id, ym, ovGet ? ovGet(id) : null, kvOf);
+      if (L) { any = true; sum.ex += L.ex; sum.in += L.in; sum.it += L.it; sum.tx += L.tx; sum.txv += L.txv; sum.v += L.v; }
+    });
+    return any ? sum : null;
+  }
+
   // plan_data page="fcavg"（手入力の平日/土日祝 平均売上・税抜）を全店/全月まとめて読む。
   // 戻り: { "店id|YYYY-MM": {wkEx, weEx} }
   function loadOverrides(SB) {
@@ -116,6 +149,7 @@
   global.NL = {
     WK_DAYS: WK_DAYS, WE_DAYS: WE_DAYS, JP_HOLIDAYS: JP_HOLIDAYS,
     isWkHol: isWkHol, dayClass: dayClass, addDays: addDays, monthEnd: monthEnd, today: today,
-    components: components, storeParts: storeParts, salesEx: salesEx, loadOverrides: loadOverrides
+    components: components, storeParts: storeParts, salesEx: salesEx, loadOverrides: loadOverrides,
+    storeMetricsAuto: storeMetricsAuto, landingFull: landingFull, aggFull: aggFull
   };
 })(typeof window !== "undefined" ? window : this);

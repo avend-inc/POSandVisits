@@ -3892,28 +3892,35 @@ function drawKpi2Detail(el,ctx){
   const top3=baked?[]:topStoresBy(members,state.from,state.to,3);
   const avOf=k=>baked?baked.top3[k]:peerAvg(k,state.from,state.to,top3);
   const rl=document.getElementById("kpi-range"); if(rl)rl.textContent="期間 "+mdLabel(state.from,state.to);
+  // 着地見込み（当月）：売上・来店・販売数は着地(landing.js＝見込設定に連動)、
+  //   購入率・客単価・平均購入数・商品単価は当月経過実績＝現状維持（売上を変えても不変）。
+  const landM=NL.aggFull(DATA.daily,new Set([id]),ym,i=>fcOvGet(i,ym),kvOf);
+  const mtdP=sumRows(rowsIn(ym+"-01",sd,id));
+  const landVal=(k)=>{
+    if(!landM)return null;
+    if(k==="ex")return landM.ex;
+    if(k==="v") return landM.v>0?landM.v:null;
+    if(k==="qty")return landM.it;
+    return M(k).calc(mtdP);   // 比率系は現状維持
+  };
+  const ovOn=!!fcOvGet(id,ym);
+  const landHdr=`着地見込み<small>当月${ovOn?' <b style="color:var(--accent)">手入力</b>':''}</small>`
+    +(canEditFc()?`<br><button id="fc-edit" title="平日/土日祝の平均売上を手入力（売上を変えると数量も連動）" style="font-size:10.5px;padding:2px 6px;margin-top:2px;border:1px solid var(--border,#ccc);border-radius:6px;background:var(--surface,#fff);color:var(--ink,#111);cursor:pointer;font-weight:600">⚙ 見込設定</button>`:'');
   let h=`<thead><tr><th></th>
     <th class="colhdr">自店<small>${mdLabel(state.from,state.to)}</small></th>
+    <th class="colhdr" style="color:var(--accent)">${landHdr}</th>
     <th class="colhdr">${esc(short)}上位3店<small>平均・同期間</small></th>
     <th class="colhdr">差分<small>自店−上位3</small></th>
     <th class="colhdr">平日平均<small>直近2週·日平均</small></th>
     <th class="colhdr">土日祝平均<small>直近2週·日平均</small></th></tr></thead><tbody>`;
-  // 着地見込み：今月を選んでいるときだけ自店列に出す
-  const showLand=isMonthPeriod()&&state.from.slice(0,7)===ym;
-  const ovOn=!!fcOvGet(id,ym);
-  const landCell=showLand
-    ? YEN(lv||0)+"円"
-      +(ovOn?' <span title="手入力の平日/土日祝平均で計算中" style="display:inline-block;font-size:9.5px;font-weight:700;color:#fff;background:var(--accent,#2f6fd0);border-radius:4px;padding:1px 5px;margin-left:3px">手入力</span>':'')
-      +(canEditFc()?' <button id="fc-edit" title="平日/土日祝の平均売上を手入力" style="font-size:11px;padding:2px 7px;margin-left:5px;border:1px solid var(--border,#ccc);border-radius:6px;background:var(--surface,#fff);color:var(--ink,#111);cursor:pointer">⚙ 見込設定</button>':'')
-    : '対象外';
-  h+=`<tr class="land"><td>着地見込み <span class="sub" style="font-weight:500;font-size:9.5px">当月のみ</span></td>`+
-     `<td>${landCell}</td><td>—</td><td>—</td><td>対象外</td><td>対象外</td></tr>`;
   for(const k of KPI2_COLS){const m=M(k);
     const cur=cellVal(selCol,k), av=avOf(k);
     const diff=(cur!=null&&av!=null)?cur-av:null;
     const wd=cellVal(wdCol,k), we=cellVal(weCol,k);
+    const lval=landVal(k);
     h+=`<tr><td>${kpiLabel(k)}</td>
       <td>${cur==null?"—":m.fmt(cur)}</td>
+      <td style="font-weight:600;color:var(--accent)">${lval==null?"—":m.fmt(lval)}</td>
       <td class="peer">${av==null?"—":m.fmt(av)}</td>
       <td style="${diffColor(cur,av)}">${diff==null?"—":(diff>=0?"+":"−")+m.fmt(Math.abs(diff))}</td>
       <td>${wd==null?"—":m.fmt(wd)}</td>
@@ -3948,11 +3955,11 @@ function kpi2AdRows(id,ctx){
   // 広告費もCPCも「多い/少ない＝良い」が一概に言えないので、差分に色を付けない
   //（CPCは安いほうが良いが、出稿量とのトレードオフがあるため色で断定しない）
   return `<tr><td>広告費 <span class="sub" style="font-weight:500;font-size:9.5px">Meta</span></td>
-      <td>${yen(curSp)}</td><td class="peer">${yen(peerSp)}</td>
+      <td>${yen(curSp)}</td><td>—</td><td class="peer">${yen(peerSp)}</td>
       <td>${dSp==null?"—":(dSp>=0?"+":"−")+YEN(Math.round(Math.abs(dSp)))+"円"}</td>
       <td>${yen(wdA.per)}</td><td>${yen(weA.per)}</td></tr>
     <tr><td>CPC <span class="sub" style="font-weight:500;font-size:9.5px">広告費÷（プロフアクセス＋リンク遷移）</span></td>
-      <td>${yen(curCpc)}</td><td class="peer">${yen(peerCpc)}</td>
+      <td>${yen(curCpc)}</td><td>—</td><td class="peer">${yen(peerCpc)}</td>
       <td>${dCpc==null?"—":(dCpc>=0?"+":"−")+YEN(Math.round(Math.abs(dCpc)))+"円"}</td>
       <td>${yen(adVal("cpc",wdA.p))}</td><td>${yen(adVal("cpc",weA.p))}</td></tr>`;
 }
