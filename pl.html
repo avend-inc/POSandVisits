@@ -136,6 +136,7 @@
   <a href="keiei.html" id="tab-keiei" style="display:none">経営</a>
   <a href="admin.html" id="tab-admin" style="display:none">管理</a>
 </div></nav>
+<script src="landing.js"></script>
 <script>
 "use strict";
 const YEN=n=>Math.round(n).toLocaleString("ja-JP");
@@ -378,10 +379,9 @@ function budCell(m){ if(!m.budget) return "";
   const v=budKPI(m.k); return `<span class="auto">${v==null?"—":m.fmt(v)+m.u}</span>`; }
 
 // ======= 着地見込み（旧・別ページを予実タブに統合）=======
-// アプリ共通の着地見込み定義：
-//   着地見込み ＝ ① 今月の経過実績 ＋ ② 平日の直近10日平均 × 残平日 ＋ ③ 土日祝の直近10日平均 × 残土日祝
-//   ・平日/土日祝の判定は isWeekendOrHoliday（土日＋日本の祝日 JP_HOLIDAYS）で統一（dashboard と同一）
-//   ・「直近10日」＝ 締日以前で、その区分の実績がある日を新しい順に最大10日
+// 着地見込みの計算は landing.js（アプリ共通の唯一実装）に委譲する。ページ独自ロジックは持たない。
+//   売上(税抜/税込)の着地 ＝ ① 今月の経過実績 ＋ ② 平日の直近10日平均 × 残平日 ＋ ③ 土日祝の直近6日平均 × 残土日祝。
+//   平日/土日祝の平均売上は店舗ページの「⚙ 見込設定」で手入力でき、保存済み(plan_data page=fcavg)なら優先。
 function addDays(d,n){const t=new Date(d+"T00:00:00Z");t.setUTCDate(t.getUTCDate()+n);return t.toISOString().slice(0,10);}
 function monthEnd(ym){const[y,m]=ym.split("-").map(Number);const last=new Date(Date.UTC(y,m,0)).getUTCDate();return `${ym}-${String(last).padStart(2,"0")}`;}
 function todayStr(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;}
@@ -395,30 +395,23 @@ const JP_HOLIDAYS=new Set([
 ]);
 function isWeekendOrHoliday(d){const wd=new Date(d+"T00:00:00Z").getUTCDay();return wd===0||wd===6||JP_HOLIDAYS.has(d);}
 const METS=["in","ex","tx","txv","it","v"];   // txv=来店をKPIに使う店だけの取引（購入率の分子）
+// 実績・平日/土日祝の1日平均・残日数は landing.js の唯一実装（NL.components）から取る。ページ独自計算は持たない。
 function computeAuto(store, ym){
-  const ids = idsForScope(store);
-  const mS=ym+"-01", mE=monthEnd(ym), today=todayStr(), winStart=addDays(mS,-70);
-  const byDate={};
-  for(const r of DATA.daily){ if(!ids.has(r.s))continue; if(r.d<winStart||r.d>mE)continue;
-    const a=byDate[r.d]||(byDate[r.d]={in:0,ex:0,tx:0,txv:0,it:0,v:0,hasV:false});
-    a.in+=r.in||0;a.ex+=r.ex||0;a.tx+=r.tx||0;a.it+=r.it||0;
-    if(kvOf(r.s)){ a.txv+=r.tx||0; if(r.v!=null){a.v+=r.v;a.hasV=true;} } }
-  const monthDates=Object.keys(byDate).filter(d=>d>=mS&&d<=mE).sort();
-  const closing = monthDates.filter(d=>d<=today).slice(-1)[0] || null;
-  // ① 経過実績（締日まで）＋ 平日/土日祝の経過日数
-  const td={in:0,ex:0,tx:0,txv:0,it:0,v:0}; let wkN=0,weN=0;
-  if(closing) for(const d of monthDates){ if(d>closing)continue; const a=byDate[d];
-    METS.forEach(k=>td[k]+=a[k]); if(isWeekendOrHoliday(d))weN++; else wkN++; }
-  // ②③ 直近10日平均（締日以前、平日/土日祝それぞれ最大10日）
-  const ref = closing || addDays(today,-1);
-  const hist = Object.keys(byDate).filter(d=>d<=ref).sort();
-  const avg10=(we,k)=>{let s=0,n=0; for(let i=hist.length-1;i>=0&&n<10;i--){const d=hist[i]; if(isWeekendOrHoliday(d)===we){s+=byDate[d][k];n++;}} return n?s/n:0;};
-  const avg={}; METS.forEach(k=>avg[k]={wk:avg10(false,k), we:avg10(true,k)});
-  // 残りの平日/土日祝（祝日も自動で土日祝に含める）
-  let remWk=0,remWe=0; const start = closing? addDays(closing,1): mS;
-  for(let d=start; d<=mE; d=addDays(d,1)){ if(isWeekendOrHoliday(d))remWe++; else remWk++; }
-  const exRatio = td.in? td.ex/td.in : 0.91;
-  return {closing, mS, mE, td, wkN, weN, avg, remWk, remWe, exRatio};
+  const C=NL.components(DATA.daily, idsForScope(store), ym, kvOf);
+  return {closing:C.closing, mS:ym+"-01", mE:monthEnd(ym), td:C.actual, wkN:C.wkN, weN:C.weN, avg:C.avg, remWk:C.remWk, remWe:C.remWe, exRatio:C.exRatio};
+}
+// この店×月の手入力（平日/土日祝 平均売上・税抜）。plan_data page="fcavg"（全ページ共通のDB源）。
+let FC_OV={};
+function fcOvGet(id){const o=FC_OV[String(id)+"|"+state.ym];return (o&&Number.isFinite(o.wkEx)&&Number.isFinite(o.weEx))?o:null;}
+function fcOvActive(){return !isAll() && !!fcOvGet(state.store);}
+// 税込売上(in)の見込み平均は、売上着地(=landing.js)に合わせて表示（手入力ありなら手入力を税込換算、無ければ自動）。
+function applyFcOvDisplay(){
+  if(!fc||!fc.avg||!fc.avg.in||!AUTO)return;
+  const er=(AUTO.exRatio>0)?AUTO.exRatio:0.91;
+  const ov=fcOvActive()?fcOvGet(state.store):null;
+  const wkEx=ov?ov.wkEx:((AUTO.avg.ex&&AUTO.avg.ex.wk)||0);
+  const weEx=ov?ov.weEx:((AUTO.avg.ex&&AUTO.avg.ex.we)||0);
+  fc.avg.in.wk=Math.round(wkEx/er); fc.avg.in.we=Math.round(weEx/er);
 }
 function fcKey(){return `notime-fc-${state.store}-${state.ym}`;}
 function fcNum(v,d){const n=Number(v);return Number.isFinite(n)?n:d;}
@@ -439,12 +432,12 @@ function saveFc(){ planSave("fc",state.store,state.ym,fc); }
 function resetFc(){ planDelete("fc",state.store,state.ym); reload(); }
 function landing(){
   const L={};
-  METS.forEach(k=>{ if(k==="ex")return;
-    const a=(fc.avg&&fc.avg[k])||(AUTO.avg&&AUTO.avg[k])||{wk:0,we:0};   // txv等の未編集項目はAUTO平均で補完
-    L[k]=AUTO.td[k] + fc.remWk*(a.wk||0) + fc.remWe*(a.we||0); });
-  // 税抜売上の着地：見込み商品単価(fc.aup)が入っていれば「販売点数 × 商品単価」で出す。
-  //  未入力(0)なら従来どおり 税込 × 実績税率。
-  L.ex=(fc.aup>0)?L.it*fc.aup:L.in*AUTO.exRatio;
+  // 売上(税抜ex/税込in)は landing.js の唯一実装＝手入力(fcavg)または自動。ページ独自計算は持たない＝全ページ同じ数字。
+  const exLand=NL.salesEx(DATA.daily, idsForScope(state.store), state.ym, id=>fcOvGet(id));
+  L.ex=(exLand!=null)?exLand:(AUTO.td.ex + fc.remWk*((AUTO.avg.ex&&AUTO.avg.ex.wk)||0) + fc.remWe*((AUTO.avg.ex&&AUTO.avg.ex.we)||0));
+  L.in=(AUTO.exRatio>0)?L.ex/AUTO.exRatio:(AUTO.td.in + fc.remWk*((fc.avg.in&&fc.avg.in.wk)||0) + fc.remWe*((fc.avg.in&&fc.avg.in.we)||0));
+  // 取引・来店・点数は予実タブの見込み平均(fc.avg)で（この店の打ち手計画。売上着地の数字には影響しない）。
+  ["tx","txv","it","v"].forEach(k=>{ const a=(fc.avg&&fc.avg[k])||(AUTO.avg&&AUTO.avg[k])||{wk:0,we:0}; L[k]=AUTO.td[k] + fc.remWk*(a.wk||0) + fc.remWe*(a.we||0); });
   return L;
 }
 // 主要KPI(key)＝売上を動かす3要素、その他(sub)＝参考。売上(KGI)はヒーローに別表示。
@@ -473,8 +466,11 @@ async function reload(){
     await loadTargets();
     const months=monthsInData();
     if(!state.ym||!months.includes(state.ym)) state.ym=(DATA._salesMax||months[months.length-1]).slice(0,7);
-    if(state.view==="fc"){ AUTO=computeAuto(state.store,state.ym); fc=await loadFcData(); }
-    else if(state.view==="ac"){ AUTO=computeAuto(state.store,state.ym); fc=await loadFcData(); await acLoad(); }
+    if(state.view==="fc"||state.view==="ac"){
+      FC_OV = SB ? await NL.loadOverrides(SB) : {};   // 手入力（平日/土日祝 平均売上）を全ページ共通DBから読む
+      AUTO=computeAuto(state.store,state.ym); fc=await loadFcData(); applyFcOvDisplay();
+      if(state.view==="ac") await acLoad();
+    }
     else{ A=computeActual(state.store,state.ym);
       if(isAll()){ MALL=await planLoadAll("pl",state.ym); M={}; } else { M=await loadMData(); MALL={}; } }
     render(); subscribeRealtime();
@@ -652,18 +648,17 @@ function fcBody(monthLabel,storeName){
         <span id="land-vs"></span>
       </div>
       <div class="pills" id="pills"></div>
-      <p class="note">締日（最新データ）: <b id="closing">—</b> ／ 締日までの税込売上: <b id="td-in">—</b>。締日より後の日数×下の「見込み平均／日」で着地を計算しています。</p>
+      <p class="note">締日（最新データ）: <b id="closing">—</b> ／ 締日までの税込売上: <b id="td-in">—</b>。締日より後の日数×見込み平均で着地を計算しています。</p>
     </div>
     <div class="panel">
       <h2>前提（数値を直して上の「更新」でサーバ保存＝全端末に反映）</h2>
       <div class="rowflex">
-        <div class="field"><label>残 平日日数</label><input class="num" id="remWk" type="number" min="0" step="1" value="${fc.remWk}" style="width:70px"${CANEDIT?"":" disabled"}></div>
-        <div class="field"><label>残 土日祝日数</label><input class="num" id="remWe" type="number" min="0" step="1" value="${fc.remWe}" style="width:70px"${CANEDIT?"":" disabled"}></div>
+        <div class="field"><label>残 平日日数</label><input class="num" id="remWk" type="number" min="0" step="1" value="${fc.remWk}" style="width:70px" disabled title="締日から自動計算"></div>
+        <div class="field"><label>残 土日祝日数</label><input class="num" id="remWe" type="number" min="0" step="1" value="${fc.remWe}" style="width:70px" disabled title="締日から自動計算"></div>
         <div class="field"><label>目標（税込予算）</label><input class="num" id="budget" type="number" min="0" step="10000" value="${fc.budget||""}" placeholder="未登録"${CANEDIT?"":" disabled"}></div>
-        <div class="field"><label>見込み 商品単価（税抜／点）</label><input class="num" id="fcaup" type="number" min="0" step="10" value="${fc.aup||""}" placeholder="自動 ${AUTO.td.it>0?YEN(AUTO.td.ex/AUTO.td.it):"—"}"${CANEDIT?"":" disabled"}></div>
         ${CANEDIT?'<button class="chip" id="fcreset">自動見込みに戻す</button>':'<span class="note">閲覧のみ（編集は権限者）</span>'}
       </div>
-      <p class="note">土日祝の残日数は<b>土日＋祝日</b>を自動で数えています。目標（税込予算）は<b>月次予実シートから自動表示</b>。違っていれば上書きできます（進捗率・計画比・差額が出ます）。<b>見込み商品単価</b>を入れると、税抜売上の着地を「販売点数 × 商品単価」で計算します（空欄なら税込×実績税率）。</p>
+      <p class="note"><b>売上（税込/税抜）の着地見込みは、店舗ページの「⚙ 見込設定」で手入力した平日/土日祝 平均売上（税抜）を全ページ共通で使用</b>します（未入力なら自動＝平日直近10日・土日祝直近6日の平均）。ここでは<b>取引数・来店数・販売点数</b>の見込み平均だけ調整できます（この店の打ち手計画。売上着地の数字は変わりません）。残日数は締日から自動。目標（税込予算）は月次予実シートから自動表示、違えば上書き可。</p>
       <div class="tblwrap"><table id="driver"></table></div>
     </div>
     <div class="panel">
@@ -671,27 +666,28 @@ function fcBody(monthLabel,storeName){
       <div class="tblwrap"><table id="kpi"></table></div>
       <p class="note">税抜売上＝税込×実績税率(${(AUTO.exRatio).toFixed(3)})。購入率＝取引数÷来店客数／客単価（税込）＝税込÷取引数／平均購入数＝点数÷取引数／平均商品単価（税抜）＝税抜÷点数。レジ袋・クーポンは除外済み。</p>
     </div>
-    <div class="foot">「私の見込み」はデータから自動算出した初期値です（着地見込み＝①今月の経過実績＋②平日の直近10日平均×残平日＋③土日祝の直近10日平均×残土日祝。土日祝＝土日＋祝日）。ズレていれば数値を上書きして「更新」（サーバ保存＝全端末に反映）。「自動見込みに戻す」で初期値に戻せます。締日＝取り込み済みの最新日。</div>`;
+    <div class="foot">売上の着地見込み＝①今月の経過実績＋②平日の直近10日平均×残平日＋③土日祝の直近6日平均×残土日祝（土日祝＝土日＋祝日）。<b>この計算はアプリ全ページ共通（landing.js）で、数字は必ず一致します。</b>平日/土日祝の平均売上は店舗ページの「⚙ 見込設定」で手入力でき、保存すると全端末・全ページに反映されます。締日＝取り込み済みの最新日。</div>`;
 }
 
 function bindFc(){
-  document.getElementById("fcreset").onclick=resetFc;
-  bindFcInput("remWk",v=>fc.remWk=Math.max(0,Math.round(v)));
-  bindFcInput("remWe",v=>fc.remWe=Math.max(0,Math.round(v)));
+  const fr=document.getElementById("fcreset"); if(fr)fr.onclick=resetFc;
   bindFcInput("budget",v=>fc.budget=Math.max(0,v));
-  bindFcInput("fcaup",v=>fc.aup=Math.max(0,v));
 }
 function bindFcInput(id,setter){const el=document.getElementById(id);if(!el)return;
   el.oninput=()=>{const v=Number(el.value); if(el.value===""){setter(0);}else if(Number.isFinite(v)){setter(v);} el.classList.remove("saved");el.classList.add("editing"); markDirty(); fcRecompute();};}
 function drawDriver(){
   const head=`<thead><tr><th>指標</th><th>締日まで(実績)</th><th>平日 見込/日</th><th>土日祝 見込/日</th><th>着地見込み</th></tr></thead>`;
-  const rows=DRIVERS.map(d=>`<tr>
-    <td>${d.name}</td>
+  const rows=DRIVERS.map(d=>{
+    const lock=(d.k==="in");   // 税込売上の見込みは「売上着地(landing.js)」を使う＝ここでは編集不可（全ページ同じ数字）
+    const dis=(lock||!CANEDIT)?" disabled":"";
+    const tip=lock?' title="売上の着地は店舗ページの「⚙ 見込設定」（平日/土日祝 平均売上）を全ページ共通で使用中"':"";
+    return `<tr>
+    <td>${d.name}${lock?' <span class="sub" style="font-weight:500;color:var(--accent)">見込設定</span>':''}</td>
     <td>${d.fmt(AUTO.td[d.k])}${d.unit}</td>
-    <td><input class="num edit" data-k="${d.k}" data-t="wk" type="number" min="0" step="${d.step}" value="${Math.round(fc.avg[d.k].wk)}"${CANEDIT?"":" disabled"}></td>
-    <td><input class="num edit" data-k="${d.k}" data-t="we" type="number" min="0" step="${d.step}" value="${Math.round(fc.avg[d.k].we)}"${CANEDIT?"":" disabled"}></td>
+    <td><input class="num edit" data-k="${d.k}" data-t="wk" type="number" min="0" step="${d.step}" value="${Math.round(fc.avg[d.k].wk)}"${dis}${tip}></td>
+    <td><input class="num edit" data-k="${d.k}" data-t="we" type="number" min="0" step="${d.step}" value="${Math.round(fc.avg[d.k].we)}"${dis}${tip}></td>
     <td id="dland-${d.k}">—</td>
-  </tr>`).join("");
+  </tr>`;}).join("");
   document.getElementById("driver").innerHTML=head+"<tbody>"+rows+"</tbody>";
   document.querySelectorAll('#driver input.edit').forEach(el=>{
     el.oninput=()=>{const v=Number(el.value);const k=el.dataset.k,t=el.dataset.t;

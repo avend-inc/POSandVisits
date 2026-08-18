@@ -132,6 +132,7 @@
   <a href="admin.html" id="tab-admin" style="display:none">管理</a>
 </div></nav>
 
+<script src="landing.js"></script>
 <script>
 "use strict";
 const YEN=n=>Math.round(n).toLocaleString("ja-JP");
@@ -257,6 +258,7 @@ async function authBoot(url,anon){
   if(error)throw new Error("データを取得できませんでした（"+error.message+"）");
   DATA=JSON.parse(await data.text());
   DATA.daily=await loadDaily();
+  await loadFcOv();
   prep();render();
 }
 function showLogin(){ screen(`<div class="gate"><div class="logo">NOTIME KPI推移</div>
@@ -342,23 +344,12 @@ function exOfRow(r){return r.ex!=null?r.ex:(r.in||0)/1.1;}
 function curMonthKey(){return (DATA._salesMax||DATA._max||"").slice(0,7);}
 function daysInMonthYm(ym){const[y,m]=ym.split("-").map(Number);return new Date(Date.UTC(y,m,0)).getUTCDate();}
 function isWeekendD(d){const g=new Date(d+"T00:00:00Z").getUTCDay();return g===0||g===6;}
-// 平日/土日祝の平均×残日数 ＋ 実績 で月末を予測（dashboardの着地見込みと同方式・税抜）。
-function monthLandingEx(idset,ym){
-  const mS=ym+"-01",mE=`${ym}-${String(daysInMonthYm(ym)).padStart(2,"0")}`,winStart=addDays(mS,-56);
-  const byDate={};
-  for(const r of DATA.daily){ if(!idset.has(r.s))continue; if(r.d<winStart||r.d>mE)continue;
-    byDate[r.d]=(byDate[r.d]||0)+exOfRow(r); }
-  const monthDates=Object.keys(byDate).filter(d=>d>=mS&&d<=mE).sort();
-  const closing=monthDates.length?monthDates[monthDates.length-1]:null;
-  if(!closing)return 0;
-  let td=0,wk=0,wkN=0,we=0,weN=0;
-  for(const d of monthDates){const v=byDate[d];td+=v;if(isWeekendD(d)){we+=v;weN++;}else{wk+=v;wkN++;}}
-  let twk=0,twkN=0,twe=0,tweN=0;const trFrom=addDays(closing,-56);
-  for(const d of Object.keys(byDate)){if(d<trFrom||d>closing)continue;const v=byDate[d];if(isWeekendD(d)){twe+=v;tweN++;}else{twk+=v;twkN++;}}
-  const wkAvg=wkN?wk/wkN:(twkN?twk/twkN:0),weAvg=weN?we/weN:(tweN?twe/tweN:0);
-  let remWk=0,remWe=0;for(let d=addDays(closing,1);d<=mE;d=addDays(d,1)){if(isWeekendD(d))remWe++;else remWk++;}
-  return td+remWk*wkAvg+remWe*weAvg;
-}
+// 手入力（平日/土日祝 平均売上・税抜）を全ページ共通DB(plan_data page="fcavg")から読む。唯一のDB源。
+let FC_OV={};
+async function loadFcOv(){ FC_OV = SB ? await NL.loadOverrides(SB) : {}; }
+function fcOvGet(id,ym){const o=FC_OV[String(id)+"|"+ym];return (o&&Number.isFinite(o.wkEx)&&Number.isFinite(o.weEx))?o:null;}
+// 月末の着地見込み（税抜）＝ landing.js の唯一実装に委譲。ページ独自ロジックは持たない＝全ページ同じ数字。
+function monthLandingEx(idset,ym){ return NL.salesEx(DATA.daily, idset, ym, id=>fcOvGet(id,ym)) || 0; }
 // 月別表示のとき、締日を含む月の p に着地見込み(税抜)を exDisp として付ける（税抜売上のみ）。
 function annotateLanding(map,idset){
   if(state.grain!=="month")return map;
