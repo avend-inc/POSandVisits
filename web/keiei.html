@@ -74,6 +74,7 @@
   <a href="keiei.html" id="tab-keiei" class="on">経営</a>
   <a href="admin.html" id="tab-admin">管理</a>
 </div></nav>
+<script src="landing.js"></script>
 <script>
 "use strict";
 const NUM=n=>Math.round(n).toLocaleString("ja-JP");
@@ -121,63 +122,23 @@ async function planLoadAllFc(ym){
   try{for(const s of usableStores()){const x=localStorage.getItem(`notime-fc-${s.id}-${ym}`);if(x)m[String(s.id)]=JSON.parse(x);}}catch(e){}
   return m;
 }
-// pl.html computeAuto 相当（税込 in／税抜 ex のみ）。締日までの実績・平日/土日祝1日平均・残日数を出す。
-// アプリ共通の着地見込み定義（①経過実績＋②平日直近10日平均×残平日＋③土日祝直近10日平均×残土日祝）。
-// 平日/土日祝は _isWkHol（土日＋祝日）で判定。「直近10日」＝締日以前でその区分の実績がある日を新しい順に最大10日。
-function fcAuto(storeId,ym){
-  const ids=new Set([storeId]);
-  const mS=ym+"-01", mE=_monthEnd(ym), today=todayStr(), winStart=_addDays(mS,-70);
-  const byDate={};
-  for(const r of DATA.daily){ if(!ids.has(r.s))continue; if(r.d<winStart||r.d>mE)continue;
-    const a=byDate[r.d]||(byDate[r.d]={in:0,ex:0,it:0}); a.in+=r.in||0; a.ex+=(r.ex!=null?r.ex:0); a.it+=(r.it!=null?r.it:0); }
-  const monthDates=Object.keys(byDate).filter(d=>d>=mS&&d<=mE).sort();
-  const closing=monthDates.filter(d=>d<=today).slice(-1)[0]||null;
-  let tdIn=0,tdEx=0,tdIt=0;   // ① 経過実績
-  if(closing) for(const d of monthDates){ if(d>closing)continue; const a=byDate[d]; tdIn+=a.in; tdEx+=a.ex; tdIt+=a.it; }
-  // ②③ 直近10日平均（平日/土日祝それぞれ最大10日）
-  const ref=closing||_addDays(today,-1);
-  const hist=Object.keys(byDate).filter(d=>d<=ref).sort();
-  const avg10=(we,k)=>{let s=0,n=0; for(let i=hist.length-1;i>=0&&n<10;i--){const d=hist[i]; if(_isWkHol(d)===we){s+=byDate[d][k];n++;}} return n?s/n:0;};
-  const avgWk=avg10(false,"in"), avgWe=avg10(true,"in");
-  const avgItWk=avg10(false,"it"), avgItWe=avg10(true,"it");
-  let remWk=0,remWe=0; const start=closing?_addDays(closing,1):mS;
-  for(let d=start; d<=mE; d=_addDays(d,1)){ if(_isWkHol(d))remWe++; else remWk++; }
-  const exRatio = tdIn? tdEx/tdIn : 0.91;
-  return {tdIn,tdEx,tdIt,avgWk,avgWe,avgItWk,avgItWe,remWk,remWe,exRatio,closing};
-}
-// 着地見込み（税抜・複数店の合算）＝dashboard の landingForIds と同一。ロイヤリティ基礎に使う。
-function landingExForIds(ids,ym){
-  const mS=ym+"-01", mE=_monthEnd(ym), today=todayStr();
-  const byDate={};
-  for(const r of DATA.daily){ if(!ids.has(r.s))continue;
-    byDate[r.d]=(byDate[r.d]||0)+(r.ex!=null?r.ex:(r.in||0)/1.1); }
-  const allDates=Object.keys(byDate).sort();
-  if(!allDates.length)return 0;
-  const monthDates=allDates.filter(d=>d>=mS&&d<=mE);
-  const cutoff=today<mE?today:mE;
-  const closing=monthDates.filter(d=>d<=cutoff).slice(-1)[0]||null;
-  let actual=0; if(closing)for(const d of monthDates){ if(d<=closing)actual+=byDate[d]; }
-  const ref=closing||cutoff, hist=allDates.filter(d=>d<=ref);
-  const avg10=we=>{let s=0,n=0; for(let i=hist.length-1;i>=0&&n<10;i--){const d=hist[i]; if(_isWkHol(d)===we){s+=byDate[d];n++;}} return n?s/n:0;};
-  const wkAvg=avg10(false), weAvg=avg10(true);
-  let remWk=0,remWe=0; const start=closing?_addDays(closing,1):mS;
-  for(let d=start; d<=mE; d=_addDays(d,1)){ if(_isWkHol(d))remWe++; else remWk++; }
-  return actual + remWk*wkAvg + remWe*weAvg;
-}
-// 予実タブと同じ着地見込み（保存済み上書き o があれば反映）。o は planLoadAllFc の該当店ぶん。
-// 戻り: {ex:税抜売上着地, inLand:税込着地, it:商品販売数着地}
-function fcLandingEx(storeId,ym,o){
-  const A=fcAuto(storeId,ym);
-  // v が未指定(null/undefined/空)なら既定値dへ。※Number(null)===0 の罠を避ける。
-  const num=(v,d)=>{if(v==null||v==="")return d;const n=Number(v);return Number.isFinite(n)?n:d;};
-  const remWk=num(o&&o.remWk,A.remWk), remWe=num(o&&o.remWe,A.remWe);
-  const avgWk=num(o&&o.avg&&o.avg.in&&o.avg.in.wk, Math.round(A.avgWk));
-  const avgWe=num(o&&o.avg&&o.avg.in&&o.avg.in.we, Math.round(A.avgWe));
-  const avgItWk=num(o&&o.avg&&o.avg.it&&o.avg.it.wk, Math.round(A.avgItWk));
-  const avgItWe=num(o&&o.avg&&o.avg.it&&o.avg.it.we, Math.round(A.avgItWe));
-  const Lin = A.tdIn + remWk*avgWk + remWe*avgWe;
-  const Lit = A.tdIt + remWk*avgItWk + remWe*avgItWe;
-  return {ex:Math.round(Lin*A.exRatio), inLand:Math.round(Lin), it:Math.round(Lit), closing:A.closing};
+// 手入力（平日/土日祝 平均売上・税抜）を全ページ共通DB(plan_data page="fcavg")から読む。唯一のDB源。
+let FC_OV={};
+async function loadFcOv(){ FC_OV = SB ? await NL.loadOverrides(SB) : {}; }
+function fcOvGet(id,ym){const o=FC_OV[String(id)+"|"+ym];return (o&&Number.isFinite(o.wkEx)&&Number.isFinite(o.weEx))?o:null;}
+
+// 着地見込み（税抜・複数店の合算）＝ landing.js の唯一実装に委譲。ページ独自ロジックは持たない＝全ページ同じ数字。
+function landingExForIds(ids,ym){ return NL.salesEx(DATA.daily, ids, ym, id=>fcOvGet(id,ym)) || 0; }
+
+// 単店の着地（税抜ex・税込in・商品販売数it）。売上は landing.js（手入力or自動）、点数は同定義の自動平均。
+// 戻り: {ex:税抜売上着地, inLand:税込着地, it:商品販売数着地, closing}
+function fcLandingEx(storeId,ym){
+  const C=NL.components(DATA.daily, new Set([storeId]), ym, function(){return true;});
+  const ex=NL.salesEx(DATA.daily, new Set([storeId]), ym, id=>fcOvGet(id,ym));
+  const exV=(ex!=null)?ex:(C.actual.ex + C.remWk*C.avg.ex.wk + C.remWe*C.avg.ex.we);
+  const it=C.actual.it + C.remWk*C.avg.it.wk + C.remWe*C.avg.it.we;
+  const inLand=(C.exRatio>0)?exV/C.exRatio:C.actual.in;
+  return {ex:Math.round(exV), inLand:Math.round(inLand), it:Math.round(it), closing:C.closing};
 }
 
 // ---- 保存（mgmt_report：月ごとJSON。サーバー未整備時は端末にフォールバック）----
@@ -295,8 +256,8 @@ async function renderKeiei(){
   const budgetEx=(id,ym)=>{let v=bizEx(id,ym); if(v!=null)return v; const p=plBud[ym+"|"+id]; if(p!=null)return p; return tgtEx(id,ym);};
   // 当月着地は「予実タブ（🎯着地見込み）」と同じ計算＝編集値も反映される。
   // 予実タブ保存値は1回のクエリで全店まとめて取得（往復を店舗数ぶん→1回に短縮）。
-  const fcAll=await planLoadAllFc(cur);
-  const fcMap={}; dstores.forEach(s=>{ try{fcMap[s.id]=fcLandingEx(s.id,cur,fcAll[String(s.id)]);}catch(e){fcMap[s.id]=null;} });
+  await loadFcOv();   // 手入力（平日/土日祝 平均売上）を全ページ共通DBから読む
+  const fcMap={}; dstores.forEach(s=>{ try{fcMap[s.id]=fcLandingEx(s.id,cur);}catch(e){fcMap[s.id]=null;} });
   const storeEx={}, storeIt={};
   dstores.forEach(s=>{const idset=new Set([s.id]);
     const pAgg=sumIds(idset,pf,pt); const pEx=pAgg.ex||0, pIt=pAgg.it||0;
@@ -315,7 +276,8 @@ async function renderKeiei(){
   const kOf=a=>({ex:Math.round(a.ex||0),aov:(a.tx>0?Math.round(a.in/a.tx):0),upt:(a.tx>0?+(a.it/a.tx).toFixed(2):0),aup:(a.it>0?Math.round(a.ex/a.it):0),v:Math.round(a.v||0),pr:(a.v>0?+(a.txv/a.v*100).toFixed(1):0)});
   const KPIS=[{k:"ex",n:"税抜売上"},{k:"aov",n:"客単価(税込)"},{k:"upt",n:"平均購入点数",u:"点"},{k:"aup",n:"商品単価(税抜)"},{k:"v",n:"来店客数",u:"人"},{k:"pr",n:"購入率",u:"%"}];
   const kpi={prev:kOf(aggPrev),cur:kOf(aggCur),next:kOf(aggNext)};
-  // 直営全体の翌月 税抜売上は、各店の翌月着地（予算優先）の合計と一致させる。
+  // 直営全体の当月/翌月 税抜売上は、各店の着地の合計＝アプリ共通の着地見込み（landing.js）に一致させる。
+  kpi.cur.ex=Math.round(dstores.reduce((t,s)=>t+(storeEx[s.id].cur||0),0));
   kpi.next.ex=Math.round(dstores.reduce((t,s)=>t+(storeEx[s.id].next||0),0));
   // FC 税抜着地（ロイヤリティ基礎）＝ダッシュボードの着地見込みと同一定義（①②③、税抜、FC全店の合算）
   const fcIds=new Set(usableStores().filter(s=>ownOf(s.id)!=="直営").map(s=>s.id));
@@ -368,7 +330,7 @@ async function renderKeiei(){
   // FC
   h+=`<div class="panel"><h2>■ FC売上（本部としての売上着地見込）</h2>`;
   h+=`<div class="subhd">① ロイヤリティ</div><div class="krow">FC着地売上(税抜) ${ni("roy|base",M.roy.base)} × 率 ${ni("roy|rate",M.roy.rate)}% ＝ <b id="roy-res" style="font-size:15px"></b></div>`;
-  h+=`<div class="note" style="margin:-2px 0 8px">FC着地売上＝ダッシュボードの着地見込みと同じ計算（①今月の経過実績＋②平日の直近10日平均×残平日＋③土日祝の直近10日平均×残土日祝）。<b>税抜</b>のFC全店合算です。</div>`;
+  h+=`<div class="note" style="margin:-2px 0 8px">FC着地売上＝アプリ共通の着地見込み（landing.js）＝①今月の経過実績＋②平日の直近10日平均×残平日＋③土日祝の直近6日平均×残土日祝（店舗ページの手入力があれば優先）。<b>税抜</b>のFC全店合算です。</div>`;
   h+=`<div class="subhd">② 卸売上</div><div class="tblwrap"><table><thead><tr><th>区分</th><th>発送数</th><th>卸商品単価</th><th>小計</th></tr></thead><tbody>`;
   WH.forEach(([k,nm])=>{const w=M.wh[k];h+=`<tr><td>${nm}</td><td>${ni("wh|"+k+"|qty",w.qty)}</td><td>${ni("wh|"+k+"|unit",w.unit)}</td><td id="wsub-${k}"></td></tr>`;});
   h+=`<tr class="total"><td>卸売上 合計</td><td id="wqty-tot"></td><td id="wunit-avg"></td><td id="wtot"></td></tr></tbody></table></div><div class="note">卸売上合計の「発送数」＝各区分の発送数の合計、「卸商品単価」＝加重平均（合計金額÷合計発送数）。</div>`;

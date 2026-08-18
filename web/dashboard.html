@@ -509,6 +509,7 @@
   <a href="admin.html" id="tab-admin" style="display:none">管理</a>
 </div></nav>
 
+<script src="landing.js"></script>
 <script>
 "use strict";
 const YEN=n=>Math.round(n).toLocaleString("ja-JP");
@@ -3755,19 +3756,12 @@ function updateSelCount(){
 //  ・平日/土日祝の判定は isWeekendOrHoliday（土日＋祝日）で統一／「直近N日」＝締日以前でその区分の売上がある日を新しい順に最大N日
 //  ・平日/土日祝の平均売上（税抜/日）は手入力で上書きできる（店舗ページの「⚙ 見込設定」）。
 //    保存された店・月は自動値より手入力値を優先し、アプリ全体（全端末）に反映する。
-const FC_WK_DAYS=10, FC_WE_DAYS=6;   // 自動見込みの平均に使う直近日数（平日=10日／土日祝=6日）
-let FC_OV={};                        // 手入力の平日/土日祝 平均売上（税抜/日）。key="storeId|ym"→{wkEx,weEx}
+// 手入力の平日/土日祝 平均売上（税抜/日）。plan_data page="fcavg" を landing.js 経由で読む（全ページ共通の唯一のDB源）。
+let FC_OV={};                        // key="storeId|ym"→{wkEx,weEx}
 function fcOvKey(id,ym){return String(id)+"|"+ym;}
 function fcOvGet(id,ym){const o=FC_OV[fcOvKey(id,ym)];return (o&&Number.isFinite(o.wkEx)&&Number.isFinite(o.weEx))?o:null;}
 function canEditFc(){return !!SB && (ME.role==="admin"||ME.role==="editor") && !window.FRANCHISEE;}
-async function loadFcOv(){
-  FC_OV={};
-  if(!SB)return;
-  try{
-    const {data}=await SB.from("plan_data").select("scope,ym,data").eq("page","fcavg");
-    (data||[]).forEach(r=>{const d=r.data||{}; if(Number.isFinite(d.wkEx)&&Number.isFinite(d.weEx))FC_OV[fcOvKey(r.scope,r.ym)]=d;});
-  }catch(e){}
-}
+async function loadFcOv(){ FC_OV = SB ? await NL.loadOverrides(SB) : {}; }
 async function fcSave(id,ym,wkEx,weEx){
   if(!SB)return;
   await SB.from("plan_data").upsert({page:"fcavg",scope:String(id),ym,data:{wkEx,weEx},updated_at:new Date().toISOString(),updated_by:ME.email},{onConflict:"page,scope,ym"});
@@ -3776,40 +3770,9 @@ async function fcReset(id,ym){
   if(!SB)return;
   try{await SB.from("plan_data").delete().eq("page","fcavg").eq("scope",String(id)).eq("ym",ym);}catch(e){}
 }
-// ある店/月の着地見込みの内訳（自動平均・実効平均・残日数・着地額）。ovWk/ovWe を渡すと平均を上書き。
-function landingCore(ids,ym,ovWk,ovWe){
-  if(!ids||!ids.size)return null;
-  const mS=ym+"-01", mE=fMonthEnd(ym), today=todayStr();
-  const byDate={};
-  for(const r of DATA.daily){ if(!ids.has(r.s))continue;
-    byDate[r.d]=(byDate[r.d]||0)+(r.ex!=null?r.ex:(r.in||0)/1.1); }
-  const allDates=Object.keys(byDate).sort();
-  if(!allDates.length)return null;
-  const monthDates=allDates.filter(d=>d>=mS&&d<=mE);
-  const cutoff=today<mE?today:mE;
-  const closing=monthDates.filter(d=>d<=cutoff).slice(-1)[0]||null;
-  let actual=0; if(closing)for(const d of monthDates){ if(d<=closing)actual+=byDate[d]; }
-  const ref=closing||cutoff, hist=allDates.filter(d=>d<=ref);
-  const avgN=(cls,cap)=>{let s=0,n=0; for(let i=hist.length-1;i>=0&&n<cap;i--){const d=hist[i]; if(dayClass(d)===cls){s+=byDate[d];n++;}} return n?s/n:0;};
-  const wkAuto=avgN("wd",FC_WK_DAYS), weAuto=avgN("we",FC_WE_DAYS);
-  const wkUsed=Number.isFinite(ovWk)?ovWk:wkAuto, weUsed=Number.isFinite(ovWe)?ovWe:weAuto;
-  let remWk=0,remWe=0; const start=closing?addDays(closing,1):mS;
-  for(let d=start; d<=mE; d=addDays(d,1)){ if(dayClass(d)==="we")remWe++; else remWk++; }
-  return {value:actual+remWk*wkUsed+remWe*weUsed, actual, remWk, remWe, wkAuto, weAuto, wkUsed, weUsed, closing};
-}
-function landingForIds(ids,ym){
-  if(!ids||!ids.size)return null;
-  const arr=[...ids];
-  // 手入力の上書きがある店を含む集計は、店ごとに着地を出して合算（上書きを正しく反映）
-  if(arr.length>1 && arr.some(id=>fcOvGet(id,ym))){
-    let sum=0,any=false;
-    for(const id of arr){ const o=fcOvGet(id,ym); const c=landingCore(new Set([id]),ym,o?o.wkEx:undefined,o?o.weEx:undefined); if(c){sum+=c.value;any=true;} }
-    return any?sum:null;
-  }
-  const o=(arr.length===1)?fcOvGet(arr[0],ym):null;
-  const c=landingCore(ids,ym,o?o.wkEx:undefined,o?o.weEx:undefined);
-  return c?c.value:null;
-}
+// 着地見込み（税抜）＝ landing.js の唯一実装に委譲。ページ独自の計算は持たない。
+// （landing.js 未読込の埋め込みスナップショット等では null を返して壊さない）
+function landingForIds(ids,ym){ return (typeof NL!=="undefined") ? NL.salesEx(DATA.daily, ids, ym, id=>fcOvGet(id,ym)) : null; }
 function landingMonth(){
   const sd=DATA._salesMax||DATA._max, ym=sd.slice(0,7);
   const ids=(state.sel&&state.sel.size)?state.sel:new Set(usableStores().map(s=>s.id));
@@ -3817,7 +3780,7 @@ function landingMonth(){
 }
 // 着地見込みの手入力ポップアップ（店舗ページのKPIまとめから開く）。平日/土日祝の平均売上(税抜/日)を保存＝アプリ全体に反映。
 function openFcModal(id,ym){
-  const c=landingCore(new Set([id]),ym);
+  const c=NL.storeParts(DATA.daily,id,ym,null);
   if(!c){alert("この店舗の当月データがありません。");return;}
   const cur=fcOvGet(id,ym);
   const wk0=cur?Math.round(cur.wkEx):Math.round(c.wkAuto);
@@ -3835,7 +3798,7 @@ function openFcModal(id,ym){
       '<label style="display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:13px;font-weight:600">平日 平均売上（税抜/日）<input type="number" min="0" step="1000" id="fc-wk" value="'+wk0+'" style="'+inS+'"></label>'+
       '<label style="display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:13px;font-weight:600">土日祝 平均売上（税抜/日）<input type="number" min="0" step="1000" id="fc-we" value="'+we0+'" style="'+inS+'"></label>'+
     '</div>'+
-    '<div style="font-size:12px;color:var(--muted,#8a929b);margin-top:10px">自動値：平日 '+YEN(Math.round(c.wkAuto))+'円（直近'+FC_WK_DAYS+'日）／土日祝 '+YEN(Math.round(c.weAuto))+'円（直近'+FC_WE_DAYS+'日）。残り 平日'+c.remWk+'日・土日祝'+c.remWe+'日。締日まで実績 '+YEN(Math.round(c.actual))+'円。</div>'+
+    '<div style="font-size:12px;color:var(--muted,#8a929b);margin-top:10px">自動値：平日 '+YEN(Math.round(c.wkAuto))+'円（直近'+NL.WK_DAYS+'日）／土日祝 '+YEN(Math.round(c.weAuto))+'円（直近'+NL.WE_DAYS+'日）。残り 平日'+c.remWk+'日・土日祝'+c.remWe+'日。締日まで実績 '+YEN(Math.round(c.actual))+'円。</div>'+
     '<div style="font-size:13px;margin-top:8px">着地見込み（プレビュー）：<b id="fc-prev">—</b></div>'+
     '<div style="margin-top:18px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">'+
       '<button id="fc-auto" class="themebtn" title="手入力を消して自動計算に戻す">自動見込</button>'+

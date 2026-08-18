@@ -24,7 +24,13 @@ name: ダッシュボードを配信(GitHub Pages)
 on:
   push:
     branches: [feature/supabase-etl]
-    paths: ["web/dashboard.html", "web/bukken.html"]
+    paths:
+      - "web/dashboard.html"
+      - "web/bukken.html"
+      - "web/pl.html"
+      - "web/keiei.html"
+      - "web/trends.html"
+      - "web/landing.js"
   workflow_dispatch:
 
 # 同時に2つ走ると push がぶつかるので直列化する
@@ -54,16 +60,23 @@ jobs:
       - name: コピーして push
         run: |
           set -e
+          # dashboard は index.html として、他は同名でコピー。
+          # landing.js は全ページ共通の「着地見込み」実装なので、消費ページと必ず一緒に配信する。
           cp src/web/dashboard.html pages/index.html
           cp src/web/bukken.html    pages/bukken.html
+          cp src/web/pl.html        pages/pl.html
+          cp src/web/keiei.html     pages/keiei.html
+          cp src/web/trends.html    pages/trends.html
+          cp src/web/landing.js     pages/landing.js
           cd pages
-          if git diff --quiet -- index.html bukken.html; then
+          FILES="index.html bukken.html pl.html keiei.html trends.html landing.js"
+          if git diff --quiet -- $FILES; then
             echo "変更はありません（配信済みと同じ内容）。"
             exit 0
           fi
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add index.html bukken.html
-          git commit -m "デプロイ: dashboard.html / bukken.html を配信 (${GITHUB_SHA::7})"
+          git add $FILES
+          git commit -m "デプロイ: dashboard/pl/keiei/trends/landing.js を配信 (${GITHUB_SHA::7})"
           git push
           echo "✅ 配信しました。GitHub Pages の反映まで1分ほどかかります。"
