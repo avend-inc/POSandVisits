@@ -229,11 +229,16 @@ for (const [name, query] of VIEWS) {
     ok(`${name}：表示する項目は畳んである`, /<details class="pickbox"/.test(view)
       && !/<details class="pickbox" id="adpickbox" open/.test(view));
   }
-  // Instagram はまだ枠だけだが、枠が出ていることは確かめる。
-  // 振り分けを外すと店舗一覧が出てしまい、「中身が描かれている」だけでは通る
+  // Instagram：条件・日別推移・属性の3段が実際に描かれること。
+  // ig_accounts/ig_daily/ig_demographics は画面から直接Supabaseに問い合わせる作りなので、
+  // ここ（window.__DATA__だけを入れた＝SBがnullの経路）では「読み込めない」に
+  // ちゃんと倒れることを見る。振り分けを外すと店舗一覧が出てしまい、
+  // 「中身が描かれている」だけでは通る
   if (name.startsWith("Instagram")) {
-    ok(`${name}：Instagram の枠が出ている`,
-      /フォロワー/.test(view) && /class="igskel"/.test(view));
+    ok(`${name}：条件・日別推移・属性の3段が出ている`,
+      /id="igcards"/.test(view) && /id="igtrend"/.test(view) && /id="igdemo"/.test(view));
+    ok(`${name}：SBが無いときはエラーメッセージに倒れる（データを創作しない）`,
+      /ログイン情報が読み込めていないため/.test(view));
     ok(`${name}：マーケティングの切り替えから来ている`,
       /class="seg mktseg"/.test(view) && /view=ads/.test(view));
     ok(`${name}：売上のタブバーを出していない`,
