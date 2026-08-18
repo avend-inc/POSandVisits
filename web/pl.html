@@ -379,9 +379,10 @@ function budCell(m){ if(!m.budget) return "";
 
 // ======= 着地見込み（旧・別ページを予実タブに統合）=======
 // アプリ共通の着地見込み定義：
-//   着地見込み ＝ ① 今月の経過実績 ＋ ② 平日の直近10日平均 × 残平日 ＋ ③ 土日祝の直近10日平均 × 残土日祝
+//   着地見込み ＝ ① 今月の経過実績 ＋ ② 平日の直近10日平均 × 残平日 ＋ ③ 土日祝の直近6日平均 × 残土日祝
 //   ・平日/土日祝の判定は isWeekendOrHoliday（土日＋日本の祝日 JP_HOLIDAYS）で統一（dashboard と同一）
-//   ・「直近10日」＝ 締日以前で、その区分の実績がある日を新しい順に最大10日
+//   ・「直近N日」＝ 締日以前で、その区分の実績がある日を新しい順に最大N日（平日10日／土日祝6日）
+//   ・平日/土日祝の平均売上は店舗ページの「⚙ 見込設定」で手入力でき、保存済みなら税込売上(in)の見込みへ換算して優先反映
 function addDays(d,n){const t=new Date(d+"T00:00:00Z");t.setUTCDate(t.getUTCDate()+n);return t.toISOString().slice(0,10);}
 function monthEnd(ym){const[y,m]=ym.split("-").map(Number);const last=new Date(Date.UTC(y,m,0)).getUTCDate();return `${ym}-${String(last).padStart(2,"0")}`;}
 function todayStr(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;}
@@ -409,11 +410,11 @@ function computeAuto(store, ym){
   const td={in:0,ex:0,tx:0,txv:0,it:0,v:0}; let wkN=0,weN=0;
   if(closing) for(const d of monthDates){ if(d>closing)continue; const a=byDate[d];
     METS.forEach(k=>td[k]+=a[k]); if(isWeekendOrHoliday(d))weN++; else wkN++; }
-  // ②③ 直近10日平均（締日以前、平日/土日祝それぞれ最大10日）
+  // ②③ 直近平均（締日以前、平日は最大10日／土日祝は最大6日）
   const ref = closing || addDays(today,-1);
   const hist = Object.keys(byDate).filter(d=>d<=ref).sort();
-  const avg10=(we,k)=>{let s=0,n=0; for(let i=hist.length-1;i>=0&&n<10;i--){const d=hist[i]; if(isWeekendOrHoliday(d)===we){s+=byDate[d][k];n++;}} return n?s/n:0;};
-  const avg={}; METS.forEach(k=>avg[k]={wk:avg10(false,k), we:avg10(true,k)});
+  const avgN=(we,k)=>{const cap=we?6:10; let s=0,n=0; for(let i=hist.length-1;i>=0&&n<cap;i--){const d=hist[i]; if(isWeekendOrHoliday(d)===we){s+=byDate[d][k];n++;}} return n?s/n:0;};
+  const avg={}; METS.forEach(k=>avg[k]={wk:avgN(false,k), we:avgN(true,k)});
   // 残りの平日/土日祝（祝日も自動で土日祝に含める）
   let remWk=0,remWe=0; const start = closing? addDays(closing,1): mS;
   for(let d=start; d<=mE; d=addDays(d,1)){ if(isWeekendOrHoliday(d))remWe++; else remWk++; }
@@ -437,6 +438,21 @@ async function loadFcData(){
 }
 function saveFc(){ planSave("fc",state.store,state.ym,fc); }
 function resetFc(){ planDelete("fc",state.store,state.ym); reload(); }
+// 店舗ページの「⚙ 見込設定」で手入力した平日/土日祝 平均売上（税抜/日）。単店スコープのみ。
+//  保存されていれば、税込売上(in)の見込み平均へ換算して反映し、着地見込みをアプリ全体で一致させる。
+let FCOV=null;
+async function loadFcOvIn(){
+  FCOV=null;
+  if(!SB || isAll()) return;
+  try{ const {data}=await SB.from("plan_data").select("data").eq("page","fcavg").eq("scope",String(state.store)).eq("ym",state.ym).maybeSingle();
+    const d=data&&data.data; if(d&&Number.isFinite(d.wkEx)&&Number.isFinite(d.weEx))FCOV=d; }catch(e){}
+}
+function applyFcOv(){
+  if(!FCOV||!fc||!fc.avg||!fc.avg.in)return;
+  const er=(AUTO&&AUTO.exRatio)?AUTO.exRatio:0.91;   // 税抜→税込 換算（実績税率の逆数）
+  fc.avg.in.wk=Math.round(FCOV.wkEx/er);
+  fc.avg.in.we=Math.round(FCOV.weEx/er);
+}
 function landing(){
   const L={};
   METS.forEach(k=>{ if(k==="ex")return;
@@ -473,8 +489,8 @@ async function reload(){
     await loadTargets();
     const months=monthsInData();
     if(!state.ym||!months.includes(state.ym)) state.ym=(DATA._salesMax||months[months.length-1]).slice(0,7);
-    if(state.view==="fc"){ AUTO=computeAuto(state.store,state.ym); fc=await loadFcData(); }
-    else if(state.view==="ac"){ AUTO=computeAuto(state.store,state.ym); fc=await loadFcData(); await acLoad(); }
+    if(state.view==="fc"){ AUTO=computeAuto(state.store,state.ym); fc=await loadFcData(); await loadFcOvIn(); applyFcOv(); }
+    else if(state.view==="ac"){ AUTO=computeAuto(state.store,state.ym); fc=await loadFcData(); await loadFcOvIn(); applyFcOv(); await acLoad(); }
     else{ A=computeActual(state.store,state.ym);
       if(isAll()){ MALL=await planLoadAll("pl",state.ym); M={}; } else { M=await loadMData(); MALL={}; } }
     render(); subscribeRealtime();
@@ -671,7 +687,7 @@ function fcBody(monthLabel,storeName){
       <div class="tblwrap"><table id="kpi"></table></div>
       <p class="note">税抜売上＝税込×実績税率(${(AUTO.exRatio).toFixed(3)})。購入率＝取引数÷来店客数／客単価（税込）＝税込÷取引数／平均購入数＝点数÷取引数／平均商品単価（税抜）＝税抜÷点数。レジ袋・クーポンは除外済み。</p>
     </div>
-    <div class="foot">「私の見込み」はデータから自動算出した初期値です（着地見込み＝①今月の経過実績＋②平日の直近10日平均×残平日＋③土日祝の直近10日平均×残土日祝。土日祝＝土日＋祝日）。ズレていれば数値を上書きして「更新」（サーバ保存＝全端末に反映）。「自動見込みに戻す」で初期値に戻せます。締日＝取り込み済みの最新日。</div>`;
+    <div class="foot">「私の見込み」はデータから自動算出した初期値です（着地見込み＝①今月の経過実績＋②平日の直近10日平均×残平日＋③土日祝の直近6日平均×残土日祝。土日祝＝土日＋祝日）。ズレていれば数値を上書きして「更新」（サーバ保存＝全端末に反映）。「自動見込みに戻す」で初期値に戻せます。締日＝取り込み済みの最新日。<br>※ 税込売上の平日/土日祝 見込は、店舗ページの「⚙ 見込設定」で手入力した平日/土日祝 平均売上（税抜）があれば、そこから換算した値を優先します（アプリ全体で一致）。</div>`;
 }
 
 function bindFc(){
@@ -685,13 +701,17 @@ function bindFcInput(id,setter){const el=document.getElementById(id);if(!el)retu
   el.oninput=()=>{const v=Number(el.value); if(el.value===""){setter(0);}else if(Number.isFinite(v)){setter(v);} el.classList.remove("saved");el.classList.add("editing"); markDirty(); fcRecompute();};}
 function drawDriver(){
   const head=`<thead><tr><th>指標</th><th>締日まで(実績)</th><th>平日 見込/日</th><th>土日祝 見込/日</th><th>着地見込み</th></tr></thead>`;
-  const rows=DRIVERS.map(d=>`<tr>
-    <td>${d.name}</td>
+  const rows=DRIVERS.map(d=>{
+    const lock=!!FCOV && d.k==="in";   // 税込売上は店舗ページの見込設定を使用中＝ここでは編集不可
+    const dis=(lock||!CANEDIT)?" disabled":"";
+    const tip=lock?' title="店舗ページの「⚙ 見込設定」で手入力した平日/土日祝 平均売上（税抜）から換算中"':"";
+    return `<tr>
+    <td>${d.name}${lock?' <span class="sub" style="font-weight:500;color:var(--accent)">見込設定</span>':''}</td>
     <td>${d.fmt(AUTO.td[d.k])}${d.unit}</td>
-    <td><input class="num edit" data-k="${d.k}" data-t="wk" type="number" min="0" step="${d.step}" value="${Math.round(fc.avg[d.k].wk)}"${CANEDIT?"":" disabled"}></td>
-    <td><input class="num edit" data-k="${d.k}" data-t="we" type="number" min="0" step="${d.step}" value="${Math.round(fc.avg[d.k].we)}"${CANEDIT?"":" disabled"}></td>
+    <td><input class="num edit" data-k="${d.k}" data-t="wk" type="number" min="0" step="${d.step}" value="${Math.round(fc.avg[d.k].wk)}"${dis}${tip}></td>
+    <td><input class="num edit" data-k="${d.k}" data-t="we" type="number" min="0" step="${d.step}" value="${Math.round(fc.avg[d.k].we)}"${dis}${tip}></td>
     <td id="dland-${d.k}">—</td>
-  </tr>`).join("");
+  </tr>`;}).join("");
   document.getElementById("driver").innerHTML=head+"<tbody>"+rows+"</tbody>";
   document.querySelectorAll('#driver input.edit').forEach(el=>{
     el.oninput=()=>{const v=Number(el.value);const k=el.dataset.k,t=el.dataset.t;
