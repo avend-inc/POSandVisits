@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Cache-Control" content="no-store, max-age=0">
+<title>対象エリア</title>
+<style>
+  :root{--ink:#1a1a1a;--ink2:#6b6b6b;--bg:#f5f5f3;--surface:#fff;--border:#e4e4e4;
+    --accent:#b8860b;--ok:#1b8a3a;--ng:#c0392b;--shadow:0 1px 3px rgba(0,0,0,.06);}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:system-ui,-apple-system,"Hiragino Kaku Gothic ProN",sans-serif;padding-bottom:60px}
+  header{background:var(--surface);border-bottom:1px solid var(--border);padding:14px 16px;
+    position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:10px}
+  header h1{font-size:16px;margin:0;flex:1}
+  .hbtn{border:1px solid var(--border);background:var(--surface);color:var(--ink2);
+    border-radius:9px;padding:7px 11px;font-size:12px;cursor:pointer;text-decoration:none;white-space:nowrap}
+  main{max-width:760px;margin:0 auto;padding:14px}
+  .lead{font-size:12.5px;color:var(--ink2);line-height:1.7;margin:2px 0 12px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:14px;margin:12px 0;box-shadow:var(--shadow)}
+  .card h2{font-size:14px;margin:0 0 10px}
+  .search{position:relative}
+  .search input{width:100%;border:1px solid var(--border);border-radius:10px;padding:11px;font-size:15px}
+  .sug{position:absolute;left:0;right:0;top:calc(100% + 4px);background:#fff;border:1px solid var(--border);
+    border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.1);max-height:280px;overflow-y:auto;z-index:30}
+  .sug div{padding:10px 12px;font-size:13px;cursor:pointer;border-top:1px solid #f0f0f0}
+  .sug div:first-child{border-top:none}
+  .sug div:hover{background:#faf7ee}
+  .sug .p{color:var(--ink2);font-size:11px;margin-left:6px}
+  .sug .added{color:#b5b5b5}
+  .empty{color:var(--ink2);font-size:12.5px;padding:8px 2px}
+  .row{border:1px solid var(--border);border-radius:12px;padding:11px 12px;margin:8px 0;background:#fff}
+  .row.off{opacity:.55}
+  .rhead{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .rname{font-size:15px;font-weight:700}
+  .rpref{font-size:11px;color:var(--ink2)}
+  .jis{font-size:10.5px;color:#9a9a9a;font-family:ui-monospace,monospace}
+  .warnb{font-size:10px;font-weight:700;color:#fff;background:#c99a00;border-radius:5px;padding:1px 6px}
+  .del{margin-left:auto;border:1px solid var(--border);background:#fff;color:var(--ng);border-radius:8px;padding:5px 9px;font-size:11px;cursor:pointer}
+  .fields{display:grid;grid-template-columns:1fr 1fr;gap:8px 10px;margin-top:9px}
+  @media(max-width:520px){.fields{grid-template-columns:1fr}}
+  label{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--ink2)}
+  label.chk{flex-direction:row;align-items:center;gap:7px;font-size:12px}
+  input[type=text],select{border:1px solid var(--border);border-radius:9px;padding:8px;font-size:14px;background:#fff;width:100%}
+  .saved{font-size:11px;color:var(--ok);opacity:0;transition:opacity .2s}
+  .saved.on{opacity:1}
+  .hint{font-size:10.5px;color:#9a9a9a}
+  .msg{padding:24px 16px;color:var(--ink2);text-align:center;line-height:1.8}
+  .loginbtn{display:inline-block;margin-top:12px;background:var(--accent);color:#fff;border:none;border-radius:10px;padding:11px 20px;font-size:15px;font-weight:700;cursor:pointer}
+  .banner{background:#fff7e6;border:1px solid #f0d9a0;color:#7a5c00;border-radius:10px;padding:10px 12px;font-size:12px;line-height:1.6;margin:10px 0}
+</style></head>
+<body>
+<header>
+  <a class="hbtn" href="bukken.html">‹ 物件</a>
+  <h1>対象エリア</h1>
+  <button class="hbtn" id="logoutbtn" style="display:none">ログアウト</button>
+  <a class="hbtn" href="../" title="アプリのトップへ">ホーム</a>
+</header>
+<main id="main"><div class="msg">読み込み中…</div></main>
+
+<script>
+"use strict";
+const CONFIG_URL="https://qcdxhsrnlsgpntbiellh.supabase.co/storage/v1/object/public/dashboard/config.json";
+let SB=null, MUNI=[], TARGETS=[];
+
+const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+// ひらがな→カタカナ（かな検索用）
+const kata=s=>String(s||"").replace(/[ぁ-ゖ]/g,c=>String.fromCharCode(c.charCodeAt(0)+0x60));
+
+async function loadSupabase(){ if(window.supabase)return;
+  await new Promise((res,rej)=>{const s=document.createElement("script");
+    s.src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2";s.onload=res;s.onerror=()=>rej(new Error("ログイン部品を読み込めませんでした"));
+    document.head.appendChild(s);});}
+
+async function loadTargets(){
+  const {data,error}=await SB.from("bukken_cities").select("*").order("priority").order("jis");
+  if(error) throw error;
+  TARGETS=data||[];
+}
+
+function render(){
+  document.getElementById("main").innerHTML=`
+    <p class="lead">自動収集の<b>対象市区町村</b>を管理します。ここに登録した市を、毎日の物件収集が巡回します。
+      市名を検索して選ぶだけで、JISコード・県・主要駅は自動で入ります。変更は次回の収集から反映されます。</p>
+    <div class="card">
+      <h2>市区町村を追加</h2>
+      <div class="search">
+        <input id="q" placeholder="市名で検索（例：金沢 / かなざわ）" autocomplete="off">
+        <div class="sug" id="sug" style="display:none"></div>
+      </div>
+      <p class="hint" style="margin-top:8px">全国1,892市区町村から選べます。市だけでなく区・町村も対象にできます。</p>
+    </div>
+    <div class="card">
+      <h2>対象の市（${TARGETS.length}）</h2>
+      <div id="rows"></div>
+    </div>`;
+  const q=document.getElementById("q");
+  q.oninput=()=>suggest(q.value.trim());
+  q.onblur=()=>setTimeout(()=>{document.getElementById("sug").style.display="none";},150);
+  q.onfocus=()=>{ if(q.value.trim())suggest(q.value.trim()); };
+  renderRows();
+}
+
+function suggest(qq){
+  const box=document.getElementById("sug");
+  if(!qq){ box.style.display="none"; return; }
+  const k=kata(qq); const have=new Set(TARGETS.map(t=>t.jis));
+  const hits=MUNI.filter(m=>m.name.includes(qq)||m.kana.includes(k)).slice(0,40);
+  if(!hits.length){ box.innerHTML='<div class="empty" style="padding:12px">該当なし</div>'; box.style.display="block"; return; }
+  box.innerHTML=hits.map(m=>{
+    const added=have.has(m.jis);
+    return `<div data-jis="${m.jis}" class="${added?"added":""}">${esc(m.name)}<span class="p">${esc(m.pref)}</span>${added?'<span class="p">✓登録済み</span>':""}</div>`;
+  }).join("");
+  box.style.display="block";
+  box.querySelectorAll("div[data-jis]").forEach(d=>d.onclick=()=>addCity(d.dataset.jis));
+}
+
+async function addCity(jis){
+  if(TARGETS.some(t=>t.jis===jis)) return;
+  const m=MUNI.find(x=>x.jis===jis); if(!m) return;
+  const rec={jis:m.jis,name:m.name,pref:m.pref,pref_roma:m.pref_roma,main_station:m.station,priority:1,warn:false,enabled:true};
+  const {error}=await SB.from("bukken_cities").upsert(rec,{onConflict:"jis"});
+  if(error){ alert("保存に失敗："+error.message+"\n（bukken_cities テーブル未作成の可能性）"); return; }
+  TARGETS.push(rec);
+  TARGETS.sort((a,b)=>(a.priority-b.priority)||a.jis.localeCompare(b.jis));
+  document.getElementById("q").value=""; document.getElementById("sug").style.display="none";
+  render();
+}
+
+function renderRows(){
+  const box=document.getElementById("rows");
+  if(!TARGETS.length){ box.innerHTML='<div class="empty">まだ登録がありません。上の検索から追加してください。</div>'; return; }
+  box.innerHTML=TARGETS.map((t,i)=>`
+    <div class="row ${t.enabled===false?"off":""}" data-i="${i}">
+      <div class="rhead">
+        <span class="rname">${esc(t.name)}</span><span class="rpref">${esc(t.pref)}</span>
+        ${t.warn?'<span class="warnb">商圏未確定</span>':""}
+        <span class="jis">JIS ${esc(t.jis)}</span>
+        <button class="del" data-del="${t.jis}">削除</button>
+      </div>
+      <div class="fields">
+        <label>主要駅<input type="text" data-f="main_station" value="${esc(t.main_station||"")}"></label>
+        <label>優先度
+          <select data-f="priority">
+            <option value="1" ${t.priority==1?"selected":""}>1（高・毎日）</option>
+            <option value="2" ${t.priority==2?"selected":""}>2（中）</option>
+            <option value="3" ${t.priority==3?"selected":""}>3（低）</option>
+          </select></label>
+        <label class="chk"><input type="checkbox" data-f="warn" ${t.warn?"checked":""}>商圏未確定（ランクA判定を出さない）</label>
+        <label class="chk"><input type="checkbox" data-f="enabled" ${t.enabled!==false?"checked":""}>収集する（オフで一時停止）</label>
+      </div>
+      <div class="saved" data-saved="${t.jis}">✓ 保存済み</div>
+    </div>`).join("");
+  box.querySelectorAll("button[data-del]").forEach(b=>b.onclick=()=>delCity(b.dataset.del));
+  box.querySelectorAll(".row").forEach(row=>{
+    const i=+row.dataset.i;
+    row.querySelectorAll("[data-f]").forEach(el=>{
+      const ev=(el.type==="checkbox"||el.tagName==="SELECT")?"change":"blur";
+      el.addEventListener(ev,()=>saveField(i,el));
+    });
+  });
+}
+
+async function saveField(i,el){
+  const t=TARGETS[i]; const f=el.dataset.f;
+  let v = el.type==="checkbox" ? el.checked : (f==="priority" ? Number(el.value) : el.value);
+  t[f]=v;
+  const patch={jis:t.jis,name:t.name,pref:t.pref,pref_roma:t.pref_roma,main_station:t.main_station,priority:t.priority,warn:t.warn,enabled:t.enabled};
+  const {error}=await SB.from("bukken_cities").upsert(patch,{onConflict:"jis"});
+  const tag=document.querySelector(`[data-saved="${t.jis}"]`);
+  if(error){ if(tag){tag.textContent="保存に失敗："+error.message;tag.style.color="var(--ng)";tag.classList.add("on");} return; }
+  if(f==="enabled"){ const row=el.closest(".row"); if(row)row.classList.toggle("off",!v); }
+  if(f==="warn"){ render(); return; }
+  if(tag){ tag.textContent="✓ 保存済み"; tag.style.color="var(--ok)"; tag.classList.add("on"); setTimeout(()=>tag.classList.remove("on"),1400); }
+}
+
+async function delCity(jis){
+  const t=TARGETS.find(x=>x.jis===jis);
+  if(!confirm(`${t?t.name:jis} を対象から外しますか？`)) return;
+  const {error}=await SB.from("bukken_cities").delete().eq("jis",jis);
+  if(error){ alert("削除に失敗："+error.message); return; }
+  TARGETS=TARGETS.filter(x=>x.jis!==jis); render();
+}
+
+async function boot(){
+  try{
+    const [cfg,muni]=await Promise.all([
+      (await fetch(CONFIG_URL,{cache:"no-store"})).json(),
+      (await fetch("municipalities.json",{cache:"force-cache"})).json(),
+    ]);
+    MUNI=muni;
+    await loadSupabase();
+    SB=window.supabase.createClient(cfg.url,cfg.anon,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,flowType:"pkce",storageKey:"notime-auth"}});
+    const {data:{session}}=await SB.auth.getSession();
+    if(!session){
+      document.getElementById("main").innerHTML='<div class="msg">対象エリアを編集するにはログインが必要です。<br><button class="loginbtn" id="lg">Googleでログイン</button></div>';
+      document.getElementById("lg").onclick=()=>SB.auth.signInWithOAuth({provider:"google",options:{redirectTo:location.origin+location.pathname,queryParams:{prompt:"select_account"}}});
+      return;
+    }
+    document.getElementById("logoutbtn").style.display="";
+    document.getElementById("logoutbtn").onclick=async()=>{try{await SB.auth.signOut();}catch(e){}location.reload();};
+    try{ await loadTargets(); }
+    catch(e){
+      document.getElementById("main").innerHTML='<div class="banner">対象エリアのテーブル（bukken_cities）がまだ作成されていません。チャットで渡したSQLをSupabaseで実行してから、この画面を再読み込みしてください。</div>';
+      return;
+    }
+    render();
+  }catch(e){ document.getElementById("main").innerHTML='<div class="msg">読み込みに失敗しました：'+String(e.message||e)+'</div>'; }
+}
+boot();
+</script>
+</body></html>
