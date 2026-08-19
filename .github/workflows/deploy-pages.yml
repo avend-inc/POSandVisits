@@ -74,13 +74,16 @@ jobs:
           cp src/web/landing.js     pages/landing.js
           cd pages
           FILES="index.html bukken.html shoken.html mise.html pl.html keiei.html trends.html landing.js"
-          if git diff --quiet -- $FILES; then
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # 先に stage してから差分判定する。git diff（stage前）は「新規ファイル」を
+          # 検知しないため、shoken/mise のような新規ページが未配信のまま
+          # 「変更なし」で早期終了してしまう事故を防ぐ（実際に起きた）。
+          git add $FILES
+          if git diff --cached --quiet; then
             echo "変更はありません（配信済みと同じ内容）。"
             exit 0
           fi
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add $FILES
-          git commit -m "デプロイ: dashboard/pl/keiei/trends/landing.js を配信 (${GITHUB_SHA::7})"
+          git commit -m "デプロイ: dashboard/bukken/shoken/mise/pl/keiei/trends/landing.js を配信 (${GITHUB_SHA::7})"
           git push
           echo "✅ 配信しました。GitHub Pages の反映まで1分ほどかかります。"
