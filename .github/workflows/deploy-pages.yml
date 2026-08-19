@@ -27,6 +27,8 @@ on:
     paths:
       - "web/dashboard.html"
       - "web/bukken.html"
+      - "web/shoken.html"
+      - "web/mise.html"
       - "web/pl.html"
       - "web/keiei.html"
       - "web/trends.html"
@@ -64,12 +66,14 @@ jobs:
           # landing.js は全ページ共通の「着地見込み」実装なので、消費ページと必ず一緒に配信する。
           cp src/web/dashboard.html pages/index.html
           cp src/web/bukken.html    pages/bukken.html
+          cp src/web/shoken.html    pages/shoken.html
+          cp src/web/mise.html      pages/mise.html
           cp src/web/pl.html        pages/pl.html
           cp src/web/keiei.html     pages/keiei.html
           cp src/web/trends.html    pages/trends.html
           cp src/web/landing.js     pages/landing.js
           cd pages
-          FILES="index.html bukken.html pl.html keiei.html trends.html landing.js"
+          FILES="index.html bukken.html shoken.html mise.html pl.html keiei.html trends.html landing.js"
           if git diff --quiet -- $FILES; then
             echo "変更はありません（配信済みと同じ内容）。"
             exit 0
