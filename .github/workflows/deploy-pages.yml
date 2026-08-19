@@ -29,6 +29,8 @@ on:
       - "web/bukken.html"
       - "web/shoken.html"
       - "web/mise.html"
+      - "web/cities.html"
+      - "web/municipalities.json"
       - "web/pl.html"
       - "web/keiei.html"
       - "web/trends.html"
@@ -68,12 +70,14 @@ jobs:
           cp src/web/bukken.html    pages/bukken.html
           cp src/web/shoken.html    pages/shoken.html
           cp src/web/mise.html      pages/mise.html
+          cp src/web/cities.html    pages/cities.html
+          cp src/web/municipalities.json pages/municipalities.json
           cp src/web/pl.html        pages/pl.html
           cp src/web/keiei.html     pages/keiei.html
           cp src/web/trends.html    pages/trends.html
           cp src/web/landing.js     pages/landing.js
           cd pages
-          FILES="index.html bukken.html shoken.html mise.html pl.html keiei.html trends.html landing.js"
+          FILES="index.html bukken.html shoken.html mise.html cities.html municipalities.json pl.html keiei.html trends.html landing.js"
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           # 先に stage してから差分判定する。git diff（stage前）は「新規ファイル」を

@@ -29,6 +29,12 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def load_cities(path: Path | str = ROOT / "cities.yaml") -> list[dict]:
+    # まず Supabase の bukken_cities（レビュー画面「対象エリア」で編集）を見る。
+    # テーブルが無い/取得できない/1件も無いときだけ cities.yaml にフォールバックする。
+    from . import cities_db
+    rows = cities_db.fetch()
+    if rows:
+        return rows
     data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     return data["cities"]
 
