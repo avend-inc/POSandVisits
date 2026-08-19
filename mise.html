@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Cache-Control" content="no-store, max-age=0">
+<title>既存店データ</title>
+<style>
+  :root{--ink:#1a1a1a;--ink2:#6b6b6b;--bg:#f5f5f3;--surface:#fff;--border:#e4e4e4;
+    --accent:#b8860b;--ok:#1b8a3a;--ng:#c0392b;--hold:#8a6d00;--shadow:0 1px 3px rgba(0,0,0,.06);}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:system-ui,-apple-system,"Hiragino Kaku Gothic ProN",sans-serif;padding-bottom:60px}
+  header{background:var(--surface);border-bottom:1px solid var(--border);padding:14px 16px;
+    position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:10px}
+  header h1{font-size:16px;margin:0;flex:1}
+  .hbtn{border:1px solid var(--border);background:var(--surface);color:var(--ink2);
+    border-radius:9px;padding:7px 11px;font-size:12px;cursor:pointer;text-decoration:none;white-space:nowrap}
+  main{max-width:1100px;margin:0 auto;padding:14px}
+  .lead{font-size:12.5px;color:var(--ink2);line-height:1.7;margin:2px 0 10px}
+  .chips{display:flex;gap:7px;overflow-x:auto;padding-bottom:6px;-webkit-overflow-scrolling:touch}
+  .chip{flex:0 0 auto;border:1px solid var(--border);background:var(--surface);color:var(--ink2);
+    border-radius:999px;padding:7px 13px;font-size:12.5px;cursor:pointer;white-space:nowrap}
+  .chip.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--border);border-radius:12px;background:var(--surface);margin-top:10px}
+  table{border-collapse:collapse;width:100%;font-size:12px;white-space:nowrap}
+  th,td{border-bottom:1px solid var(--border);padding:7px 9px;text-align:right}
+  th{position:sticky;top:0;background:#faf9f6;font-size:11px;color:var(--ink2);cursor:pointer;user-select:none}
+  th:first-child,td:first-child{text-align:left;position:sticky;left:0;background:var(--surface);z-index:1}
+  th:first-child{z-index:2;background:#faf9f6}
+  tr.bench td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
+  tr.bench td{background:#fffdf5}
+  tr.comp td:first-child{color:#7a5cc0}
+  .tag{display:inline-block;font-size:10px;font-weight:700;color:#fff;border-radius:5px;padding:1px 5px;margin-left:5px;vertical-align:middle}
+  .t-成功{background:var(--ok)} .t-普通{background:#8a8a8a} .t-失敗{background:var(--ng)} .t-未{background:#c9c2a8}
+  .sub{font-size:10.5px;color:#9a9a9a}
+  .rangebar{font-size:11.5px;color:var(--ink2);background:var(--surface);border:1px solid var(--border);
+    border-radius:10px;padding:9px 12px;margin-top:10px;line-height:1.7}
+  .rangebar b{color:var(--ink)}
+  .msg{padding:24px 16px;color:var(--ink2);text-align:center;line-height:1.8}
+  .loginbtn{display:inline-block;margin-top:12px;background:var(--accent);color:#fff;border:none;border-radius:10px;padding:11px 20px;font-size:15px;font-weight:700;cursor:pointer}
+</style></head>
+<body>
+<header>
+  <a class="hbtn" href="shoken.html">‹ 商圏調査</a>
+  <h1>既存店データ</h1>
+  <a class="hbtn" href="bukken.html">物件</a>
+  <button class="hbtn" id="logoutbtn" style="display:none">ログアウト</button>
+  <a class="hbtn" href="../" title="アプリのトップへ">ホーム</a>
+</header>
+<main id="main"><div class="msg">読み込み中…</div></main>
+
+<script>
+"use strict";
+const CONFIG_URL="https://qcdxhsrnlsgpntbiellh.supabase.co/storage/v1/object/public/dashboard/config.json";
+let SB=null;
+
+// ===== 教師データ（Google Sheets「店舗実績_教師データ」から算出）=====
+// 人口は各距離帯の 20-34歳 絶対数。独立度＝10km÷40km。通行量＝上下・24h・小型車。
+const STORES=[{"name":"SELFURUGI旭川末広店","ours":true,"pref":"北海道","city":"旭川市","model":"地方","road":true,"success":"成功","area":50,"rent":80000,"park":2,"p3":10409,"p10":39763,"p20":42088,"p30":43191,"p40":45965,"indep":0.865,"traf":20141},{"name":"NOTIME伊予松前店","ours":true,"pref":"愛媛県","city":"伊予郡","model":"地方","road":true,"success":"成功","area":130,"rent":200000,"park":5,"p3":5652,"p10":66535,"p20":80844,"p30":83397,"p40":86577,"indep":0.769,"traf":26057},{"name":"SELFURUGI盛岡菜園店","ours":true,"pref":"岩手県","city":"盛岡市","model":"地方","road":false,"success":"成功","area":55,"rent":160000,"park":0,"p3":18919,"p10":46739,"p20":56204,"p30":60177,"p40":69830,"indep":0.669,"traf":7229},{"name":"SELFURUGI徳島沖浜店","ours":true,"pref":"徳島県","city":"徳島市","model":"地方","road":true,"success":"成功","area":70,"rent":200000,"park":3,"p3":11074,"p10":43138,"p20":63269,"p30":72024,"p40":77387,"indep":0.557,"traf":null},{"name":"NOTIME福井店","ours":true,"pref":"福井県","city":"福井市","model":"地方","road":true,"success":"成功","area":231,"rent":348000,"park":15,"p3":10744,"p10":43795,"p20":68233,"p30":83750,"p40":93106,"indep":0.47,"traf":null},{"name":"NOTIME山形店","ours":true,"pref":"山形県","city":"山形市","model":"地方","road":true,"success":"成功","area":82.5,"rent":200000,"park":5,"p3":16964,"p10":36403,"p20":52385,"p30":66765,"p40":78329,"indep":0.465,"traf":25004},{"name":"SELFURUGI富山田中町店","ours":true,"pref":"富山県","city":"富山市","model":"地方","road":true,"success":"成功","area":55,"rent":160000,"park":2,"p3":15833,"p10":55289,"p20":80401,"p30":107210,"p40":127310,"indep":0.434,"traf":24587},{"name":"NOTIME鎌ヶ谷店、SELFURUGI鎌ヶ谷店","ours":true,"pref":"千葉県","city":"鎌ケ谷市","model":"都心郊外","road":true,"success":"成功","area":100,"rent":300000,"park":14,"p3":18547,"p10":245631,"p20":783348,"p30":1620433,"p40":2850962,"indep":0.086,"traf":25215},{"name":"NOTIME熊谷店、SELFURUGI熊谷店","ours":true,"pref":"埼玉県","city":"熊谷市","model":"都心郊外","road":true,"success":"成功","area":100,"rent":400000,"park":5,"p3":11300,"p10":54355,"p20":159834,"p30":349186,"p40":745004,"indep":0.073,"traf":12798},{"name":"NOTIMEいわき店","ours":true,"pref":"福島県","city":"いわき市","model":"地方","road":true,"success":"普通","area":148.5,"rent":208000,"park":7,"p3":3917,"p10":30518,"p20":39415,"p30":43325,"p40":49234,"indep":0.62,"traf":25160},{"name":"NOTIME浜松店","ours":true,"pref":"静岡県","city":"浜松市","model":"大型地方（人口70万人以上）","road":true,"success":"普通","area":80,"rent":150000,"park":3,"p3":16808,"p10":107376,"p20":144377,"p30":168485,"p40":216841,"indep":0.495,"traf":14981},{"name":"SELFURUGI浜松高林店","ours":true,"pref":"静岡県","city":"浜松市","model":"大型地方（人口70万人以上）","road":true,"success":"普通","area":50,"rent":90000,"park":3,"p3":23914,"p10":99089,"p20":139009,"p30":166498,"p40":235871,"indep":0.42,"traf":28865},{"name":"SELFURUGI宇都宮店","ours":true,"pref":"栃木県","city":"宇都宮市","model":"地方","road":true,"success":"普通","area":70,"rent":200000,"park":3,"p3":19101,"p10":76656,"p20":119630,"p30":161543,"p40":231468,"indep":0.331,"traf":18190},{"name":"SELFURUGI仙台吉成店","ours":true,"pref":"宮城県","city":"仙台市","model":"大型地方（人口70万人以上）","road":true,"success":"失敗","area":55,"rent":100000,"park":2,"p3":14252,"p10":155323,"p20":222515,"p30":244953,"p40":276356,"indep":0.562,"traf":null},{"name":"SELFURUGI GARAGE静岡店","ours":true,"pref":"静岡県","city":"静岡市","model":"大型地方（人口70万人以上）","road":true,"success":"失敗","area":100,"rent":80000,"park":2,"p3":18895,"p10":88622,"p20":109311,"p30":138101,"p40":185365,"indep":0.478,"traf":8586},{"name":"NOTIME高松","ours":true,"pref":"香川県","city":"高松市","model":"地方","road":true,"success":"失敗","area":100,"rent":110000,"park":5,"p3":13529,"p10":55025,"p20":73323,"p30":101968,"p40":124576,"indep":0.442,"traf":16811},{"name":"NOTIME静岡店","ours":true,"pref":"静岡県","city":"静岡市","model":"大型地方（人口70万人以上）","road":true,"success":"失敗","area":60,"rent":150000,"park":3,"p3":18235,"p10":79775,"p20":94581,"p30":140276,"p40":195994,"indep":0.407,"traf":22421},{"name":"SELFURUGI倉敷店","ours":true,"pref":"岡山県","city":"倉敷市","model":"地方","road":true,"success":"失敗","area":50,"rent":150000,"park":2,"p3":12850,"p10":63641,"p20":152793,"p30":204112,"p40":241276,"indep":0.264,"traf":null},{"name":"SELFURUGI上田原店","ours":true,"pref":"長野県","city":"上田市","model":"地方","road":true,"success":"失敗","area":55,"rent":80000,"park":4,"p3":6318,"p10":22882,"p20":31762,"p30":54285,"p40":108278,"indep":0.211,"traf":13354},{"name":"SELFURUGI伊勢崎店","ours":true,"pref":"群馬県","city":"伊勢崎市","model":"地方","road":true,"success":"失敗","area":50,"rent":100000,"park":4,"p3":9243,"p10":64410,"p20":187979,"p30":286272,"p40":359266,"indep":0.179,"traf":29013},{"name":"NOTIME長野店","ours":true,"pref":"長野県","city":"長野市","model":"地方","road":true,"success":null,"area":100,"rent":180000,"park":8,"p3":9190,"p10":43070,"p20":59382,"p30":68272,"p40":83339,"indep":0.517,"traf":22324},{"name":"NOTIME所沢店","ours":true,"pref":"埼玉県","city":"所沢市","model":"都心郊外","road":true,"success":null,"area":66,"rent":250000,"park":6,"p3":20128,"p10":169728,"p20":706427,"p30":1837222,"p40":3464705,"indep":0.049,"traf":9330},{"name":"ヒューマンイズデッド本店","ours":false,"pref":"岐阜県","city":"本巣市","model":"地方","road":true,"success":"成功","area":100,"rent":80000,"park":5,"p3":6019,"p10":67354,"p20":149174,"p30":261079,"p40":471368,"indep":0.143,"traf":null},{"name":"ヒューマンイズデッド長良店","ours":false,"pref":"岐阜県","city":"岐阜市","model":"地方","road":true,"success":"成功","area":70,"rent":150000,"park":5,"p3":12901,"p10":76307,"p20":186080,"p30":326202,"p40":627365,"indep":0.122,"traf":null},{"name":"Syndi 豊川","ours":false,"pref":"愛知県","city":"豊川市","model":"地方","road":true,"success":"成功","area":130,"rent":300000,"park":7,"p3":7144,"p10":47470,"p20":122433,"p30":221258,"p40":399919,"indep":0.119,"traf":null},{"name":"Syndi 小山","ours":false,"pref":"栃木県","city":"小山市","model":"地方","road":true,"success":"成功","area":100,"rent":200000,"park":5,"p3":4993,"p10":42953,"p20":104176,"p30":217606,"p40":469476,"indep":0.091,"traf":null}];
+
+const NUM=n=>(n==null||isNaN(n))?"—":Number(n).toLocaleString("ja-JP");
+// 主ベンチマーク＝弊社・地方・路面・成功（＝商圏調査の判定基準6店）
+const isBench=s=>s.ours&&s.model==="地方"&&s.road&&s.success==="成功";
+
+let FILTER="all", SORT={key:"grp",dir:1};
+function passFilter(s){
+  if(FILTER==="ours") return s.ours;
+  if(FILTER==="comp") return !s.ours;
+  if(FILTER==="bench") return isBench(s);
+  if(FILTER==="成功"||FILTER==="失敗") return s.success===FILTER;
+  return true;
+}
+const SUCC={"成功":0,"普通":1,"失敗":2,null:3};
+function sortVal(s,k){
+  if(k==="grp") return (s.ours?0:1)*100 + (SUCC[s.success]??3);
+  if(k==="name") return s.name;
+  return s[k]==null?-Infinity:s[k];
+}
+function render(){
+  const rows=STORES.filter(passFilter).slice().sort((a,b)=>{
+    let x=sortVal(a,SORT.key), y=sortVal(b,SORT.key);
+    if(typeof x==="string") return x.localeCompare(y,"ja")*SORT.dir;
+    return (x<y?-1:x>y?1:0)*SORT.dir;
+  });
+  const COLS=[["name","店名",0],["success","成否",0],["model","モデル",0],["road","路面",0],
+    ["area","面積㎡",1],["rent","家賃",1],["park","駐車",1],
+    ["p3","3km",1],["p10","10km",1],["p20","20km",1],["p30","30km",1],["p40","40km",1],
+    ["indep","独立度",1],["traf","通行量",1]];
+  const head="<tr>"+COLS.map(([k,l])=>`<th data-k="${k}">${l}${SORT.key===k?(SORT.dir>0?" ▲":" ▼"):""}</th>`).join("")+"</tr>";
+  const body=rows.map(s=>{
+    const cls=(isBench(s)?"bench ":"")+(s.ours?"":"comp");
+    const tag=s.success?`<span class="tag t-${s.success}">${s.success}</span>`:`<span class="tag t-未">未</span>`;
+    return `<tr class="${cls}">
+      <td>${s.name}${tag}<div class="sub">${s.pref||""}${s.city||""}${!s.ours?" ・競合":""}</div></td>
+      <td>${s.success||"—"}</td><td>${s.model||"—"}</td><td>${s.road?"路面":"徒歩"}</td>
+      <td>${NUM(s.area)}</td><td>${NUM(s.rent)}</td><td>${NUM(s.park)}</td>
+      <td>${NUM(s.p3)}</td><td>${NUM(s.p10)}</td><td>${NUM(s.p20)}</td><td>${NUM(s.p30)}</td><td>${NUM(s.p40)}</td>
+      <td>${s.indep==null?"—":s.indep.toFixed(3)}</td><td>${NUM(s.traf)}</td></tr>`;
+  }).join("");
+  // 主ベンチのレンジ
+  const bench=STORES.filter(isBench);
+  const p10s=bench.map(b=>b.p10), trs=bench.map(b=>b.traf).filter(v=>v!=null), ins=bench.map(b=>b.indep);
+  const mm=a=>`${NUM(Math.min(...a))}〜${NUM(Math.max(...a))}`;
+  document.getElementById("main").innerHTML=`
+    <p class="lead">教師データ（弊社 SELFURUGI／NOTIME と競合）の商圏実数です。<b>金色の帯</b>＝商圏調査の判定基準になっている
+      主ベンチマーク（地方・路面・成功の6店）。列見出しをタップで並べ替え。人口は各距離帯の20-34歳の絶対数。</p>
+    <div class="chips">
+      ${[["all","全部"],["ours","弊社"],["comp","競合"],["bench","主ベンチ6店"],["成功","成功"],["失敗","失敗"]]
+        .map(([k,l])=>`<button class="chip ${FILTER===k?"on":""}" data-f="${k}">${l}</button>`).join("")}
+    </div>
+    <div class="rangebar">主ベンチ6店のレンジ　<b>10km20-34</b> ${mm(p10s)}　／　<b>独立度</b> ${Math.min(...ins).toFixed(3)}〜${Math.max(...ins).toFixed(3)}　／　<b>通行量</b> ${mm(trs)}</div>
+    <div class="wrap"><table><thead>${head}</thead><tbody>${body}</tbody></table></div>
+    <p class="sub" style="margin-top:8px">※ 成否は教師データの success_label（成功／普通／失敗／未設定）。競合（Syndi・ヒューマンイズデッド）は判定基準には使っていません。</p>`;
+  document.querySelectorAll(".chip").forEach(c=>c.onclick=()=>{FILTER=c.dataset.f;render();});
+  document.querySelectorAll("th[data-k]").forEach(t=>t.onclick=()=>{
+    const k=t.dataset.k; if(SORT.key===k)SORT.dir*=-1; else{SORT.key=k;SORT.dir=(k==="name"||k==="grp")?1:-1;} render();});
+}
+
+async function loadSupabase(){ if(window.supabase)return;
+  await new Promise((res,rej)=>{const s=document.createElement("script");
+    s.src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2";s.onload=res;s.onerror=()=>rej(new Error("ログイン部品を読み込めませんでした"));
+    document.head.appendChild(s);});}
+async function boot(){
+  try{
+    const cfg=await (await fetch(CONFIG_URL,{cache:"no-store"})).json();
+    await loadSupabase();
+    SB=window.supabase.createClient(cfg.url,cfg.anon,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,flowType:"pkce",storageKey:"notime-auth"}});
+    const {data:{session}}=await SB.auth.getSession();
+    if(!session){
+      document.getElementById("main").innerHTML='<div class="msg">既存店データを見るにはログインが必要です。<br><button class="loginbtn" id="lg">Googleでログイン</button></div>';
+      document.getElementById("lg").onclick=()=>SB.auth.signInWithOAuth({provider:"google",options:{redirectTo:location.origin+location.pathname,queryParams:{prompt:"select_account"}}});
+      return;
+    }
+    document.getElementById("logoutbtn").style.display="";
+    document.getElementById("logoutbtn").onclick=async()=>{try{await SB.auth.signOut();}catch(e){}location.reload();};
+    render();
+  }catch(e){ document.getElementById("main").innerHTML='<div class="msg">読み込みに失敗しました：'+String(e.message||e)+'</div>'; }
+}
+boot();
+</script>
+</body></html>
