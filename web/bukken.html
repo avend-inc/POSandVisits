@@ -100,7 +100,7 @@
   <h1>物件レビュー</h1>
   <a class="hbtn" href="shoken.html" title="商圏調査（教師データ照合）">商圏調査</a>
   <a class="hbtn" href="cities.html" title="自動収集の対象市区町村を登録">対象エリア</a>
-  <button class="hbtn" id="setbtn" style="display:none" title="検索条件の設定">⚙ 条件</button>
+  <button class="hbtn" id="setbtn" style="display:none" title="検索条件の設定">条件</button>
   <button class="hbtn" id="logoutbtn" style="display:none">ログアウト</button>
 
       <a class="navlink homebtn" href="../" title="アプリのトップへ">ホーム</a>
@@ -146,7 +146,7 @@
 "use strict";
 // POSandVisits ダッシュボードと同じ Supabase / 同じログイン(notime-auth)を共有する。
 const CONFIG_URL="https://qcdxhsrnlsgpntbiellh.supabase.co/storage/v1/object/public/dashboard/config.json";
-let SB=null, ME={email:""}, ROWS=[], FILTER="todo";
+let SB=null, ME={email:"",role:null}, ROWS=[], FILTER="todo";
 // 検索条件（面積・家賃・階数・駐車場のしきい値）。⚙設定で編集し bukken_criteria に保存する。
 // 収集(discover)・同期(sync)も同じ値を読むので、ここを変えると次回収集にも反映される。
 const CRIT_DEFAULT={area_min:25,area_max:50,rent_min:30000,rent_max:500000,floor_max:2,parking_min:0};
@@ -189,6 +189,8 @@ async function loadSupabase(){
 }
 function screen(html){document.getElementById("list").innerHTML=html;}
 
+function syncAdminTab(){const ad=!!(ME&&ME.role==="admin");const t=document.getElementById("tab-admin");if(t)t.style.display=ad?"":"none";const k=document.getElementById("tab-keiei");if(k)k.style.display=ad?"":"none";}
+
 async function boot(){
   try{
     const cfg=await (await fetch(CONFIG_URL,{cache:"no-store"})).json();
@@ -204,6 +206,14 @@ async function boot(){
       return;
     }
     ME.email=(session.user&&session.user.email||"").toLowerCase();
+    // 管理・経営タブは管理者だけに出す。他ページ（dashboard 等）と同じ判定にそろえる。
+    // ここで読まないと、このページからだけ管理タブに辿り着けない状態になる
+    try{
+      const {data:u}=await SB.from("users").select("role,is_active,segments").ilike("email",ME.email).maybeSingle();
+      ME.role=(u&&u.is_active&&(u.segments||[]).includes("sales"))
+        ? (u.role==="admin"?"admin":(u.role==="manager"?"editor":"viewer")) : null;
+    }catch(e){ ME.role=null; }
+    syncAdminTab();
     document.getElementById("logoutbtn").style.display="";
     document.getElementById("logoutbtn").onclick=async()=>{try{await SB.auth.signOut();}catch(e){}location.reload();};
     document.getElementById("setbtn").style.display="";
