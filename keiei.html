@@ -72,7 +72,7 @@
   <a href="promo.html">販促</a>
   <a href="ask.html">分析AI</a>
   <a href="keiei.html" id="tab-keiei" class="on">経営</a>
-  <a href="admin.html" id="tab-admin">管理</a>
+  <a href="admin.html" id="tab-admin" style="display:none">管理</a>
 </div></nav>
 <script src="landing.js"></script>
 <script>
@@ -80,6 +80,8 @@
 const NUM=n=>Math.round(n).toLocaleString("ja-JP");
 const CONFIG_URL="https://qcdxhsrnlsgpntbiellh.supabase.co/storage/v1/object/public/dashboard/config.json";
 let SB=null, DATA=null, ME={email:"",role:null}, TARGETS=null;
+// 管理タブは管理者だけに出す（他ページと同じ判定）
+function syncAdminTab(){const t=document.getElementById("tab-admin");if(t)t.style.display=(ME&&ME.role==="admin")?"":"none";}
 async function loadTargets(){ if(window.__TARGETS__){TARGETS=window.__TARGETS__;return;} try{TARGETS=await (await fetch("targets.json",{cache:"no-store"})).json();}catch(e){TARGETS=null;} }
 
 function screen(h){document.getElementById("app").innerHTML=h;}
@@ -158,7 +160,7 @@ async function ensureSupabase(){ if(window.supabase)return; await new Promise((r
   s.src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2";s.onload=res;s.onerror=()=>rej(new Error("ログイン部品を読み込めませんでした"));document.head.appendChild(s);}); }
 async function boot(){
   try{
-    if(window.__DATA__){DATA=window.__DATA__;prep();ME.role="admin";await loadTargets();renderKeiei();return;}
+    if(window.__DATA__){DATA=window.__DATA__;prep();ME.role="admin";syncAdminTab();await loadTargets();renderKeiei();return;}
     let cfg=null; try{cfg=await (await fetch(CONFIG_URL,{cache:"no-store"})).json();}catch(e){}
     if(!cfg||cfg.mode!=="auth"){ screen('<div class="gate"><div class="logo">経営レポート</div><div class="t">ログインが必要です</div><div class="m">この画面は管理者専用です。Googleログインの設定が完了すると利用できます。</div><div style="margin-top:14px"><a class="navlink" href="index.html">← ダッシュボードへ</a></div></div>'); return; }
     await ensureSupabase();
@@ -168,6 +170,7 @@ async function boot(){
     ME.email=(session.user&&session.user.email||"").toLowerCase();
     let role=null; try{const {data:u}=await SB.from("users").select("role,is_active,segments").ilike("email",ME.email).maybeSingle(); if(u&&u.is_active&&(u.segments||[]).includes("sales")) role=u.role==="admin"?"admin":(u.role==="manager"?"editor":"viewer");}catch(e){}
     ME.role=role;
+    syncAdminTab();
     if(ME.role!=="admin"){ showDenied(ME.role?("この画面は管理者専用です（あなたの権限："+({viewer:"閲覧",editor:"編集"}[ME.role]||ME.role)+"）"):"アクセス権がありません。管理者にユーザー追加を依頼してください。"); return; }
     const {data,error}=await SB.storage.from("dashboard-data").download("data.json");
     if(error)throw new Error("データを取得できませんでした（"+error.message+"）");
