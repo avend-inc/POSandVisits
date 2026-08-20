@@ -22,7 +22,8 @@ const path = require("path");
 const os = require("os");
 const { execFileSync } = require("child_process");
 
-const HTML = path.join(__dirname, "..", "web", "dashboard.html");
+const WEB = path.join(__dirname, "..", "web");
+const HTML = path.join(WEB, "dashboard.html");
 const src = fs.readFileSync(HTML, "utf8");
 
 const CHROME = ["/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell",
@@ -151,6 +152,13 @@ const page = src.replace("<script>",
   "d.id='smoke-errs';d.style.display='none';" +
   "d.textContent=(window.__ERRORS__||[]).map(x=>'__SMOKE_ERR__'+x+'__END__').join('');" +
   "document.body.appendChild(d);},1200));\n</script>\n<script>", 1);
+// dashboard.html は landing.js（着地見込みの唯一実装）を <script src> で読む。
+// 一時ディレクトリに置いただけだと 404 になり、着地見込みを触る所が全部
+// "NL is not defined" で落ちる。実物と同じ条件にするため、隣に置いてから開く。
+// （これが無いと店舗ページのチェックが常時 NG になり、本物の不具合が埋もれる）
+for (const asset of fs.readdirSync(WEB).filter((f) => f.endsWith(".js"))) {
+  fs.copyFileSync(path.join(WEB, asset), path.join(dir, asset));
+}
 const file = path.join(dir, "smoke.html");
 fs.writeFileSync(file, page);
 
