@@ -88,6 +88,24 @@ def _office_only(text: str) -> bool:
     return bool(_RE_OFFICE.search(t)) and not bool(_RE_RETAIL.search(t))
 
 
+# 貸地・売地・土地（建物が無い＝店舗として出せない）を弾く。
+#  ・種目/種別が土地系ならそれだけで確定（「物件種目：貸地」等）。
+#  ・貸地/売地/用地/更地 等の語があり、かつ建物のシグナル（所在階・建物面積・築年 等）が
+#    無いものは土地とみなす。「店舗用地」のように店舗の語を含んでも建物が無ければ土地。
+_RE_LAND = re.compile(r"貸地|売地|借地|更地|事業用地|店舗用地|商業用地|建築条件|定期借地")
+_RE_LAND_TYPE = re.compile(
+    r"(?:物件種目|建物種目|種目|種別|物件種別)[：:\s　]{0,4}(?:貸地|売地|土地|更地|事業用地)")
+_RE_HASBLDG = re.compile(r"\d+\s*階|所在階|建物面積|延床面積|築\s*\d|築年|建物種目|階建")
+
+
+def _land_only(text: str) -> bool:
+    """貸地・売地・土地（建物なし）で店舗として出せないと判断できるか。"""
+    t = text or ""
+    if _RE_LAND_TYPE.search(t):
+        return True
+    return bool(_RE_LAND.search(t)) and not bool(_RE_HASBLDG.search(t))
+
+
 _RE_ROAD = re.compile(r"路面|幹線|国道|バイパス|ロードサイド")
 _RE_HASSPEC = re.compile(r"坪|㎡|m2|平米|賃料|家賃|万円|駐車")
 # 物件“個別”詳細ページらしいリンク（§9.1：一覧URLは不可。個別のみ拾う）
@@ -264,6 +282,8 @@ def extract(html: str, source: str, city: str, base_url: str,
         seen.add(url)
         if _office_only(text):
             continue                # 事務所・オフィス専用は店舗として出せないので除外
+        if _land_only(text):
+            continue                # 貸地・売地・土地（建物なし）は店舗として出せないので除外
         # 面積(ラベル優先・単位必須)
         _a = _area(text)
         area_sqm, area_tsubo = _a if _a else (None, None)
@@ -325,8 +345,10 @@ def enrich(rec: dict) -> dict | None:
         if rtext:
             text = rtext          # 以降の抽出は描画後テキストで行う（家賃/駅等もより正確）
 
-    # 用途スクリーニング：事務所・オフィス専用（店舗として出せない）は除外
+    # 用途スクリーニング：事務所・オフィス専用／貸地・土地（店舗として出せない）は除外
     if _office_only(text):
+        return None
+    if _land_only(text):
         return None
     usage = _usage(text)
     if usage:
@@ -368,11 +390,12 @@ def _feed_screen_out(r: dict) -> bool:
     方針: 「条件に合致しないと判明している」物件は除外し、確認で変わりうるもの（面積・家賃不明など）だけ残す。
     - 面積・家賃・階数・駐車場が判明していて条件レンジ外 → 除外
     - 事務所・オフィス専用 → 除外
+    - 貸地・売地・土地（建物なし） → 除外
     """
     if criteria_mod.out_of_range(r, CRIT):
         return True
     hay = " ".join(str(r.get(k) or "") for k in ("usage", "name", "note"))
-    return _office_only(hay)
+    return _office_only(hay) or _land_only(hay)
 
 
 def sources() -> list[tuple[str, str, str]]:
