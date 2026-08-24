@@ -43,6 +43,7 @@ UA = f"notime-property-scout/0.1 (+{CONTACT})"
 REQUEST_GAP_SEC = 3.0          # §5.4 1リクエスト/3秒以上
 MAX_NEW_PER_RUN = 60           # 1回の総上限（暴走防止）
 PER_CITY = 8                   # 1市あたりの上限（1市で埋め尽くさず6市に散らす）
+PER_SOURCE_CITY = 3            # 1市×1ソースあたりの上限（goo等1サイトの独占を防ぎ地場も入れる）
 ENRICH_EXISTING = 50           # 既存の家賃/面積が欠けた行を1回あたり最大この数だけ詳細ページで読み直す
 PROP_COLS = ["id", "city", "name", "address", "area_tsubo", "area_sqm", "rent_yen",
              "parking", "floor", "station_name", "usage", "source", "detail_url",
@@ -399,10 +400,17 @@ def _feed_screen_out(r: dict) -> bool:
 
 
 def sources() -> list[tuple[str, str, str]]:
-    """(city, source_name, list_url)。semi(bot遮断)は除外。"""
+    """(city, source_name, list_url)。semi(bot遮断)は除外。
+
+    地場（EXTRA_LINKS）を全国ポータル(portal_links)より先に並べる。理由:
+    1市あたり PER_CITY 件で打ち切るため、先頭のソースが枠を埋めると後続は取得されない。
+    以前は portal_links が先頭で、特に goo が枠を食い尽くし地場サイトがほぼ巡回されず、
+    フィードが goo 一色になっていた（実測 91%）。地場を先に置き、さらに main() の
+    ソース別上限(PER_SOURCE_CITY)で1サイトの独占を防ぐことで、地場が確実に検索される。
+    """
     lst = []
     for city, m in linksheet.CITY_META.items():
-        for name, url, kind in linksheet.portal_links(m) + linksheet.EXTRA_LINKS.get(city, []):
+        for name, url, kind in linksheet.EXTRA_LINKS.get(city, []) + linksheet.portal_links(m):
             if kind == "semi":
                 continue
             lst.append((city, name, url))
@@ -440,6 +448,8 @@ def main() -> int:
         for r in recs:
             if per_city[city] >= PER_CITY:
                 break
+            if added >= PER_SOURCE_CITY:
+                break                      # 1ソースで市の枠を独占させない（goo対策）
             if r["id"] in known_ids or r["detail_url"] in known_urls:
                 continue
             known_ids.add(r["id"]); known_urls.add(r["detail_url"])
