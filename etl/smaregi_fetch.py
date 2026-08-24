@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import time
 
-from .browser import browser_page
+from .browser import browser_page, dump_page
 from .settings import EtlError, RETRIES, RETRY_WAIT_SEC
 
 LOGIN_URL = "https://www1.smaregi.jp/control/Main.html"
@@ -32,8 +32,20 @@ def login(page, user: str, password: str) -> None:
         page.get_by_placeholder("メールアドレス").first.fill(user, timeout=6000)
         page.get_by_placeholder("パスワード").first.fill(password, timeout=6000)
     except Exception:
-        page.locator('input[type="email"],input[type="text"]').first.fill(user, timeout=6000)
-        page.locator('input[type="password"]').first.fill(password, timeout=6000)
+        try:
+            page.locator('input[type="email"],input[type="text"]').first.fill(user, timeout=6000)
+            page.locator('input[type="password"]').first.fill(password, timeout=6000)
+        except Exception:
+            # 他のPOS連携（cashier/airregi等）と同じく、失敗した瞬間の画面を
+            # debug/ に残す。これまでは何も残らず「タイムアウトした」としか
+            # 分からなかった（2026-08-23発生時に原因を特定できなかった）。
+            dump_page(page, "smaregi_login_notfound")
+            raise EtlError(
+                "スマレジのログイン画面（メール/パスワード欄）が表示されませんでした。\n"
+                f"  今のURL: {page.url}\n"
+                "  → サイト側の作りが変わったか、表示が遅かった可能性があります。"
+                "debug/ に保存した画面を確認してください。"
+            )
     try:
         page.get_by_role("button", name="ログイン").first.click(timeout=8000)
     except Exception:
@@ -49,7 +61,11 @@ def login(page, user: str, password: str) -> None:
     except Exception:
         pass
     if "パスワード" in body and "ログアウト" not in body:
-        raise EtlError("スマレジのログインに失敗した可能性があります（メール/パスワードを確認）。")
+        dump_page(page, "smaregi_login_failed")
+        raise EtlError(
+            "スマレジのログインに失敗した可能性があります（メール/パスワードを確認）。"
+            "debug/ に保存した画面を確認してください。"
+        )
 
 
 def _call(context, method: str, params: dict):
