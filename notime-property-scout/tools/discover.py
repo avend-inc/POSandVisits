@@ -399,6 +399,34 @@ def _feed_screen_out(r: dict) -> bool:
     return _office_only(hay) or _land_only(hay)
 
 
+FEED_CAP_PER_SOURCE = 6        # feed全体で 1市×1ソース の上限（goo等の在庫独占を是正）
+
+
+def _cap_per_source(rows: list[dict], cap: int = FEED_CAP_PER_SOURCE) -> list[dict]:
+    """1市×1ソースあたり最大 cap 件に間引く（feed全体のバランス調整）。
+
+    goo等の大量在庫が feed を埋め尽くし、地場サイトが埋没するのを防ぐ。
+    残す優先度: 面積&家賃が判明 > 面積 or 家賃が判明 > 成功フラグ > その他。
+    元の並び順は保つ（同点は先着）。
+    """
+    from collections import defaultdict
+
+    def quality(r: dict) -> tuple:
+        has_area = r.get("area_tsubo") is not None
+        has_rent = r.get("rent_yen") is not None
+        return (has_area and has_rent, has_area, has_rent, bool(r.get("success_flag")))
+
+    # (city, source) ごとに quality 上位 cap 件のインデックスを選ぶ
+    groups: dict[tuple, list[int]] = defaultdict(list)
+    for i, r in enumerate(rows):
+        groups[(r.get("city"), r.get("source"))].append(i)
+    keep: set[int] = set()
+    for _, idxs in groups.items():
+        idxs_sorted = sorted(idxs, key=lambda i: (quality(rows[i]), -i), reverse=True)
+        keep.update(idxs_sorted[:cap])
+    return [r for i, r in enumerate(rows) if i in keep]
+
+
 def sources() -> list[tuple[str, str, str]]:
     """(city, source_name, list_url)。semi(bot遮断)は除外。
 
@@ -497,6 +525,11 @@ def main() -> int:
     all_rows = [r for r in all_rows if not _feed_screen_out(r)]
     if before != len(all_rows):
         print(f"feed最終スクリーニング除外 {before - len(all_rows)} 件（100坪超/事務所専用）")
+    # 1市×1ソースの上限で間引く（goo等の在庫独占を是正・地場を埋没させない）
+    before_cap = len(all_rows)
+    all_rows = _cap_per_source(all_rows)
+    if before_cap != len(all_rows):
+        print(f"ソース別上限({FEED_CAP_PER_SOURCE}件/市)で間引き {before_cap - len(all_rows)} 件")
     with FEED.open("w", encoding="utf-8") as f:
         for r in all_rows:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
