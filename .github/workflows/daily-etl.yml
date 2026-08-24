@@ -169,9 +169,14 @@ jobs:
           fi
 
       # 集計してダッシュボード(HTML+data.json)をSupabase Storageへ配信。
-      # 取り込みが成功した後、または dashboard 単独モードのときに動く。
+      # ETLの一部（レジ1台の不調など）が失敗しても、取り込めた分はここで必ず配信する。
+      # ・以前は if: success() だったため、best-effort扱いの接続が1つでも失敗すると
+      #   このステップ自体が skipped になり、他の店舗の分まで含めてダッシュボードが
+      #   丸ごと更新されずに止まっていた（「23日の情報が出ない」の原因）。
+      #   ETL側のログは「他の取り込み・ダッシュボードには影響しません」と言っているのに
+      #   ワークフロー側の条件がそれを反故にしていたのが実体。
       - name: ダッシュボードを更新
-        if: ${{ inputs.dashboard || success() }}
+        if: ${{ inputs.dashboard || !cancelled() }}
         run: python -m tools.export_dashboard
 
       # 失敗したときだけ、原因調査用のファイルを残す（7日で自動削除）
