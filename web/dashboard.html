@@ -127,6 +127,15 @@
   .igskel{height:96px;border-radius:10px;margin:10px 0 2px;
     background:repeating-linear-gradient(135deg,var(--surface2),var(--surface2) 10px,
       transparent 10px,transparent 20px);border:1px solid var(--border);}
+  /* Instagram：フォロワー属性の内訳バー */
+  .igdemo{margin:0 0 18px}
+  .igdemo:last-child{margin-bottom:0}
+  .igdemo h3{font-size:13px;font-weight:800;margin:0 0 8px}
+  .igbar{display:flex;align-items:center;gap:8px;margin-bottom:5px;font-size:12px}
+  .igbar-l{width:84px;flex:none;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .igbar-t{flex:1;height:8px;border-radius:4px;background:var(--surface2);overflow:hidden}
+  .igbar-t i{display:block;height:100%;background:var(--accent);border-radius:4px}
+  .igbar-v{width:44px;flex:none;text-align:right;font-weight:700;font-variant-numeric:tabular-nums}
   /* タブバーを出さないので、そのぶんの余白（88px）は要らない */
   .wrap.adsview{padding-bottom:28px;}
   .adsview .panel{
@@ -1385,36 +1394,218 @@ function mktHead(active){
       <a href="index.html?view=ig"${active==="ig"?' class="on"':""}>Instagram</a>
     </div>`;
 }
-// Instagram。取り込みの土台（sql/023）はあるが、まだ画面に出していない。
-// 何を並べるかは後から決めるので、いまは型だけ置いておく。
+// Instagram（オーガニック）。ig_accounts / ig_daily / ig_demographics を直接読む。
+//   広告（DATA.meta）とは違い、件数が少ないのでバッチのdata.jsonを経由せず
+//   画面から直接Supabaseに問い合わせる。
+//   期間・店舗の状態を広告タブ（state / AD_*）と共有すると、片方を動かすと
+//   もう片方の記憶が壊れるので、IG_* として完全に独立させている。
+let IG_LOADED=false, IG_LOADING=false, IG_ERR="", IG_PERIOD_INIT=false;
+let IG_ACCOUNTS=[], IG_DAILY=[], IG_DEMO=[], IG_ACCOUNT="", IG_FROM="", IG_TO="";
+const IG_METRICS=[
+  {k:"reach",name:"リーチ"},
+  {k:"profile_views",name:"プロフィール表示"},
+  {k:"website_clicks",name:"ウェブサイトのクリック"},
+  {k:"accounts_engaged",name:"エンゲージしたアカウント数"},
+  {k:"total_interactions",name:"反応数"},
+];
+const IG_COLOR={reach:"#2f6fed",profile_views:"#e0a52c",website_clicks:"#4caf7d",
+  accounts_engaged:"#b060d0",total_interactions:"#e05f5f"};
+const IG_DEMO_LABEL={age:"年齢",gender:"性別",city:"都市",country:"国"};
+
+// Insightsも広告と同じく前日までしか確定しないので、既定は「前日までの28日間」
+function igDefaultRange(){ const to=addDays(todayStr(),-1); return [addDays(to,-27),to]; }
+
+async function igLoad(){
+  if(IG_LOADING)return; IG_LOADING=true; IG_ERR="";
+  try{
+    if(!SB){ IG_ERR="ログイン情報が読み込めていないため、Instagramのデータを取得できません。"; return; }
+    const [acc,daily,demo]=await Promise.all([
+      SB.from("ig_accounts").select("ig_user_id,username,name,destination_id,active").eq("active",true),
+      SB.from("ig_daily").select("date,ig_user_id,reach,profile_views,website_clicks,accounts_engaged,total_interactions,followers_count,follows_count,media_count")
+        .gte("date",IG_FROM).lte("date",IG_TO),
+      SB.from("ig_demographics").select("date,ig_user_id,breakdown,key,value").gte("date",IG_FROM).lte("date",IG_TO),
+    ]);
+    if(acc.error)throw acc.error;
+    if(daily.error)throw daily.error;
+    if(demo.error)throw demo.error;
+    IG_ACCOUNTS=acc.data||[]; IG_DAILY=daily.data||[]; IG_DEMO=demo.data||[];
+  }catch(e){
+    console.warn("Instagramデータの取得に失敗しました",e);
+    IG_ERR="データの取得に失敗しました。時間をおいて読み込み直してください。";
+  }finally{ IG_LOADING=false; IG_LOADED=true; }
+}
+
+function igRows(){ return IG_DAILY.filter(r=>!IG_ACCOUNT||r.ig_user_id===IG_ACCOUNT); }
+function igDemoRows(){ return IG_DEMO.filter(r=>!IG_ACCOUNT||r.ig_user_id===IG_ACCOUNT); }
+
+// アカウントを選ばず「すべて」のときは日付ごとに全アカウント分を合算する。
+// フォロワー数等もスナップショットだが、店舗の垣根なく「会社全体でいま何人か」を見たいので合算でよい。
+function igByDate(rows){
+  const m=new Map();
+  for(const r of rows){
+    let a=m.get(r.date);
+    if(!a){a={date:r.date,reach:0,profile_views:0,website_clicks:0,accounts_engaged:0,total_interactions:0,
+      followers_count:null,follows_count:null,media_count:null}; m.set(r.date,a);}
+    for(const k of ["reach","profile_views","website_clicks","accounts_engaged","total_interactions"])
+      if(r[k]!=null)a[k]+=r[k];
+    for(const k of ["followers_count","follows_count","media_count"])
+      if(r[k]!=null)a[k]=(a[k]||0)+r[k];
+  }
+  return m;
+}
+
+function igAccountOptions(){
+  return IG_ACCOUNTS.map(a=>`<option value="${esc(a.ig_user_id)}"${IG_ACCOUNT===a.ig_user_id?" selected":""}>`+
+    `@${esc(a.username||a.ig_user_id)}</option>`).join("");
+}
+
+function igCardsHtml(rows,days){
+  const byDate=igByDate(rows);
+  const inRange=days.filter(d=>byDate.has(d));
+  const withF=inRange.filter(d=>byDate.get(d).followers_count!=null);
+  const lastF=withF.length?byDate.get(withF[withF.length-1]).followers_count:null;
+  const firstF=withF.length?byDate.get(withF[0]).followers_count:null;
+  const delta=(lastF!=null&&firstF!=null)?lastF-firstF:null;
+  const sum=k=>inRange.reduce((a,d)=>a+(byDate.get(d)[k]||0),0);
+  const dot=c=>`<i style="width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:4px;background:${c}"></i>`;
+  return [
+    `<div class="card"><div class="k">フォロワー数</div>`+
+      `<div class="val">${lastF!=null?NUM(lastF):"—"}</div>`+
+      `<div class="knote">${delta!=null?(delta>=0?"+":"")+NUM(delta)+"（期間中）":"データ不足"}</div></div>`,
+    ...IG_METRICS.map(m=>`<div class="card"><div class="k">${dot(IG_COLOR[m.k])}${m.name}</div>`+
+      `<div class="val">${inRange.length?NUM(sum(m.k)):"—"}</div>`+
+      `<div class="knote">期間合計</div></div>`),
+  ].join("");
+}
+
+// 広告タブの adChart と同じ考え方（項目ごとに最小〜最大で正規化、1・2番目だけ軸を出す）を
+// Instagram用に自己完結させたもの。AD_* の状態には触れない。
+function igChart(days,byDate,cols){
+  if(!days.length)return `<p class="note">この期間のデータがありません。</p>`;
+  const NARROW=(window.innerWidth||760)<560;
+  const W=NARROW?380:760, H=NARROW?190:230, L=NARROW?40:54, R=NARROW?40:54, T=NARROW?8:12, B=NARROW?22:26;
+  const FS=NARROW?8:9;
+  const x=i=>days.length<2?(L+(W-R))/2:L+i*(W-L-R)/(days.length-1);
+  const series=cols.map(k=>{
+    const m=IG_METRICS.find(z=>z.k===k);
+    const vals=days.map(d=>{const a=byDate.get(d); return a?a[k]:null;});
+    const fin=vals.filter(v=>v!=null&&isFinite(v));
+    if(!fin.length)return null;
+    const max=Math.max(...fin), min=Math.min(...fin), span=(max-min)||Math.abs(max)||1;
+    const y=v=>H-B-((v-min)/span)*(H-B-T);
+    let d="",pen=false;
+    vals.forEach((v,i)=>{ if(v==null||!isFinite(v)){pen=false;return;}
+      d+=(pen?" L":" M")+x(i).toFixed(1)+" "+y(v).toFixed(1); pen=true; });
+    return {k,m,vals,min,max,y,d:d.trim(),c:IG_COLOR[k]||"var(--accent)"};
+  }).filter(Boolean);
+  if(!series.length)return `<p class="note">グラフに出す項目がありません。</p>`;
+  const dot=days.length>45?1.7:2.6;
+  const step=Math.max(1,Math.ceil(days.length/(NARROW?5:8)));
+  const fmtX=d=>`${+d.slice(5,7)}/${+d.slice(8,10)}`;
+  const axis=(s2,side)=>{ if(!s2)return "";
+    const at=side==="L"?L-6:W-R+6, an=side==="L"?"end":"start";
+    return [0,.5,1].map(f=>{ const v=s2.min+(s2.max-s2.min)*f, yy=s2.y(v);
+      return `<text x="${at}" y="${(yy+3).toFixed(1)}" font-size="${FS}" fill="${s2.c}" text-anchor="${an}">${esc(igShort(v))}</text>`;
+    }).join("");
+  };
+  return `<div class="adlegend">`+series.map((s2,i)=>
+      `<span>${`<i style="background:${s2.c}"></i>`}${s2.m.name}${i<2?`<em>${i?"右軸":"左軸"}</em>`:""}`+
+      `<small>${NUM(s2.min)}〜${NUM(s2.max)}</small></span>`).join("")+`</div>
+    <div class="adwrap"><svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;display:block">
+      ${axis(series[0],"L")}${axis(series[1],"R")}
+      ${days.map((d,i)=>i%step?"":`<text x="${x(i).toFixed(1)}" y="${H-7}" font-size="${FS}" fill="var(--muted)" text-anchor="middle">${esc(fmtX(d))}</text>`).join("")}
+      ${series.map(s2=>`<path d="${s2.d}" fill="none" stroke="${s2.c}" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round"/>`).join("")}
+      ${series.map(s2=>days.map((dd,i)=>{const v=s2.vals[i];
+        return (v==null||!isFinite(v))?"":`<circle cx="${x(i).toFixed(1)}" cy="${s2.y(v).toFixed(1)}" r="${dot}" fill="${s2.c}"/>`;}).join("")).join("")}
+    </svg></div>`;
+}
+function igShort(v){ if(v==null||!isFinite(v))return "—"; const a=Math.abs(v);
+  if(a>=10000)return Math.round(v/1000)+"千"; if(a>=1000)return NUM(Math.round(v)); return String(Math.round(v)); }
+
+function igDemoHtml(){
+  const rows=igDemoRows();
+  if(!rows.length)return `<p class="note">属性データがありません（フォロワー100人未満のアカウントは仕様上取得できません）。</p>`;
+  const latest=rows.reduce((a,r)=>r.date>a?r.date:a,"");
+  const atDate=rows.filter(r=>r.date===latest);
+  return Object.keys(IG_DEMO_LABEL).map(bd=>{
+    const items=atDate.filter(r=>r.breakdown===bd);
+    if(!items.length)return "";
+    const tot=items.reduce((a,r)=>a+(+r.value||0),0)||1;
+    const sorted=[...items].sort((a,b)=>(+b.value||0)-(+a.value||0)).slice(0,8);
+    return `<div class="igdemo"><h3>${IG_DEMO_LABEL[bd]}</h3>`+
+      sorted.map(r=>{const pct=(+r.value||0)/tot*100;
+        return `<div class="igbar"><span class="igbar-l">${esc(r.key)}</span>`+
+               `<span class="igbar-t"><i style="width:${pct.toFixed(1)}%"></i></span>`+
+               `<span class="igbar-v">${NUM(+r.value||0)}</span></div>`;
+      }).join("")+`</div>`;
+  }).join("");
+}
+
 function renderIg(){
   document.getElementById("app").classList.add("adsview");
   {const tb=document.querySelector(".tabbar"); if(tb)tb.style.display="none";}
+  syncAdminTab();
+  if(!IG_PERIOD_INIT){ [IG_FROM,IG_TO]=igDefaultRange(); IG_PERIOD_INIT=true; }
   document.getElementById("app").innerHTML=mktHead("ig")+`
     <div class="panel">
-      <h2 data-en="Followers">フォロワー</h2>
-      <p class="note">日々のフォロワー数と、その増減。</p>
-      <div class="igskel"></div>
+      <h2 data-en="Filter">条件</h2>
+      <div class="adperiod">
+        <button class="chip igperiod" data-d="7">過去7日</button>
+        <button class="chip igperiod" data-d="28">過去28日</button>
+        <button class="chip igperiod" data-d="90">過去90日</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+        <input type="date" id="igfrom" value="${IG_FROM}">
+        <span class="sub">〜</span>
+        <input type="date" id="igto" value="${IG_TO}">
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+        <span class="sub" style="font-weight:700">アカウント</span>
+        <select id="igaccount" style="max-width:220px">
+          <option value="">すべて</option>
+          ${igAccountOptions()}
+        </select>
+      </div>
+      <div class="dtop" id="igcards"><p class="note">読み込み中…</p></div>
     </div>
     <div class="panel">
-      <h2 data-en="Reach">リーチ・プロフィール表示</h2>
-      <p class="note">投稿がどれだけ届いて、どれだけプロフィールを見られたか。</p>
-      <div class="igskel"></div>
+      <h2 data-en="Daily">日別の推移<span class="sub" style="font-weight:500">（リーチ・プロフィール表示）</span></h2>
+      <div id="igtrend"><p class="note">読み込み中…</p></div>
     </div>
     <div class="panel">
-      <h2 data-en="Audience">フォロワーの属性</h2>
-      <p class="note">年齢・性別・地域。</p>
-      <div class="igskel"></div>
+      <h2 data-en="Audience">フォロワーの属性<span class="sub" style="font-weight:500">（直近の取得日）</span></h2>
+      <div id="igdemo"><p class="note">読み込み中…</p></div>
     </div>
-    <p class="note" style="margin-top:18px">
-      <b>この画面はまだ枠だけです。</b>
-      ためる側（<code>ig_accounts</code>・フォロワーの日次・インサイト・属性）は
-      用意してありますが、画面に出す中身はこれから決めます。
-      ${adMore("", `フォロワー数は Instagram の API で過去に遡れないため、毎日1回ずつ貯めています。`+
-        `店舗との紐付けは広告と同じ持ち方（destination_id）なので、`+
-        `広告費とフォロワーの増減を店舗単位で並べられます。`)}
-    </p>`;
+    <p class="note" style="margin-top:18px" id="ignote"></p>`;
   wireCommon();
+  const on=(id,ev,fn)=>{const el=document.getElementById(id); if(el)el[ev]=fn;};
+  on("igfrom","onchange",e=>{IG_FROM=e.target.value||IG_FROM; if(IG_FROM>IG_TO)IG_TO=IG_FROM; igReload();});
+  on("igto","onchange",e=>{IG_TO=e.target.value||IG_TO; if(IG_TO<IG_FROM)IG_FROM=IG_TO; igReload();});
+  on("igaccount","onchange",e=>{IG_ACCOUNT=e.target.value; drawIg();});
+  document.querySelectorAll(".igperiod").forEach(b=>b.onclick=()=>{
+    const n=+b.dataset.d; IG_TO=addDays(todayStr(),-1); IG_FROM=addDays(IG_TO,-(n-1));
+    const f=document.getElementById("igfrom"), t=document.getElementById("igto");
+    if(f)f.value=IG_FROM; if(t)t.value=IG_TO;
+    igReload();
+  });
+  igReload();
+}
+async function igReload(){ await igLoad(); drawIg(); }
+function drawIg(){
+  const days=[]; for(let d=IG_FROM; d<=IG_TO; d=addDays(d,1))days.push(d);
+  const rows=igRows();
+  const cardsEl=document.getElementById("igcards");
+  if(cardsEl)cardsEl.innerHTML=IG_ERR?`<p class="note">${esc(IG_ERR)}</p>`:igCardsHtml(rows,days);
+  const trendEl=document.getElementById("igtrend");
+  if(trendEl)trendEl.innerHTML=(!IG_ERR&&rows.length)?igChart(days,igByDate(rows),["reach","profile_views"]):
+    `<p class="note">${esc(IG_ERR||"この期間のInstagramデータがありません。")}</p>`;
+  const demoEl=document.getElementById("igdemo");
+  if(demoEl)demoEl.innerHTML=IG_ERR?"":igDemoHtml();
+  const note=document.getElementById("ignote");
+  if(note)note.innerHTML=IG_ACCOUNTS.length?
+    `フォロー数・プロフィールアクセス数は Instagram の API で過去に遡れないため、毎日1回ずつ貯めています。`+
+    `店舗との紐付けは広告と同じ持ち方（<code>destination_id</code>）です。`:
+    (IG_ERR?"":`<b>まだInstagramアカウントが登録されていません。</b> Meta側の連携が完了すると、翌日以降に自動で表示されます。`);
 }
 function renderAds(){
   // トップページと同じ見た目にする範囲を、この画面だけに閉じるための印。
