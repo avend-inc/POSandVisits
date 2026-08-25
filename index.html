@@ -213,6 +213,10 @@
   .kmat tr.land td{color:var(--accent);font-weight:800}
   .kmat tr.prow td{font-weight:800;background:color-mix(in srgb,var(--accent) 8%,transparent)}
   .stbtn{background:none;border:none;color:var(--accent);font-weight:800;text-decoration:underline;cursor:pointer;padding:0;font:inherit}
+  .tgtbtn{background:none;border:none;color:var(--accent);font-weight:700;cursor:pointer;padding:0;font:inherit;text-decoration:underline}
+  .tgtbtn.add{text-decoration:none;border:1px dashed var(--accent);border-radius:7px;padding:1px 7px;font-size:11.5px;font-weight:700}
+  .landbtn{background:none;border:none;cursor:pointer;font-size:12px;line-height:1;opacity:.6;padding:0 0 0 4px}
+  .landbtn:hover{opacity:1}
   .pchip.on,.gchip.on,.hchip.on,.achip.on{background:var(--accent);border-color:var(--accent);color:#fff}
   .dd summary{list-style:none;display:flex;justify-content:space-between;align-items:center;border:1px solid var(--border);border-radius:10px;padding:11px 13px;background:var(--surface);font-weight:700;cursor:pointer;margin-top:4px}
   .dd summary::-webkit-details-marker{display:none}
@@ -5101,43 +5105,150 @@ function drawStoreKpiDetail(el){
 //   0 と出すと「本当に0だった」と読めてしまう。来店を計測していない店の
 //   購入率が 0.0% と並ぶと、売上があるのに買われていないように見える。
 function kpiCell(k,v){ return v==null?"—":M(k).fmt(v); }
+// ===== ③店舗別KPIの「目標売上（税抜・当月）」まとめ読み =====
+//  直営＝経営の事業計画(bizplan)から自動。FC＝各店の手入力(plan_data page="pl" の b_ex／予実タブと共有)。
+//  優先順位は単店カード(loadBudget)と同じ：① 事業計画 ② 予実タブ/手入力(pl) ③ 配信ファイル(targets.json)。
+//  当月ぶんを一度だけまとめて読み、KPI_TGT にキャッシュ（読めたら表を描き直す）。
+let KPI_TGT={ym:null,map:{}}, _kpiTgtLoading=null;
+async function loadKpiTargets(ym){
+  const ids=usableStores().map(s=>s.id);
+  const map={}; ids.forEach(id=>{map[id]={ex:null,src:null};});
+  if(SB){
+    try{                                   // ① 事業計画（直営の正）：1回のRPCで当月・全店
+      const {data,error}=await SB.rpc("bizplan_store_sales",{p_ym:ym});
+      if(!error) for(const id of ids){
+        const nm=(storeMeta(id)||{}).name||"";
+        for(const r of (data||[])){
+          const key=((r&&r.pos_store_name)||"").trim(), v=Number(r&&r.amount);
+          if(key&&nm.indexOf(key)>=0&&Number.isFinite(v)){ map[id]={ex:v,src:"事業計画"}; break; }
+        }
+      }
+    }catch(e){}
+    try{                                   // ② 予実タブ/この表の手入力（plan_data page="pl" の b_ex）＝主にFC
+      const {data}=await SB.from("plan_data").select("scope,data").eq("page","pl").eq("ym",ym);
+      const byScope={}; (data||[]).forEach(r=>{byScope[String(r.scope)]=r.data||{};});
+      for(const id of ids){ if(map[id].ex!=null)continue; const v=byScope[String(id)]&&byScope[String(id)].b_ex; if(Number.isFinite(v))map[id]={ex:v,src:"予実タブ"}; }
+    }catch(e){}
+  }
+  await loadTargets();                     // ③ 配信ファイル（targets.json）
+  for(const id of ids){ if(map[id].ex!=null)continue; const v=planEx(id,ym); if(v!=null)map[id]={ex:v,src:"ファイル"}; }
+  KPI_TGT={ym,map};
+}
+function ensureKpiTargets(ym){
+  if(KPI_TGT.ym===ym)return true;
+  if(_kpiTgtLoading!==ym){ _kpiTgtLoading=ym;
+    loadKpiTargets(ym).then(()=>{ _kpiTgtLoading=null; if(state.sel&&!state.detail)drawStoreKpi(); })
+                      .catch(()=>{ _kpiTgtLoading=null; }); }
+  return false;
+}
+function kpiTgtOf(id){ return (KPI_TGT.map&&KPI_TGT.map[id])||{ex:null,src:null}; }
+function sumTargets(ids){ let s=0,any=false; for(const id of ids){const t=kpiTgtOf(id); if(t.ex!=null){s+=t.ex;any=true;}} return any?s:null; }
+// 目標売上の手入力ポップアップ（③の表から。FC＝目標が無い店の入力用。既存の予実予算 b_ex と共有）。
+async function openTargetModal(id,ym){
+  if(!SB){alert("この画面ではログインが必要です。");return;}
+  const nm=(storeMeta(id)||{}).name||("店舗"+id);
+  const cur=kpiTgtOf(id), cur0=(cur.ex!=null)?Math.round(cur.ex):"";
+  const ov=document.createElement("div"); ov.setAttribute("role","dialog");
+  ov.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:9999;";
+  const box=document.createElement("div");
+  box.style.cssText="background:var(--surface,#fff);color:var(--ink,#1a1d21);border:1px solid var(--border,#e2e6ea);border-radius:12px;padding:22px 24px;min-width:320px;max-width:92vw;box-shadow:0 12px 44px rgba(0,0,0,.35);";
+  const inS="width:180px;padding:7px 10px;font-size:14px;border:1px solid var(--border,#ccc);border-radius:8px;background:var(--surface,#fff);color:var(--ink,#111);text-align:right";
+  box.innerHTML=
+    '<div style="font-size:16px;font-weight:700;margin-bottom:4px">🎯 目標売上の設定</div>'+
+    '<div style="font-size:13px;color:var(--muted,#8a929b);margin-bottom:14px"><b>'+esc(nm)+'</b> ／ '+(+ym.slice(5,7))+'月の<b>目標売上（税抜）</b>を入力します。保存すると予実タブと共有され、達成見込み（着地÷目標）に使われます。</div>'+
+    '<label style="display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:13px;font-weight:600">目標売上（税抜・当月）<input type="number" min="0" step="10000" id="tg-ex" value="'+cur0+'" style="'+inS+'"></label>'+
+    '<div style="margin-top:18px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">'+
+      '<button id="tg-clear" class="themebtn" title="目標を消す">クリア</button>'+
+      '<button id="tg-cancel" class="themebtn">閉じる</button>'+
+      '<button id="tg-save" class="themebtn" style="background:var(--accent,#2f6fd0);color:#fff;border-color:var(--accent,#2f6fd0)">保存</button>'+
+    '</div>';
+  ov.appendChild(box); document.body.appendChild(ov);
+  const close=()=>{ if(ov.parentNode)document.body.removeChild(ov); document.removeEventListener("keydown",onKey); };
+  const onKey=e=>{ if(e.key==="Escape")close(); };
+  box.querySelector("#tg-cancel").onclick=close;
+  ov.addEventListener("click",e=>{ if(e.target===ov)close(); });
+  document.addEventListener("keydown",onKey);
+  // 既存の plan_data(page="pl") を読み直し、b_ex だけ差し替えて保存（b_v 等を壊さない）。
+  async function saveEx(exVal){
+    let data={};
+    try{ const {data:row}=await SB.from("plan_data").select("data").eq("page","pl").eq("scope",String(id)).eq("ym",ym).maybeSingle(); if(row&&row.data)data=row.data; }catch(e){}
+    if(exVal==null) delete data.b_ex; else data.b_ex=exVal;
+    await SB.from("plan_data").upsert({page:"pl",scope:String(id),ym,data,updated_at:new Date().toISOString(),updated_by:ME.email},{onConflict:"page,scope,ym"});
+  }
+  box.querySelector("#tg-save").onclick=async()=>{
+    const ex=Math.round(Number(box.querySelector("#tg-ex").value));
+    if(!Number.isFinite(ex)||ex<0){alert("目標売上（0以上の数値）を入力してください。");return;}
+    const btn=box.querySelector("#tg-save"); btn.disabled=true; btn.textContent="保存中…";
+    try{ await saveEx(ex); KPI_TGT={ym:null,map:{}}; close(); refresh(); }
+    catch(e){ alert("保存に失敗しました："+(e&&e.message||e)); btn.disabled=false; btn.textContent="保存"; }
+  };
+  box.querySelector("#tg-clear").onclick=async()=>{
+    const btn=box.querySelector("#tg-clear"); btn.disabled=true; btn.textContent="消去中…";
+    try{ await saveEx(null); KPI_TGT={ym:null,map:{}}; close(); refresh(); }
+    catch(e){ alert("消去に失敗しました："+(e&&e.message||e)); btn.disabled=false; btn.textContent="クリア"; }
+  };
+}
+
 // ③ 店舗別KPI（選択店舗を売上降順・合計を先頭／平均を末尾・店名ボタンで単店へ）
-//  着地見込み列＝税抜売上の隣。直営・FC共通の着地見込み定義(landingForIds:
-//    ①当月経過実績＋②平日直近10日平均×残平日＋③土日祝直近10日平均×残土日祝)。
-//  当月を選んでいるときだけ算出（他期間は「対象外」、平均行は着地見込みになじまないので「—」）。
+//  税抜売上の左隣に「目標売上（税抜）」「着地見込み」を追加（いずれも当月のみ、他期間は「対象外」）。
+//   ・目標売上：直営＝事業計画から自動表示／FC＝未入力は「＋目標を入力」ボタン→手入力(予実と共有)。
+//   ・着地見込み：直営・FC共通の定義(landingForIds＝手入力優先・無ければ自動)。⚙で手入力ポップアップ。
+//  編集ボタン（目標入力・着地修正）は admin/editor のときだけ出す（canEditFc）。
 function drawStoreKpi(){
   const el=document.getElementById("storekpi"); if(!el)return;
   if(state.detail){ drawStoreKpiDetail(el); return; }
   const ym=(DATA._salesMax||DATA._max).slice(0,7);
-  const showLand=isMonthPeriod()&&state.from.slice(0,7)===ym;   // 着地見込みは当月のみ
-  const landCell=ids=>showLand?`<td>${YEN(landingForIds(ids,ym)||0)}円</td>`:`<td>対象外</td>`;
-  // KPI各セル。i===0（税抜売上）の直後に着地見込み列を差し込む。
-  const kcells=(p,landIds)=>KPI2_COLS.map((k,i)=>{const c=`<td>${kpiCell(k,M(k).calc(p))}</td>`;return i===0?c+landCell(landIds):c;}).join("");
+  const showLand=isMonthPeriod()&&state.from.slice(0,7)===ym;   // 目標売上・着地見込みは当月のみ
+  const canEdit=canEditFc();                                    // 目標入力・着地修正ボタンは admin/editor のみ
+  const tgtReady=showLand?ensureKpiTargets(ym):true;            // 目標売上（当月）をまとめ読み
+  // 目標売上セル：値があれば表示（手入力ソースは押して再編集）。無ければ「＋目標を入力」（編集権限時）。
+  function tgtCell(id){
+    if(!showLand)return `<td>対象外</td>`;
+    if(!tgtReady)return `<td class="sub">…</td>`;
+    const t=kpiTgtOf(id), auto=(t.src==="事業計画"||t.src==="ファイル");
+    if(t.ex!=null){
+      return (canEdit&&!auto)
+        ? `<td><button class="tgtbtn" data-sid="${id}" title="目標売上を修正">${YEN(Math.round(t.ex))}円</button></td>`
+        : `<td>${YEN(Math.round(t.ex))}円</td>`;
+    }
+    return canEdit ? `<td><button class="tgtbtn add" data-sid="${id}">＋目標を入力</button></td>` : `<td>—</td>`;
+  }
+  // 着地見込みセル：共通定義（手入力優先・無ければ自動）。⚙で手入力ポップアップ（編集権限時）。
+  function landCell(id){
+    if(!showLand)return `<td>対象外</td>`;
+    const v=landingForIds(new Set([id]),ym), val=(v==null)?"—":YEN(Math.round(v))+"円";
+    return canEdit ? `<td>${val} <button class="landbtn" data-sid="${id}" title="着地見込みを修正">⚙</button></td>` : `<td>${val}</td>`;
+  }
+  const kcells=(id,p)=>tgtCell(id)+landCell(id)+KPI2_COLS.map(k=>`<td>${kpiCell(k,M(k).calc(p))}</td>`).join("");
   const rows=[...state.sel].map(id=>{const p=sumRows(rowsIn(state.from,state.to,id));const s=storeMeta(id);
     p._id=id; p._name=(s&&s.name)||String(id); return p;});
   rows.sort((a,b)=>(M("ex").calc(b)||0)-(M("ex").calc(a)||0));
   const rl=document.getElementById("kpi-range"); if(rl)rl.textContent=mdLabel(state.from,state.to);   // ⑤ 店舗詳細のタイトル「KPI（m/d〜m/d）」
-  // 見出し：店舗｜税抜売上｜着地見込み｜来店客数｜…
-  const hdr=KPI2_COLS.map((k,i)=>{const th=`<th>${kpiLabel(k)}</th>`;
-    return i===0?th+`<th>着地見込み<br><span class="sub" style="font-weight:500">当月・税抜</span></th>`:th;}).join("");
+  // 見出し：店舗｜目標売上｜着地見込み｜税抜売上｜来店客数｜…
+  const hdr=`<th>目標売上<br><span class="sub" style="font-weight:500">当月・税抜</span></th>`+
+            `<th>着地見込み<br><span class="sub" style="font-weight:500">当月・税抜</span></th>`+
+            KPI2_COLS.map(k=>`<th>${kpiLabel(k)}</th>`).join("");
   let h=`<thead><tr><th>店舗</th>${hdr}</tr></thead><tbody>`;
   if(rows.length){
-    // 合計を一番上に（着地見込みは選択店をまとめた共通定義）
+    // 合計を一番上に（目標＝各店の合計、着地＝選択店をまとめた共通定義）
     const tot=sumRows(rowsIn(state.from,state.to,"__sel__"));
-    h+=`<tr class="prow"><td>合計</td>${kcells(tot,new Set([...state.sel]))}</tr>`;
+    const totTgt=!showLand?`<td>対象外</td>`:(!tgtReady?`<td class="sub">…</td>`:(()=>{const s=sumTargets([...state.sel]);return `<td>${s!=null?YEN(Math.round(s))+"円":"—"}</td>`;})());
+    const totLand=!showLand?`<td>対象外</td>`:(()=>{const v=landingForIds(new Set([...state.sel]),ym);return `<td>${v==null?"—":YEN(Math.round(v))+"円"}</td>`;})();
+    h+=`<tr class="prow"><td>合計</td>${totTgt}${totLand}${KPI2_COLS.map(k=>`<td>${kpiCell(k,M(k).calc(tot))}</td>`).join("")}</tr>`;
     for(const p of rows){
-      h+=`<tr><td><button class="stbtn" data-sid="${p._id}">${esc(p._name)}</button></td>${kcells(p,new Set([p._id]))}</tr>`;
+      h+=`<tr><td><button class="stbtn" data-sid="${p._id}">${esc(p._name)}</button></td>${kcells(p._id,p)}</tr>`;
     }
-    // 平均は末尾。着地見込みは平均になじまないので「—」。
-    const avgCells=KPI2_COLS.map((k,i)=>{
+    // 平均は末尾。目標・着地は月次の合計値のため平均行では「—」。
+    const avgCells=`<td>—</td><td>—</td>`+KPI2_COLS.map(k=>{
       const vs=rows.map(p=>M(k).calc(p)).filter(v=>v!=null);
       const av=vs.length?vs.reduce((s,v)=>s+v,0)/vs.length:null;
-      const c=`<td>${kpiCell(k,av)}</td>`;
-      return i===0?c+`<td>—</td>`:c;}).join("");
+      return `<td>${kpiCell(k,av)}</td>`;}).join("");
     h+=`<tr class="prow"><td>平均</td>${avgCells}</tr>`;
-  }else{ h+=`<tr><td colspan="${KPI2_COLS.length+2}" class="sub">店舗が選択されていません</td></tr>`; }
+  }else{ h+=`<tr><td colspan="${KPI2_COLS.length+3}" class="sub">店舗が選択されていません</td></tr>`; }
   el.innerHTML=h+`</tbody>`;
   el.querySelectorAll(".stbtn").forEach(b=>b.onclick=()=>{location.href="index.html?g="+GROUP+"&store="+b.dataset.sid;});
+  el.querySelectorAll(".landbtn").forEach(b=>b.onclick=()=>openFcModal(+b.dataset.sid,ym));
+  el.querySelectorAll(".tgtbtn").forEach(b=>b.onclick=()=>openTargetModal(+b.dataset.sid,ym));
 }
 
 // ⑤ 売上推移（縦=選択店舗／横=期間。日/週/月/全期間、◀▶で移動。既定=日）
