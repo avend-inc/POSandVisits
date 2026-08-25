@@ -4476,7 +4476,7 @@ function adBuyLine(weekly){
 // Edge Function "ask"（分析AI）を呼ぶ。まず直接 fetch し、だめなら supabase-js 経由で再試行する。
 // 直接 fetch にすることで、失敗時に HTTP ステータスと本文が読めて原因が分かる。
 async function callAsk(question,digest){
-  const body=JSON.stringify({question,digest,history:[]});
+  const body=JSON.stringify({question,digest});
   let firstErr=null;
   if(SUPA.url){
     try{
@@ -4498,7 +4498,7 @@ async function callAsk(question,digest){
   }
   // 予備：supabase-js の invoke（直接fetchが通らない環境向け）
   try{
-    const {data,error}=await SB.functions.invoke("ask",{body:{question,digest,history:[]}});
+    const {data,error}=await SB.functions.invoke("ask",{body:{question,digest}});
     if(error)throw error;
     if(data&&data.error)throw new Error(data.error);
     if(data&&data.answer)return data.answer;

@@ -324,7 +324,9 @@ async function send(){
   if(!q){t.focus();return;}
   BUSY=true;
   const btn=document.getElementById("send"); if(btn){btn.disabled=true;btn.textContent="送信中…";}
-  const history=CUR.messages.map(m=>({role:m.role,content:m.content}));
+  // これまでのやり取りはサーバー側が ai_conversations から読む（クライアントは送らない）。
+  // 新規スレッドの初回はまだ保存されていない＝履歴なしになる、で正しい。
+  const threadId=CUR._new?null:CUR.id;
   CUR.messages.push({role:"user",content:q,by:ME.email,at:nowIso()});
   if(!CUR.title)CUR.title=q.slice(0,42);
   // 描画（ユーザー発言＋考え中）
@@ -334,7 +336,7 @@ async function send(){
   t.value=""; window.scrollTo(0,document.body.scrollHeight);
   let answer=null, errMsg=null, newTitle=null;
   try{
-    const {data,error}=await SB.functions.invoke("ask",{body:{question:q,digest:buildDigest(),history}});
+    const {data,error}=await SB.functions.invoke("ask",{body:{question:q,digest:buildDigest(),thread_id:threadId}});
     if(error){ errMsg=error.message||String(error); try{const ctx=error.context&&await error.context.json();if(ctx&&ctx.error)errMsg=ctx.error;}catch(e){} }
     else if(data&&data.error){ errMsg=data.error; }
     else { answer=(data&&data.answer)||""; newTitle=(data&&data.title)||null; }

@@ -40,6 +40,19 @@ from etl.settings import EtlError, load_dotenv  # noqa: E402
 from etl.supabase_client import Supabase  # noqa: E402
 
 
+def _delete(sb: Supabase, bucket: str, path: str) -> bool:
+    """取り込みが終わったCSVをバケットから消す。
+
+    CSVにはレジのログインパスワードが平文で入っている。以前は最後に
+    「手で消してください」と表示するだけで、消し忘れるとバケットに
+    平文のまま残り続けた。取り込めた時点で自動で消す。
+    """
+    url = f"{sb.url}/storage/v1/object/{bucket}/{path}"
+    r = requests.delete(url, headers={"apikey": sb.key,
+                                      "Authorization": f"Bearer {sb.key}"}, timeout=60)
+    return r.status_code in (200, 204)
+
+
 def _download(sb: Supabase, bucket: str, path: str) -> bytes:
     url = f"{sb.url}/storage/v1/object/{bucket}/{path}"
     r = requests.get(url, headers={"apikey": sb.key, "Authorization": f"Bearer {sb.key}"}, timeout=180)
@@ -187,7 +200,13 @@ def main() -> int:
         finally:
             _sys.argv = saved
 
-    print("✅ 一括登録が完了しました。CSV（PWを含む）はバケットから削除してください。")
+    # PWを平文で含むCSVを残さない
+    if _delete(sb, args.bucket, args.path):
+        print(f"✅ 一括登録が完了しました。取り込み済みCSV（{args.bucket}/{args.path}）は削除しました。")
+    else:
+        print(f"✅ 一括登録が完了しました。\n"
+              f"⚠️ CSV（{args.bucket}/{args.path}）を自動削除できませんでした。"
+              f"PWが平文で残るので、管理画面から手で削除してください。")
     return 0
 
 
