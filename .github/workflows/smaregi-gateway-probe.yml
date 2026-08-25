@@ -1,0 +1,29 @@
+# ============================================================
+#  スマレジ ゲートウェイURLの調査（403切り分け用）
+#
+#  ログインページ(/control/Main.html)が403で拒否される件について、
+#  実データ取得に使っているAJAXゲートウェイURLも同様にブロックされて
+#  いるかを、未認証のまま1回だけアクセスして確かめる。ログインは試みない。
+#
+#  使い方: Actions →「スマレジ ゲートウェイURLの調査」→ Run workflow
+# ============================================================
+name: スマレジ ゲートウェイURLの調査
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      TZ: Asia/Tokyo
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install requests
+      - name: ゲートウェイへ未認証でアクセスして応答を見る
+        run: python -m tools.smaregi_gateway_probe
