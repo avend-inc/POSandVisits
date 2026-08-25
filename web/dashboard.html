@@ -5101,27 +5101,41 @@ function drawStoreKpiDetail(el){
 //   0 と出すと「本当に0だった」と読めてしまう。来店を計測していない店の
 //   購入率が 0.0% と並ぶと、売上があるのに買われていないように見える。
 function kpiCell(k,v){ return v==null?"—":M(k).fmt(v); }
+// ③ 店舗別KPI（選択店舗を売上降順・合計を先頭／平均を末尾・店名ボタンで単店へ）
+//  着地見込み列＝税抜売上の隣。直営・FC共通の着地見込み定義(landingForIds:
+//    ①当月経過実績＋②平日直近10日平均×残平日＋③土日祝直近10日平均×残土日祝)。
+//  当月を選んでいるときだけ算出（他期間は「対象外」、平均行は着地見込みになじまないので「—」）。
 function drawStoreKpi(){
   const el=document.getElementById("storekpi"); if(!el)return;
   if(state.detail){ drawStoreKpiDetail(el); return; }
+  const ym=(DATA._salesMax||DATA._max).slice(0,7);
+  const showLand=isMonthPeriod()&&state.from.slice(0,7)===ym;   // 着地見込みは当月のみ
+  const landCell=ids=>showLand?`<td>${YEN(landingForIds(ids,ym)||0)}円</td>`:`<td>対象外</td>`;
+  // KPI各セル。i===0（税抜売上）の直後に着地見込み列を差し込む。
+  const kcells=(p,landIds)=>KPI2_COLS.map((k,i)=>{const c=`<td>${kpiCell(k,M(k).calc(p))}</td>`;return i===0?c+landCell(landIds):c;}).join("");
   const rows=[...state.sel].map(id=>{const p=sumRows(rowsIn(state.from,state.to,id));const s=storeMeta(id);
     p._id=id; p._name=(s&&s.name)||String(id); return p;});
   rows.sort((a,b)=>(M("ex").calc(b)||0)-(M("ex").calc(a)||0));
   const rl=document.getElementById("kpi-range"); if(rl)rl.textContent=mdLabel(state.from,state.to);   // ⑤ 店舗詳細のタイトル「KPI（m/d〜m/d）」
-  let h=`<thead><tr><th>店舗</th>${KPI2_COLS.map(k=>`<th>${kpiLabel(k)}</th>`).join("")}</tr></thead><tbody>`;
-  for(const p of rows){
-    h+=`<tr><td><button class="stbtn" data-sid="${p._id}">${esc(p._name)}</button></td>`+
-       KPI2_COLS.map(k=>{const v=M(k).calc(p);return `<td>${kpiCell(k,v)}</td>`;}).join("")+`</tr>`;
-  }
-  // 店舗詳細（単店）では合計/平均は実績と同じになるので出さない
-  if(rows.length&&!state.detail){
+  // 見出し：店舗｜税抜売上｜着地見込み｜来店客数｜…
+  const hdr=KPI2_COLS.map((k,i)=>{const th=`<th>${kpiLabel(k)}</th>`;
+    return i===0?th+`<th>着地見込み<br><span class="sub" style="font-weight:500">当月・税抜</span></th>`:th;}).join("");
+  let h=`<thead><tr><th>店舗</th>${hdr}</tr></thead><tbody>`;
+  if(rows.length){
+    // 合計を一番上に（着地見込みは選択店をまとめた共通定義）
     const tot=sumRows(rowsIn(state.from,state.to,"__sel__"));
-    h+=`<tr class="prow"><td>合計</td>`+KPI2_COLS.map(k=>{const v=M(k).calc(tot);return `<td>${kpiCell(k,v)}</td>`;}).join("")+`</tr>`;
-    h+=`<tr class="prow"><td>平均</td>`+KPI2_COLS.map(k=>{
+    h+=`<tr class="prow"><td>合計</td>${kcells(tot,new Set([...state.sel]))}</tr>`;
+    for(const p of rows){
+      h+=`<tr><td><button class="stbtn" data-sid="${p._id}">${esc(p._name)}</button></td>${kcells(p,new Set([p._id]))}</tr>`;
+    }
+    // 平均は末尾。着地見込みは平均になじまないので「—」。
+    const avgCells=KPI2_COLS.map((k,i)=>{
       const vs=rows.map(p=>M(k).calc(p)).filter(v=>v!=null);
       const av=vs.length?vs.reduce((s,v)=>s+v,0)/vs.length:null;
-      return `<td>${kpiCell(k,av)}</td>`;}).join("")+`</tr>`;
-  }else if(!rows.length){ h+=`<tr><td colspan="${KPI2_COLS.length+1}" class="sub">店舗が選択されていません</td></tr>`; }
+      const c=`<td>${kpiCell(k,av)}</td>`;
+      return i===0?c+`<td>—</td>`:c;}).join("");
+    h+=`<tr class="prow"><td>平均</td>${avgCells}</tr>`;
+  }else{ h+=`<tr><td colspan="${KPI2_COLS.length+2}" class="sub">店舗が選択されていません</td></tr>`; }
   el.innerHTML=h+`</tbody>`;
   el.querySelectorAll(".stbtn").forEach(b=>b.onclick=()=>{location.href="index.html?g="+GROUP+"&store="+b.dataset.sid;});
 }
