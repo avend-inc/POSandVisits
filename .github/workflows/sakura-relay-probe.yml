@@ -1,0 +1,66 @@
+# ============================================================
+#  さくらのレンタルサーバー経由でのスマレジ到達確認（調査用）
+#
+#  GitHub Actions からのアクセスはスマレジ側で403（アクセス拒否）に
+#  なることを確認済み。SSHで さくらのレンタルサーバー に接続し、
+#  「そのサーバー自身から」スマレジのURLへアクセスして、届くかどうかを
+#  見るだけ。ログインは試みない（未認証のアクセスが通るかだけ見る）。
+#
+#  必要な Secrets: SAKURA_SSH_KEY（さくらに登録した公開鍵と対の秘密鍵）
+#
+#  使い方: Actions →「さくらのレンタルサーバー経由でのスマレジ到達確認」
+#          → Run workflow（ホスト名・ユーザー名・ポートは既定値のままでOK。
+#            違う場合だけ入力欄を変更）
+# ============================================================
+name: さくらのレンタルサーバー経由でのスマレジ到達確認
+
+on:
+  workflow_dispatch:
+    inputs:
+      ssh_host:
+        description: "さくらのSSHホスト名"
+        required: false
+        default: "avend.sakura.ne.jp"
+      ssh_user:
+        description: "さくらのSSHユーザー名（通常はアカウント名）"
+        required: false
+        default: "avend"
+      ssh_port:
+        description: "さくらのSSHポート（レンタルサーバーは既定10022）"
+        required: false
+        default: "10022"
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      TZ: Asia/Tokyo
+    steps:
+      - name: SSH鍵を準備する
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.SAKURA_SSH_KEY }}" > ~/.ssh/sakura_relay
+          chmod 600 ~/.ssh/sakura_relay
+          ssh-keyscan -p "${{ inputs.ssh_port }}" "${{ inputs.ssh_host }}" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: さくらのサーバーにSSH接続できるか確認
+        run: |
+          ssh -i ~/.ssh/sakura_relay -p "${{ inputs.ssh_port }}" \
+              -o StrictHostKeyChecking=no -o ConnectTimeout=15 \
+              "${{ inputs.ssh_user }}@${{ inputs.ssh_host }}" \
+              "echo SSH接続OK; hostname; date"
+
+      - name: さくらのサーバーからスマレジへ届くか確認（未認証・1回だけ）
+        run: |
+          ssh -i ~/.ssh/sakura_relay -p "${{ inputs.ssh_port }}" \
+              -o StrictHostKeyChecking=no -o ConnectTimeout=15 \
+              "${{ inputs.ssh_user }}@${{ inputs.ssh_host }}" \
+              'curl -sS -o /tmp/smaregi_probe_body.txt -w "HTTPステータス: %{http_code}\n" --max-time 20 \
+                 "https://www1.smaregi.jp/services/ajax/gateway.php?service=AjaxMainService&method=getSalesInfo&params=%7B%22viewMode%22%3A%221%22%2C%22searchDate%22%3A%222026%2F08%2F24%22%7D" \
+               || echo "curlが使えない/失敗しました（wgetで再試行します）"; \
+               echo "----本文の先頭300字----"; head -c 300 /tmp/smaregi_probe_body.txt 2>/dev/null || true; echo'
+
+      - name: 後片付け
+        if: always()
+        run: rm -f ~/.ssh/sakura_relay
