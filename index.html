@@ -217,6 +217,17 @@
   .tgtbtn.add{text-decoration:none;border:1px dashed var(--accent);border-radius:7px;padding:1px 7px;font-size:11.5px;font-weight:700}
   .landbtn{background:none;border:none;cursor:pointer;font-size:12px;line-height:1;opacity:.6;padding:0 0 0 4px}
   .landbtn:hover{opacity:1}
+  /* 年間 目標設定モーダルの表 */
+  .tptbl{border-collapse:collapse;font-size:12px;white-space:nowrap}
+  .tptbl th,.tptbl td{border:1px solid var(--border,#e2e6ea);padding:4px 6px;text-align:right}
+  .tptbl th{background:var(--surface2,#f4f6f8);font-weight:700;position:sticky;top:0;z-index:1}
+  .tptbl td.name,.tptbl th.name{text-align:left;position:sticky;left:0;background:var(--surface,#fff);font-weight:700;z-index:2}
+  .tptbl th.name{z-index:3}
+  .tp-act{color:var(--muted,#8a929b);font-size:10.5px}
+  .tp-auto{font-weight:700}
+  .tp-auto span{display:block;color:var(--muted,#8a929b);font-size:9px;font-weight:500}
+  .tp-in{width:88px;padding:4px 6px;font-size:12px;border:1px solid var(--border,#ccc);border-radius:6px;background:var(--surface,#fff);color:var(--ink,#111);text-align:right}
+  .tptbl tr.tot td{background:var(--surface2,#f4f6f8);font-weight:800}
   .pchip.on,.gchip.on,.hchip.on,.achip.on{background:var(--accent);border-color:var(--accent);color:#fff}
   .dd summary{list-style:none;display:flex;justify-content:space-between;align-items:center;border:1px solid var(--border);border-radius:10px;padding:11px 13px;background:var(--surface);font-weight:700;cursor:pointer;margin-top:4px}
   .dd summary::-webkit-details-marker{display:none}
@@ -2235,8 +2246,11 @@ function renderMain(){
     </div>
 
     <div class="panel">
-      <h2>③ 店舗別KPI</h2>
-      <div class="sub" style="font-weight:700;margin:2px 0 4px">集計期間</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+        <h2 style="margin:0">③ 店舗別KPI</h2>
+        <button id="tgtplan-btn" class="themebtn" style="display:none">🎯 目標設定</button>
+      </div>
+      <div class="sub" style="font-weight:700;margin:6px 0 4px">集計期間</div>
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px">
         <button class="chip pchip" data-preset="thismonth">今月</button>
         <button class="chip pchip" data-preset="lastmonth">前月</button>
@@ -5189,6 +5203,114 @@ async function openTargetModal(id,ym){
   };
 }
 
+// ===== 年間 目標設定（9月始まり・1年分。縦=そのタブの全店、横=9月〜8月）=====
+//  各月セル：実績（自動・経過月のみ）＋ 目標（入力）。直営で事業計画(bizplan)がある月は
+//  目標を自動表示（読み取り）＝KPI表の表示と一致。FC等・計画の無い月は入力（plan_data page="pl" b_ex／予実と共有）。
+let TGT_FY=null;   // いま表示している年度（"YYYY-09"）。◀▶で移動。
+function fyStartFor(ym){ const y=+ym.slice(0,4),m=+ym.slice(5,7); return ((m>=9)?y:y-1)+"-09"; }
+function fyMonths(fy){ const y=+fy.slice(0,4),out=[]; for(let i=0;i<12;i++){let yy=y,mm=9+i;while(mm>12){mm-=12;yy++;}out.push(yy+"-"+String(mm).padStart(2,"0"));} return out; }
+function tabStores(){ return usableStores().filter(s=> (GROUP==="fc")?ownOf(s.id)==="FC":ownOf(s.id)==="直営" )
+  .sort((a,b)=>String(a.name||a.id).localeCompare(String(b.name||b.id),"ja")); }
+async function openTargetPlanModal(){
+  if(!SB){alert("この画面ではログインが必要です。");return;}
+  const sd=(DATA._salesMax||DATA._max), curYm=sd.slice(0,7);
+  if(!TGT_FY) TGT_FY=fyStartFor(curYm);
+  const stores=tabStores();
+  const tab=(GROUP==="fc")?"FC":"直営";
+  const ov=document.createElement("div"); ov.setAttribute("role","dialog");
+  ov.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:9999;padding:10px";
+  const box=document.createElement("div");
+  box.style.cssText="background:var(--surface,#fff);color:var(--ink,#1a1d21);border:1px solid var(--border,#e2e6ea);border-radius:12px;padding:18px 18px;width:min(1100px,96vw);max-height:90vh;display:flex;flex-direction:column;box-shadow:0 12px 44px rgba(0,0,0,.35)";
+  ov.appendChild(box); document.body.appendChild(ov);
+  const close=()=>{ if(ov.parentNode)document.body.removeChild(ov); document.removeEventListener("keydown",onKey); };
+  const onKey=e=>{ if(e.key==="Escape")close(); };
+  ov.addEventListener("click",e=>{ if(e.target===ov)close(); });
+  document.addEventListener("keydown",onKey);
+  const monLabel=ym=>{const m=+ym.slice(5,7); return (m===1||m===9)? (+ym.slice(0,4))+"/"+m : m+"月";};
+
+  async function render(){
+    const months=fyMonths(TGT_FY), mset=new Set(months);
+    // 実績（税抜）：DATA.daily を1回走査
+    const act={}; stores.forEach(s=>act[s.id]={});
+    for(const r of DATA.daily){ if(!act[r.s])continue; const mk=r.d.slice(0,7); if(!mset.has(mk))continue; act[r.s][mk]=(act[r.s][mk]||0)+(r.ex!=null?r.ex:(r.in||0)/1.1); }
+    // 既存の手入力目標（plan_data page="pl" の full data。b_ex を差し替えて保存できるよう全体を持つ）
+    const plFull={};
+    try{ const {data}=await SB.from("plan_data").select("scope,ym,data").eq("page","pl").in("ym",months);
+      (data||[]).forEach(r=>{ (plFull[String(r.scope)]||(plFull[String(r.scope)]={}))[r.ym]=r.data||{}; }); }catch(e){}
+    const plEx=(id,ym)=>{ const d=plFull[String(id)]&&plFull[String(id)][ym]; const v=d&&d.b_ex; return Number.isFinite(v)?v:null; };
+    // 直営タブは事業計画(bizplan)を月ごとに取得（読み取り目標）。FCタブは呼ばない。
+    const biz={};
+    if(GROUP!=="fc"){
+      const arr=await Promise.all(months.map(m=>SB.rpc("bizplan_store_sales",{p_ym:m}).then(r=>({m,rows:(r&&r.data)||[]}),()=>({m,rows:[]}))));
+      arr.forEach(o=>{biz[o.m]=o.rows;});
+    }
+    const bizFor=(id,ym)=>{ const nm=(storeMeta(id)||{}).name||""; for(const r of (biz[ym]||[])){ const k=((r&&r.pos_store_name)||"").trim(),v=Number(r&&r.amount); if(k&&nm.indexOf(k)>=0&&Number.isFinite(v))return v; } return null; };
+
+    const fyy=+TGT_FY.slice(0,4);
+    const head=`<thead><tr><th class="name">店舗</th>${months.map(m=>`<th>${monLabel(m)}</th>`).join("")}</tr></thead>`;
+    const totAct={}, totTgt={}; months.forEach(m=>{totAct[m]=0;totTgt[m]=0;});
+    const body=stores.map(s=>{
+      const tds=months.map(m=>{
+        const a=act[s.id][m]; if(a!=null)totAct[m]+=a;
+        const bz=bizFor(s.id,m), px=plEx(s.id,m);
+        const tgt=(bz!=null)?bz:px; if(tgt!=null)totTgt[m]+=tgt;
+        const actHtml=`<div class="tp-act">実 ${a!=null?YEN(Math.round(a)):"—"}</div>`;
+        const tgtHtml=(bz!=null)
+          ? `<div class="tp-auto">${YEN(Math.round(bz))}<span>事業計画</span></div>`
+          : `<input class="tp-in" type="number" min="0" step="10000" data-id="${s.id}" data-ym="${m}" value="${px!=null?Math.round(px):""}" placeholder="目標">`;
+        return `<td>${actHtml}${tgtHtml}</td>`;
+      }).join("");
+      return `<tr><td class="name">${esc(s.name||String(s.id))}</td>${tds}</tr>`;
+    }).join("");
+    const totRow=`<tr class="tot"><td class="name">合計</td>${months.map(m=>`<td><div class="tp-act">実 ${YEN(Math.round(totAct[m]))}</div><div class="tp-auto">${totTgt[m]?YEN(Math.round(totTgt[m])):"—"}</div></td>`).join("")}</tr>`;
+
+    box.innerHTML=
+      `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:6px">`+
+        `<div style="font-size:16px;font-weight:700">🎯 目標設定 <span class="sub" style="font-weight:600">（${tab}店・税抜）</span></div>`+
+        `<div style="display:flex;align-items:center;gap:8px">`+
+          `<button id="tp-prev" class="themebtn">◀</button>`+
+          `<b style="min-width:170px;text-align:center">${fyy}年9月〜${fyy+1}年8月</b>`+
+          `<button id="tp-next" class="themebtn">▶</button>`+
+        `</div>`+
+      `</div>`+
+      `<div class="sub" style="margin-bottom:8px">各月の<b>目標売上（税抜）</b>を入力します（保存すると予実タブと共有）。上段は<b>実績</b>（経過月のみ）。`+
+        (GROUP!=="fc"?`直営で事業計画がある月は自動表示（読み取り）です。`:``)+`</div>`+
+      `<div class="tblwrap" style="overflow:auto;flex:1 1 auto"><table class="tptbl">${head}<tbody>${body}${totRow}</tbody></table></div>`+
+      `<div style="margin-top:12px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">`+
+        `<button id="tp-close" class="themebtn">閉じる</button>`+
+        `<button id="tp-save" class="themebtn" style="background:var(--accent,#2f6fd0);color:#fff;border-color:var(--accent,#2f6fd0)">保存</button>`+
+      `</div>`;
+
+    box.querySelector("#tp-close").onclick=close;
+    box.querySelector("#tp-prev").onclick=()=>{ TGT_FY=(fyy-1)+"-09"; render(); };
+    box.querySelector("#tp-next").onclick=()=>{ TGT_FY=(fyy+1)+"-09"; render(); };
+    box.querySelector("#tp-save").onclick=async()=>{
+      const btn=box.querySelector("#tp-save"); btn.disabled=true; btn.textContent="保存中…";
+      // 変更のあった入力だけ upsert（既存 data に b_ex を差し替え、空欄は b_ex を削除）
+      const jobs=[];
+      box.querySelectorAll("input.tp-in").forEach(inp=>{
+        const id=inp.dataset.id, ym=inp.dataset.ym;
+        const raw=String(inp.value).trim();
+        const before=plEx(id,ym);
+        const after=(raw==="")?null:Math.round(Number(raw));
+        if(after!=null&&(!Number.isFinite(after)||after<0))return;
+        const changed=(before==null&&after!=null)||(before!=null&&after==null)||(before!=null&&after!=null&&Math.round(before)!==after);
+        if(!changed)return;
+        const data=Object.assign({}, (plFull[String(id)]&&plFull[String(id)][ym])||{});
+        if(after==null) delete data.b_ex; else data.b_ex=after;
+        jobs.push({page:"pl",scope:String(id),ym,data,updated_at:new Date().toISOString(),updated_by:ME.email});
+      });
+      try{
+        for(let i=0;i<jobs.length;i+=20){ await SB.from("plan_data").upsert(jobs.slice(i,i+20),{onConflict:"page,scope,ym"}); }
+        KPI_TGT={ym:null,map:{}};
+        btn.textContent="保存しました"; refresh();
+        await render(); btn.disabled=false; btn.textContent="保存";
+      }catch(e){ alert("保存に失敗しました："+(e&&e.message||e)); btn.disabled=false; btn.textContent="保存"; }
+    };
+  }
+  render();
+}
+
 // ③ 店舗別KPI（選択店舗を売上降順・合計を先頭／平均を末尾・店名ボタンで単店へ）
 //  税抜売上の左隣に「目標売上（税抜）」「着地見込み」を追加（いずれも当月のみ、他期間は「対象外」）。
 //   ・目標売上：直営＝事業計画から自動表示／FC＝未入力は「＋目標を入力」ボタン→手入力(予実と共有)。
@@ -5257,6 +5379,9 @@ function drawStoreKpi(){
   el.querySelectorAll(".stbtn").forEach(b=>b.onclick=()=>{location.href="index.html?g="+GROUP+"&store="+b.dataset.sid;});
   el.querySelectorAll(".landbtn").forEach(b=>b.onclick=()=>openFcModal(+b.dataset.sid,ym));
   el.querySelectorAll(".tgtbtn").forEach(b=>b.onclick=()=>openTargetModal(+b.dataset.sid,ym));
+  // 右上「目標設定」ボタン：admin/editor のときだけ表示（年間の目標一括設定）
+  const tpb=document.getElementById("tgtplan-btn");
+  if(tpb){ tpb.style.display=canEdit?"":"none"; tpb.onclick=()=>openTargetPlanModal(); }
 }
 
 // ⑤ 売上推移（縦=選択店舗／横=期間。日/週/月/全期間、◀▶で移動。既定=日）
