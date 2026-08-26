@@ -5201,9 +5201,9 @@ function drawStoreKpi(){
   const showLand=isMonthPeriod()&&state.from.slice(0,7)===ym;   // 目標売上・着地見込みは当月のみ
   const canEdit=canEditFc();                                    // 目標入力・着地修正ボタンは admin/editor のみ
   const tgtReady=showLand?ensureKpiTargets(ym):true;            // 目標売上（当月）をまとめ読み
+  // 目標売上・着地見込みの2列は「当月」を選んでいるときだけ出す（他期間は列ごと非表示）。
   // 目標売上セル：値があれば表示（手入力ソースは押して再編集）。無ければ「＋目標を入力」（編集権限時）。
   function tgtCell(id){
-    if(!showLand)return `<td>対象外</td>`;
     if(!tgtReady)return `<td class="sub">…</td>`;
     const t=kpiTgtOf(id), auto=(t.src==="事業計画"||t.src==="ファイル");
     if(t.ex!=null){
@@ -5215,36 +5215,44 @@ function drawStoreKpi(){
   }
   // 着地見込みセル：共通定義（手入力優先・無ければ自動）。⚙で手入力ポップアップ（編集権限時）。
   function landCell(id){
-    if(!showLand)return `<td>対象外</td>`;
     const v=landingForIds(new Set([id]),ym), val=(v==null)?"—":YEN(Math.round(v))+"円";
     return canEdit ? `<td>${val} <button class="landbtn" data-sid="${id}" title="着地見込みを修正">⚙</button></td>` : `<td>${val}</td>`;
   }
-  const kcells=(id,p)=>tgtCell(id)+landCell(id)+KPI2_COLS.map(k=>`<td>${kpiCell(k,M(k).calc(p))}</td>`).join("");
+  // showLand（当月）のときだけ 目標売上＋着地見込みの2セルを前置きする。
+  const preCells=(id)=> showLand ? (tgtCell(id)+landCell(id)) : "";
+  const kcells=(id,p)=>preCells(id)+KPI2_COLS.map(k=>`<td>${kpiCell(k,M(k).calc(p))}</td>`).join("");
   const rows=[...state.sel].map(id=>{const p=sumRows(rowsIn(state.from,state.to,id));const s=storeMeta(id);
     p._id=id; p._name=(s&&s.name)||String(id); return p;});
   rows.sort((a,b)=>(M("ex").calc(b)||0)-(M("ex").calc(a)||0));
   const rl=document.getElementById("kpi-range"); if(rl)rl.textContent=mdLabel(state.from,state.to);   // ⑤ 店舗詳細のタイトル「KPI（m/d〜m/d）」
-  // 見出し：店舗｜目標売上｜着地見込み｜税抜売上｜来店客数｜…
-  const hdr=`<th>目標売上<br><span class="sub" style="font-weight:500">当月・税抜</span></th>`+
-            `<th>着地見込み<br><span class="sub" style="font-weight:500">当月・税抜</span></th>`+
-            KPI2_COLS.map(k=>`<th>${kpiLabel(k)}</th>`).join("");
+  // 見出し：店舗｜(当月のみ)目標売上｜着地見込み｜税抜売上｜来店客数｜…
+  const preHdr= showLand
+    ? `<th>目標売上<br><span class="sub" style="font-weight:500">当月・税抜</span></th>`+
+      `<th>着地見込み<br><span class="sub" style="font-weight:500">当月・税抜</span></th>`
+    : "";
+  const hdr=preHdr+KPI2_COLS.map(k=>`<th>${kpiLabel(k)}</th>`).join("");
   let h=`<thead><tr><th>店舗</th>${hdr}</tr></thead><tbody>`;
   if(rows.length){
-    // 合計を一番上に（目標＝各店の合計、着地＝選択店をまとめた共通定義）
+    // 合計を一番上に（目標＝各店の合計、着地＝選択店をまとめた共通定義）。当月以外は2列なし。
     const tot=sumRows(rowsIn(state.from,state.to,"__sel__"));
-    const totTgt=!showLand?`<td>対象外</td>`:(!tgtReady?`<td class="sub">…</td>`:(()=>{const s=sumTargets([...state.sel]);return `<td>${s!=null?YEN(Math.round(s))+"円":"—"}</td>`;})());
-    const totLand=!showLand?`<td>対象外</td>`:(()=>{const v=landingForIds(new Set([...state.sel]),ym);return `<td>${v==null?"—":YEN(Math.round(v))+"円"}</td>`;})();
-    h+=`<tr class="prow"><td>合計</td>${totTgt}${totLand}${KPI2_COLS.map(k=>`<td>${kpiCell(k,M(k).calc(tot))}</td>`).join("")}</tr>`;
+    let totPre="";
+    if(showLand){
+      const totTgt=!tgtReady?`<td class="sub">…</td>`:(()=>{const s=sumTargets([...state.sel]);return `<td>${s!=null?YEN(Math.round(s))+"円":"—"}</td>`;})();
+      const totLand=(()=>{const v=landingForIds(new Set([...state.sel]),ym);return `<td>${v==null?"—":YEN(Math.round(v))+"円"}</td>`;})();
+      totPre=totTgt+totLand;
+    }
+    h+=`<tr class="prow"><td>合計</td>${totPre}${KPI2_COLS.map(k=>`<td>${kpiCell(k,M(k).calc(tot))}</td>`).join("")}</tr>`;
     for(const p of rows){
       h+=`<tr><td><button class="stbtn" data-sid="${p._id}">${esc(p._name)}</button></td>${kcells(p._id,p)}</tr>`;
     }
-    // 平均は末尾。目標・着地は月次の合計値のため平均行では「—」。
-    const avgCells=`<td>—</td><td>—</td>`+KPI2_COLS.map(k=>{
+    // 平均は末尾。目標・着地は月次の合計値のため平均行では「—」（当月のみ列を出す）。
+    const avgPre= showLand ? `<td>—</td><td>—</td>` : "";
+    const avgCells=avgPre+KPI2_COLS.map(k=>{
       const vs=rows.map(p=>M(k).calc(p)).filter(v=>v!=null);
       const av=vs.length?vs.reduce((s,v)=>s+v,0)/vs.length:null;
       return `<td>${kpiCell(k,av)}</td>`;}).join("");
     h+=`<tr class="prow"><td>平均</td>${avgCells}</tr>`;
-  }else{ h+=`<tr><td colspan="${KPI2_COLS.length+3}" class="sub">店舗が選択されていません</td></tr>`; }
+  }else{ h+=`<tr><td colspan="${KPI2_COLS.length+(showLand?3:1)}" class="sub">店舗が選択されていません</td></tr>`; }
   el.innerHTML=h+`</tbody>`;
   el.querySelectorAll(".stbtn").forEach(b=>b.onclick=()=>{location.href="index.html?g="+GROUP+"&store="+b.dataset.sid;});
   el.querySelectorAll(".landbtn").forEach(b=>b.onclick=()=>openFcModal(+b.dataset.sid,ym));
