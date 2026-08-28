@@ -589,7 +589,9 @@
 
 /* --- 図の入れもの --- */
 .lv-plot{position:relative;width:100%;}
-.lv-scroll{max-height:520px;overflow-y:auto;overflow-x:hidden;}
+/* 縦に長い図は中でスクロールさせる。表は画面より広くなるので横にも出せるようにする
+   （横を hidden にすると、スマホで右端の列に手が届かなくなる） */
+.lv-scroll{max-height:520px;overflow-y:auto;overflow-x:auto;}
 .lv-plot svg{display:block;width:100%;height:auto;overflow:visible;}
 .lv-empty{padding:16px 2px;font-size:12px;color:var(--muted);}
 
@@ -612,6 +614,10 @@
 .lv-tbl th:first-child,.lv-tbl td:first-child{text-align:left;font-variant-numeric:normal;}
 .lv-tbl td.wrap{white-space:normal;min-width:220px;color:var(--ink2);}
 .lv-tbl tr:hover td{background:var(--surface2);}
+/* 見立ては「ことば」で読ませる。色は補助（色だけで意味を持たせない） */
+.lv-v-ok{color:var(--ink);font-weight:700;}
+.lv-v-weak{color:var(--ink2);}
+.lv-v-none{color:var(--muted);}
 .lv-more{margin-top:10px;font-size:12px;}
 .lv-more>summary{cursor:pointer;color:var(--lv-s1);font-weight:700;list-style:none;}
 .lv-more>summary::-webkit-details-marker{display:none;}
@@ -1700,6 +1706,81 @@ function lvCampaigns(rows){
     .sort((a,b)=>b.rows.length-a.rows.length||(b.sd-a.sd));
 }
 // ============================================================
+//  配信の中身をタグで分ける
+// ------------------------------------------------------------
+//  【タグの決め方】
+//  思いつきで並べたのではなく、**実際の本文61本に出てくる語を数えてから**
+//  決めた（2026-08-28）。6本以上の配信に出てくる言い回しを拾い、
+//  意味のまとまりごとにまとめてある。タグの付かない配信は61本中2本。
+//
+//  【重なる】
+//  1本の配信に複数のタグが付く（クーポン かつ 期間限定 など）。
+//  構成比にはならないので、円グラフにはしない。
+//
+//  【「プレゼント」を別タグにしていない理由】
+//  実データで、プレゼントを含む12本は12本ともクーポンを含んでいた。
+//  同じことを2つの行に分けて出すと、別々の発見に見えてしまう。
+const LV_TAGS=[
+  ["クーポン・プレゼント", /クーポン|プレゼント|お年玉|配布いたします/],
+  ["％OFF",             /[0-9０-９]+\s*[%％]\s*OFF|MAX\s*[0-9０-９]+\s*[%％]/],
+  ["期間の限定",          /期間限定|日間限定|週間限定|連休限定|まで使え|までSALE|限定で/],
+  ["数量・人数の限定",     /[0-9０-９,]+\s*(個|着|点|名)\s*限定|人数限定|先着|早い者?勝ち|なくなり次第/],
+  ["シークレット感",       /秘密|極秘|口外厳禁|知っている人だけ|こっそり|ここだけ/],
+  ["イベント・体験",       /詰め放題|イベント|常駐|ワークショップ|抽選/],
+  ["入荷・新着",          /入荷|大量投入|投入します|新着|新入荷/],
+  ["店舗の限定",          /店限定|店舗限定|当店限定/],
+  ["時間帯の訴求",        /[0-9０-９]+\s*時[〜～を]|夜の|タイムセール|[0-9]+:[0-9]+/],
+  ["感謝・お礼",          /感謝|ありがとうございます|日ごろの|おかげ/],
+];
+const lvTagsOf=t=>LV_TAGS.filter(([,rx])=>rx.test(t||"")).map(([k])=>k);
+
+// --- 時期の効き目を取り除く -------------------------------------------
+//  開封率は全体としてじりじり下がっている（実データで 2025Q1 76.9% →
+//  2026Q3 60.9%）。そのうえ、詰め放題やイベントの配信は最近に固まっている。
+//  そのまま「全体の平均」と比べると、**ただ最近だというだけで低く出る**。
+//  なので、配信ごとに「その前後60日に送られた配信の平均」を基準にして、
+//  そこからのズレを見る。時期の効き目が両側から消える。
+const LV_TAGWIN=60;
+function lvLocalBase(b,rows){
+  const t=Date.parse(b.d);
+  const near=rows.filter(r=>r!==b&&r.or!=null&&r.sd&&
+    Math.abs(Date.parse(r.d)-t)<=LV_TAGWIN*86400000);
+  const sd=near.reduce((a,r)=>a+r.sd,0);
+  return sd?near.reduce((a,r)=>a+r.or*r.sd,0)/sd:null;
+}
+// タグごとに「あり」「なし」と、時期を補正したズレを出す
+function lvTagStats(rows){
+  const ok=rows.filter(r=>r.or!=null&&r.sd);
+  if(ok.length<6)return {tags:[],untagged:0,n:ok.length};
+  const dev=new Map();
+  for(const b of ok){ const base=lvLocalBase(b,ok); if(base!=null)dev.set(b,b.or-base); }
+  const out=[];
+  for(const [name,rx] of LV_TAGS){
+    const yes=ok.filter(r=>rx.test(r.t||"")), no=ok.filter(r=>!rx.test(r.t||""));
+    // 3本では上下どちらにも転ぶので出さない
+    if(yes.length<4||no.length<4)continue;
+    const ds=yes.map(b=>dev.get(b)).filter(v=>v!=null);
+    if(ds.length<4)continue;
+    const adj=ds.reduce((a,x)=>a+x,0)/ds.length;
+    const sd=ds.length>1
+      ? Math.sqrt(ds.reduce((a,x)=>a+(x-adj)*(x-adj),0)/(ds.length-1)) : 0;
+    const se=sd?sd/Math.sqrt(ds.length):0.01;
+    out.push({name,n:yes.length,yes:lvAvgOr(yes),no:lvAvgOr(no),
+              raw:lvAvgOr(yes)-lvAvgOr(no),adj,se,z:adj/se});
+  }
+  out.sort((a,b)=>Math.abs(b.adj)-Math.abs(a.adj));
+  return {tags:out,untagged:ok.filter(r=>!lvTagsOf(r.t).length).length,n:ok.length};
+}
+// 「差」と言い切ってよいかを、ことばで出す。
+// 61本しかないので、2σを超えないものを断定させない。
+function lvVerdict(z){
+  const a=Math.abs(z);
+  return a>=2 ? {t:"たしかな差",c:"ok"}
+       : a>=1 ? {t:"ばらつきの範囲内かも",c:"weak"}
+              : {t:"差とは言えない",c:"none"};
+}
+
+// ============================================================
 //  図の部品（この画面だけで使う）
 // ------------------------------------------------------------
 //  ・1枚のグラフに目盛りは1つだけ（左右で違う目盛りは作らない）
@@ -1763,6 +1844,21 @@ function lvHit(g,box,mark,title,rows){
   g.appendChild(h);
 }
 const lvVar=(el,n)=>getComputedStyle(el).getPropertyValue(n).trim();
+// 画面に置いた文字を、与えた幅（viewBoxの単位）に収まるまで実際に測って詰める。
+// 文字幅の見積もりだと、欧文まじりの店名（SELFURUGIGARAGE赤羽店）で外れて
+// 図からはみ出す。全文はツールチップと表に出るので、削っても読めなくならない。
+function lvTrim(el,max){
+  let t=el.textContent;
+  if(!t||max<=0)return;
+  let len=0;
+  try{ len=el.getComputedTextLength(); }catch(e){ return; }
+  if(len<=max)return;
+  while(t.length>1){
+    t=t.slice(0,-1);
+    el.textContent=t+"…";
+    try{ if(el.getComputedTextLength()<=max)return; }catch(e){ return; }
+  }
+}
 
 // --- ① 平均からのズレを横棒で（発散） --------------------------------
 //  rows: {label, sub, dev(pp), value, tip:[{k,v}]}
@@ -1789,6 +1885,9 @@ function lvDevBars(box,rows,opt){
   const sx=v=>mid+(x1-x0)/2*(v/m);
   const svg=lvEl("svg",{viewBox:`0 0 ${W} ${H}`,role:"img"});
   svg.setAttribute("aria-label",opt.aria||"平均からのズレ");
+  // 先に画面へ入れておく。文字の幅は入れてからでないと測れず、
+  // 見積もりだけだと欧文まじりの店名がはみ出す。
+  box.appendChild(svg);
   // 目盛り（0を挟んで左右対称・きりのいい数字）
   const half=lvTicks(0,m,3).filter(v=>v>0);
   for(const t of half.map(v=>-v).reverse().concat(half)){
@@ -1811,6 +1910,9 @@ function lvDevBars(box,rows,opt){
     const bar=lvEl("path",{d:b<1?`M${mid} ${y} h1 v${BAR} h-1 Z`:p,fill:c});
     g.appendChild(bar);
     const nm=lvEl("text",{x:LAB-10,y:y+BAR-2,"text-anchor":"end","font-size":11,fill:INK});
+    // 欄に収まらない名前は詰める。はみ出したまま置くと左端で切れて読めなくなる
+    // （スマホ幅で「クーポン・プレゼント」が「ン・プレゼント」になっていた）。
+    // 全文はツールチップと表に出るので、ここで削っても読めなくならない。
     nm.textContent=r.label; g.appendChild(nm);
     if(r.sub){const s=lvEl("text",{x:LAB-10,y:y+BAR-2,"text-anchor":"end","font-size":10,fill:MUT,dy:0});
       s.textContent=""; }
@@ -1819,9 +1921,9 @@ function lvDevBars(box,rows,opt){
       "font-variant-numeric":"tabular-nums"});
     vl.textContent=(dev>0?"+":"")+F1(dev)+(opt.unit||"pp"); g.appendChild(vl);
     svg.appendChild(g);
+    lvTrim(nm,LAB-14);                       // DOMに入れてから実測して詰める
     lvHit(svg,{x:0,y:y-((RH-BAR)/2),w:W,h:RH},bar,r.label,r.tip||[]);
   });
-  box.appendChild(svg);
 }
 
 // --- ② 分布（点を並べて、平均と ±1σ を重ねる） -----------------------
@@ -2126,6 +2228,31 @@ function renderLine(){
       <div class="lv-plot" id="lv-dist"></div>
     </div>
 
+    <div class="lv-card">
+      <h3>配信の中身で、何が効いているか</h3>
+      <p class="lv-sub">本文に出てくる言い回しでタグを付け、<b>その要素があった配信と、なかった配信</b>を
+        比べています。タグは実際の本文61本に出てくる語を数えてから決めたもので、
+        1本に複数のタグが付きます（構成比にはなりません）。<br>
+        差は<b>時期をそろえて</b>出しています。開封率は全体としてじりじり下がっており（下のグラフ）、
+        新しい取り組みほど最近に固まっているので、そのまま全体平均と比べると
+        <b>ただ最近だというだけで低く出ます</b>。配信ごとに「その前後60日の平均」を基準にして、
+        時期の効き目を両側から消しています。</p>
+      <div class="lv-leg">
+        <span><i class="sq" style="background:var(--lv-pos)"></i>この要素があると開かれやすい</span>
+        <span><i class="sq" style="background:var(--lv-neg)"></i>あると開かれにくい</span>
+      </div>
+      <div class="lv-plot" id="lv-tag"></div>
+      <div class="lv-scroll" style="margin-top:14px" id="lv-tagtbl"></div>
+      <p class="lv-n" style="margin-top:10px" id="lv-tagfoot"></p>
+      <p class="lv-n" style="margin-top:6px" id="lv-tagnote"></p>
+
+      <h3 style="margin-top:24px">開封率そのものの推移（月ごと）</h3>
+      <p class="lv-sub">上の「時期をそろえた差」が要る理由です。ここが下がっているぶんは、
+        配信の中身の良し悪しではありません。</p>
+      <div class="lv-leg" id="lv-trendleg"></div>
+      <div class="lv-plot" id="lv-trend"></div>
+    </div>
+
     <div class="lv-grid2">
       <div class="lv-card">
         <h3>店舗ごとの開封率 — 全社平均とのズレ</h3>
@@ -2214,6 +2341,8 @@ function drawLine(){
   lvHero(bc,day);
   lvDrawDev(bc);
   lvDrawDist(bc);
+  lvDrawTags(bc);
+  lvDrawTrend(bc);
   lvDrawStores(bc,day);
   lvDrawTiming(bc);
   lvDrawCampaigns(bc);
@@ -2382,6 +2511,83 @@ function lvDrawTiming(bc){
            {v:all==null?"—":F1(all)+"%",k:"全体の平均"}]};
   }),{h:190,fmt:v=>F1(v)+"%",fmtAxis:v=>F1(v)+"%",padB:40,
       ref:all,refLabel:"全体の平均",aria:"時間帯ごとの平均開封率"});
+}
+
+// --- 中身の要素ごとの効き目 -------------------------------------------
+function lvDrawTags(bc){
+  const box=document.getElementById("lv-tag"); if(!box)return;
+  const st=lvTagStats(bc);
+  const tb=document.getElementById("lv-tagtbl");
+  const ft=document.getElementById("lv-tagfoot");
+  if(!st.tags.length){
+    box.innerHTML=`<div class="lv-empty">配信が少なくて、中身ごとの比較ができません（6本以上必要）。</div>`;
+    if(tb)tb.innerHTML=""; if(ft)ft.innerHTML="";
+    return;
+  }
+  lvDevBars(box,st.tags.map(x=>{
+    const v=lvVerdict(x.z);
+    return {label:x.name+"（"+x.n+"本）",dev:x.adj,
+      tip:[{c:x.adj>=0?lvVar(box,"--lv-pos"):lvVar(box,"--lv-neg"),
+            v:(x.adj>0?"+":"")+F1(x.adj)+"pt",k:"時期をそろえた差"},
+           {v:v.t,k:"見立て"},
+           {v:F1(x.yes)+"%",k:"この要素あり（"+x.n+"本）"},
+           {v:F1(x.no)+"%",k:"なし（"+(st.n-x.n)+"本）"},
+           {v:(x.raw>0?"+":"")+F1(x.raw)+"pt",k:"そのまま比べた差"}]};
+  }),{rowH:26,aria:"配信の中身ごとの、時期をそろえた開封率の差"});
+
+  // 表。図には出せない「素の差」と見立てを並べる
+  if(tb)tb.innerHTML=`<table class="lv-tbl">
+    <thead><tr><th>中身の要素</th><th>本数</th><th>あり</th><th>なし</th>
+      <th>そのままの差</th><th>時期をそろえた差</th><th style="text-align:left">見立て</th></tr></thead>
+    <tbody>${st.tags.map(x=>{const v=lvVerdict(x.z);
+      return `<tr><td>${esc(x.name)}</td><td>${x.n}</td><td>${F1(x.yes)}%</td>
+        <td>${F1(x.no)}%</td><td>${x.raw>0?"+":""}${F1(x.raw)}pt</td>
+        <td><b>${x.adj>0?"+":""}${F1(x.adj)}pt</b></td>
+        <td style="text-align:left" class="lv-v-${v.c}">${esc(v.t)}</td></tr>`;}).join("")}
+    </tbody></table>`;
+  if(ft)ft.innerHTML=
+    `対象 ${st.n}本。うち<b>どのタグも付かなかったのは ${st.untagged}本</b>です。`+
+    `1本に複数のタグが付くので、本数を足しても ${st.n}本にはなりません。`;
+
+  // 結びは、出た結果に合わせて書き分ける。
+  // 「たしかな差」が1つも無いのに「たしかな差のものを試して」と書くと、
+  // 読む人が無い物を探すことになる。
+  const note=document.getElementById("lv-tagnote"); if(!note)return;
+  const solid=st.tags.filter(x=>Math.abs(x.z)>=2);
+  const top=st.tags[0];
+  const thin=st.n<30
+    ? `<b>この期間は配信が${st.n}本しかありません。</b>下の数字はほとんど当てになりません。`+
+      `期間を「全期間」に広げるか、店舗の絞り込みを外して見てください。<br>`
+    : "";
+  note.innerHTML=thin+`<b>これは「効いた候補」を挙げるための表で、証明ではありません。</b>`+
+    `${st.n}本では、たまたまの上下と本当の差を見分けきれません。`+
+    (solid.length
+      ? `いまは <b>${solid.map(x=>esc(x.name)).join("・")}</b> が「たしかな差」です。`+
+        `次の配信で意識して入れ／外して、続くかどうか確かめてください。`
+      : `<b>いまは「たしかな差」と言い切れるものが1つもありません。</b>`+
+        (top?`いちばん見込みがあるのは <b>${esc(top.name)}</b>（${top.adj>0?"+":""}${F1(top.adj)}pt・${top.n}本）です。`
+            +`次の配信で意識して${top.adj>0?"入れて":"外して"}みて、差が続くかどうかを見てください。`:"")+
+        `本数が増えれば見分けがつくようになります。`);
+}
+
+// --- 開封率そのものの推移（時期をそろえる理由を目で見せる） --------------
+function lvDrawTrend(bc){
+  const box=document.getElementById("lv-trend"); if(!box)return;
+  const g=new Map();
+  for(const r of bc){ if(r.or==null||!r.sd)continue;
+    const m=r.d.slice(0,7); if(!g.has(m))g.set(m,[]); g.get(m).push(r); }
+  const ms=[...g.keys()].sort();
+  if(ms.length<2){box.innerHTML='<div class="lv-empty">推移を出すには2か月以上必要です。</div>';return;}
+  const all=lvAvgOr(bc);
+  lvCols(box,ms.map(m=>({label:m.slice(2).replace("-","/"),label2:g.get(m).length+"本",
+    v:lvAvgOr(g.get(m)),c:lvVar(box,"--lv-s1"),tipTitle:m,
+    tip:[{c:lvVar(box,"--lv-s1"),v:F1(lvAvgOr(g.get(m)))+"%",k:"その月の平均開封率"},
+         {v:g.get(m).length+"本",k:"配信数"},{v:F1(all)+"%",k:"期間全体の平均"}]})),
+    {h:190,fmt:v=>F1(v)+"%",fmtAxis:v=>F1(v)+"%",padB:40,
+     ref:all,refLabel:"全体の平均",aria:"月ごとの平均開封率"});
+  const leg=document.getElementById("lv-trendleg");
+  if(leg)leg.innerHTML=`<span><i class="sq" style="background:var(--lv-s1)"></i>その月の平均開封率</span>`+
+    `<span><i style="background:var(--muted)"></i>期間全体の平均 ${F1(all)}%</span>`;
 }
 
 // --- 同じ内容の配信を店で比べる --------------------------------------
