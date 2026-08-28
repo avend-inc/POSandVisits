@@ -49,7 +49,11 @@ create table if not exists public.bukken_teacher_bench (
   updated_at timestamptz not null default now()
 );
 
--- --- RLS：社内(@avend.co.jp)のログインユーザーだけ読める --------------
+-- --- RLS：本部(is_hq)だけ読める ---------------------------------------
+--   ※ メールのドメイン(@avend.co.jp)では判定しない。社内メンバーにも gmail.com の
+--     アカウントが実際に居り（users で7名・全員 is_internal）、ドメインで切ると
+--     社内の人を締め出す。sql/019 の is_hq() は「app_user_stores に割り当てのある人
+--     ＝加盟店」だけを外すので、ここで欲しい条件はこちら。
 --   加盟店オーナーには見せない（家賃・競合の数字が入っているため）。
 --   書き込みは admin のみ。
 alter table public.bukken_teacher_stores enable row level security;
@@ -58,7 +62,7 @@ alter table public.bukken_teacher_bench  enable row level security;
 drop policy if exists "teacher_stores_read" on public.bukken_teacher_stores;
 create policy "teacher_stores_read" on public.bukken_teacher_stores
   for select to authenticated
-  using ( public.current_app_email() like '%@avend.co.jp' );
+  using ( public.is_hq() );
 
 drop policy if exists "teacher_stores_write" on public.bukken_teacher_stores;
 create policy "teacher_stores_write" on public.bukken_teacher_stores
@@ -69,7 +73,7 @@ create policy "teacher_stores_write" on public.bukken_teacher_stores
 drop policy if exists "teacher_bench_read" on public.bukken_teacher_bench;
 create policy "teacher_bench_read" on public.bukken_teacher_bench
   for select to authenticated
-  using ( public.current_app_email() like '%@avend.co.jp' );
+  using ( public.is_hq() );
 
 drop policy if exists "teacher_bench_write" on public.bukken_teacher_bench;
 create policy "teacher_bench_write" on public.bukken_teacher_bench

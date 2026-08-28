@@ -13,8 +13,13 @@
 --   AIのスレッド（全店データを分析した内容が本文に入っている）から
 --   素通りで読めてしまう状態だった。
 --
---   → 社内(@avend.co.jp)だけが読める形に直す。社内のナレッジ共有という
---     元の意図はそのまま（社内なら他人のスレッドも読める）。
+--   → 本部(is_hq)だけが読める形に直す。社内のナレッジ共有という
+--     元の意図はそのまま（本部なら他人のスレッドも読める）。
+--
+--   ※ メールのドメイン(@avend.co.jp)では判定しない。社内メンバーにも gmail.com の
+--     アカウントが実際に居り（users で7名・全員 is_internal）、ドメインで切ると
+--     社内の人を締め出す。sql/019 の is_hq() は「app_user_stores に割り当てのある人
+--     ＝加盟店」だけを外すので、ここで欲しい条件はこちら。
 --
 -- 【② 回数の上限が無かった】
 --   Edge Function "ask" にレート制限が無く、登録メンバーの誰か1人が
@@ -25,23 +30,23 @@
 --   前提: sql/005（current_app_role / current_app_email）、sql/008 を実行済み。
 -- =====================================================================
 
--- --- ① ai_conversations：社内のみ ------------------------------------
+-- --- ① ai_conversations：本部のみ ------------------------------------
 --   ※ 加盟店オーナーは分析AIを使わない（売上アプリの自店ページのみ）。
 drop policy if exists ai_conv_select on public.ai_conversations;
 create policy ai_conv_select on public.ai_conversations
   for select to authenticated
-  using ( public.current_app_email() like '%@avend.co.jp' );
+  using ( public.is_hq() );
 
 drop policy if exists ai_conv_insert on public.ai_conversations;
 create policy ai_conv_insert on public.ai_conversations
   for insert to authenticated
-  with check ( public.current_app_email() like '%@avend.co.jp' );
+  with check ( public.is_hq() );
 
 drop policy if exists ai_conv_update on public.ai_conversations;
 create policy ai_conv_update on public.ai_conversations
   for update to authenticated
-  using ( public.current_app_email() like '%@avend.co.jp' )
-  with check ( public.current_app_email() like '%@avend.co.jp' );
+  using ( public.is_hq() )
+  with check ( public.is_hq() );
 
 -- 削除は従来どおり管理者のみ（008 のまま。再掲して取り違えを防ぐ）
 drop policy if exists ai_conv_delete on public.ai_conversations;
