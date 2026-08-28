@@ -1443,7 +1443,17 @@ let LINE_INIT=false;
 
 const lineAccts =()=>DATA.lineAccounts||[];
 const lineBcAll =()=>DATA.lineBc||[];
-const lineDayAll=()=>DATA.lineDaily||[];
+// 友だち数の代用について。
+// デジテールの友だちCSVにあるのは「日付 / 新規友だち登録数 / 累積友だち登録数」で、
+// 有効友だち数（ブロックした人を引いた数）の列が無い（2026-08-28 に実機で確認）。
+// fr が空なら累積(fo)を入れて、代用したことを cum で覚えておく（画面に断りを出す）。
+let LINE_DAY_CACHE=null;
+function lineDayAll(){
+  if(!LINE_DAY_CACHE)LINE_DAY_CACHE=(DATA.lineDaily||[])
+    .map(r=>(r.fr==null&&r.fo!=null)?Object.assign({},r,{fr:r.fo,cum:1}):r);
+  return LINE_DAY_CACHE;
+}
+const lineCum=()=>lineDayAll().some(r=>r.cum);
 const lineSrcAll=()=>DATA.lineSrc||[];
 const lineHas   =()=>lineBcAll().length>0||lineDayAll().length>0;
 
@@ -1471,7 +1481,12 @@ const lineNoMap=()=>lineAccts().filter(a=>a.si==null).length;
 function lineTotals(rows){
   const t={n:rows.length,sd:0,op:0,ck:0,cu:0,bl:0,cp:0};
   for(const r of rows){t.sd+=r.sd||0;t.op+=r.op||0;t.ck+=r.ck||0;t.cu+=r.cu||0;t.bl+=r.bl||0;t.cp+=r.cp||0;}
-  t.opr=t.sd?t.op/t.sd*100:null;      // 開封率＝開封÷配信通数
+  // 開封率は配信ごとの率(or)を配信通数で重み付けして出す。
+  // デジテールは率しか出さないので、件数(op)は率からの割り戻し。
+  // 率が無い配信が混ざっても崩れないよう、率のある行だけで計算する。
+  const wr=rows.filter(r=>r.or!=null&&r.sd);
+  const wsd=wr.reduce((a,r)=>a+r.sd,0);
+  t.opr=wsd?wr.reduce((a,r)=>a+r.or*r.sd,0)/wsd:(t.sd?t.op/t.sd*100:null);
   t.ckr=t.op?t.ck/t.op*100:null;      // クリック率＝クリック÷開封（開封した人のうち何%が押したか）
   t.ctr=t.sd?t.ck/t.sd*100:null;      // 配信あたりのクリック率
   return t;
@@ -1524,13 +1539,17 @@ function renderLine(){
 
     <div class="panel">
       <h2 data-en="Friends">友だち数の推移</h2>
-      <p class="note">友だち数（有効）と、その日の新規追加・ブロック。友だち数は過去に遡れないので毎日ためています。</p>
+      <p class="note">友だち数と、その日の新規追加・ブロック。${lineCum()
+        ?"デジテールから取れるのは<b>累積の友だち登録数</b>で、ブロックした人は引かれていません（有効友だち数の列が画面に無いため）。"
+        :"友だち数（有効）。過去に遡れないので毎日ためています。"}</p>
       <div class="chart" id="linefriends"></div>
     </div>
 
     <div class="panel">
       <h2 data-en="Broadcasts">配信の成果</h2>
-      <p class="note">配信ごとの通数・開封・クリック。開封率＝開封÷配信通数、クリック率＝クリック÷開封。</p>
+      <p class="note">配信ごとの通数・開封・クリック。開封率＝開封÷配信通数、クリック率＝クリック÷開封。
+        デジテールの配信履歴に出るのは<b>開封「率」まで</b>で、クリック数・クーポン使用数の列が無いため、
+        その2列は空欄のままです（開封件数は率から割り戻した概数）。</p>
       <div class="tblwrap"><table class="kmat" id="linebc"></table></div>
     </div>
 
@@ -1542,7 +1561,9 @@ function renderLine(){
 
     <div class="panel">
       <h2 data-en="Sources">友だち追加の経路</h2>
-      <p class="note">期間中に友だちが増えた経路の内訳。</p>
+      <p class="note">期間中に友だちが増えた経路（検索・QRコード・URL など）の内訳。
+        デジテールに経路別の画面が見当たらないため、いまは取り込めていません。
+        画面に出るようになれば、ためる先（<code>line_sources</code>）は用意してあります。</p>
       <div class="tblwrap"><table class="kmat" id="linesrc"></table></div>
     </div>
 
@@ -1566,13 +1587,22 @@ function drawLine(){
 
   // ---- 上のカード ----
   const dsum=day.reduce((a,r)=>{a.ad+=r.ad||0;a.bl+=r.bl||0;return a;},{ad:0,bl:0});
-  const lastFr=day.length?day.slice().sort((a,b)=>a.d<b.d?1:-1)[0].fr:null;
+  // 友だち数はアカウントごとに「期間内の最後の値」を取って足す。
+  // 単純に最新の1行を見ると、複数店を選んでいるときに1店の数しか出ない。
+  const lastFr=(()=>{
+    const last={};
+    for(const r of day){ if(r.fr==null)continue;
+      if(!last[r.a]||r.d>last[r.a].d)last[r.a]=r; }
+    const vs=Object.values(last);
+    return vs.length?vs.reduce((a,r)=>a+r.fr,0):null;
+  })();
   const cards=[
     {k:"配信数",   v:t.n?NUM(t.n)+"本":"—",                  n:"期間中に送った配信の本数"},
     {k:"配信通数", v:t.sd?NUM(t.sd)+"通":"—",                n:"のべ何通届いたか"},
     {k:"開封率",   v:t.opr==null?"—":F1(t.opr)+"%",          n:"開封 ÷ 配信通数"},
     {k:"クリック率",v:t.ckr==null?"—":F1(t.ckr)+"%",         n:"クリック ÷ 開封"},
-    {k:"友だち数", v:lastFr==null?"—":NUM(lastFr)+"人",      n:"期間の最終日の値"},
+    {k:lineCum()?"友だち登録数":"友だち数",
+                   v:lastFr==null?"—":NUM(lastFr)+"人",      n:lineCum()?"期間の最終日の累積":"期間の最終日の値"},
     {k:"新規追加", v:dsum.ad?NUM(dsum.ad)+"人":"—",          n:"期間中の合計"},
     {k:"ブロック", v:dsum.bl?NUM(dsum.bl)+"人":"—",          n:"期間中の合計"},
     {k:"クーポン使用",v:t.cp?NUM(t.cp)+"回":"—",             n:"配信したクーポンの使用"},
@@ -1592,7 +1622,8 @@ function drawLine(){
         const v=rs.reduce((a,r)=>a+(r[k]==null?0:r[k]),0);
         return rs.some(r=>r[k]!=null)?v:null;};
       drawMultiChart(fbox, days.map(d=>d.slice(5)), [
-        {key:"fr",label:"友だち数",color:"#06c755",vals:days.map(d=>at(d,"fr")),fmt:v=>NUM(v)+"人"},
+        {key:"fr",label:lineCum()?"友だち登録数(累積)":"友だち数",color:"#06c755",
+         vals:days.map(d=>at(d,"fr")),fmt:v=>NUM(v)+"人"},
         {key:"ad",label:"新規追加",color:"#2e9e5b",vals:days.map(d=>at(d,"ad")),fmt:v=>NUM(v)+"人"},
         {key:"bl",label:"ブロック",color:"#c0392b",vals:days.map(d=>at(d,"bl")),fmt:v=>NUM(v)+"人"},
       ], days.map(()=>false));
@@ -1610,7 +1641,7 @@ function drawLine(){
       tb.innerHTML=`<thead><tr><th>配信日</th>${showStore?"<th>店舗</th>":""}<th>配信名</th>`+
         `<th>通数</th><th>開封</th><th>開封率</th><th>クリック</th><th>クリック率</th><th>クーポン</th></tr></thead><tbody>`+
         rows.map(r=>{
-          const opr=r.sd?r.op/r.sd*100:null, ckr=r.op?r.ck/r.op*100:null;
+          const opr=(r.or!=null)?r.or:(r.sd?r.op/r.sd*100:null), ckr=r.op?r.ck/r.op*100:null;
           return `<tr><td>${esc(r.d)}</td>${showStore?`<td>${esc(nm(r.si))}</td>`:""}`+
             `<td>${esc(r.t||"（名称なし）")}</td>`+
             `<td>${r.sd?NUM(r.sd):"—"}</td><td>${r.op?NUM(r.op):"—"}</td>`+
@@ -1654,7 +1685,7 @@ function drawLine(){
         list.map(([k,v])=>`<tr><td>${esc(k)}</td><td>${NUM(v)}人</td>`+
           `<td>${tot?F1(v/tot*100):"0.0"}%</td></tr>`).join("")+
         `<tr class="prow"><td>合計</td><td>${NUM(tot)}人</td><td>100.0%</td></tr></tbody>`
-      : `<tbody><tr><td class="sub" style="padding:8px">この期間の経路データがありません。</td></tr></tbody>`;
+      : `<tbody><tr><td class="sub" style="padding:8px">経路別のデータは取り込めていません（上の説明のとおり）。</td></tr></tbody>`;
   }
 
   // ---- 取り込みがまだのときの案内 ----
@@ -1663,7 +1694,8 @@ function drawLine(){
     foot.insertAdjacentHTML("afterbegin",
       `<b>まだLINEのデータが入っていません。</b> ためる側（<code>line_accounts</code>・`+
       `<code>line_broadcasts</code>・<code>line_daily</code>・<code>line_sources</code>）は用意してあります。`+
-      `<code>etl/line_fetch.py</code> にネブラスカのURLとID/PWを設定すると入り始めます。<br>`);
+      `毎日の日次ETL（デジテール＝来店数と同じログイン）で入ります。`+
+      `手で動かすときは Actions →「NOTIME 日次ETL」→ only に line。<br>`);
   }else if(foot&&lineNoMap()){
     foot.insertAdjacentHTML("afterbegin",
       `<b>店舗と紐付いていないLINEアカウントが ${lineNoMap()} 件あります。</b>`+

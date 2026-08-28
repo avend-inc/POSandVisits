@@ -1,41 +1,46 @@
 """
-LINE配信データの取り込み（配信元＝ネブラスカ）
+LINE配信データの取り込み（デジテールストア）
 
 【使い方】
-  python -m etl.line_fetch --probe                  どんな画面・CSVがあるか調べる（最初はこれ）
-  python -m etl.line_fetch --from 2024-01-01        指定日から今日までを取り込む
-  python -m etl.line_fetch                          前日ぶんだけ取り込む（毎日の自動実行）
-  python -m etl.line_fetch --all                    取れる限り過去まで遡って取り込む
+  python -m etl.line_fetch --all                    過去分をすべて取り込む（初回）
+  python -m etl.line_fetch --from 2024-01-01        指定日から今日まで
+  python -m etl.line_fetch                          前日ぶんだけ（毎日の自動実行）
+  python -m etl.line_fetch --probe                  置き場所を調べ直す（画面が変わったとき）
 
 【この作りにした理由】
-  来店数（デジテール）と同じ仕組みをそのまま使っている。
-    ブラウザでログイン → その状態のままCSVのURLを叩く → 表に整えて Supabase へ
-  デジテールと違うのは、画面の場所（URL）と、CSVの列名を
-  **コードに書かず環境変数で指定できる**ようにしたところ。
-  ネブラスカの画面構成をこちらで確認できていないので、
-  実物に合わせて Secrets / Variables を直せば、コードを触らずに合わせられる。
+  来店数と同じ仕組みをそのまま使う。デジテールストア（開発元＝ネブラスカ）は
+  来店・売上・LINEを同じ管理画面で持っているので、
+    ブラウザでログイン → その状態のまま取りに行く → 整えて Supabase へ
+  という流れを etl/digitel_fetch.py と共有できる。
+  **認証情報も同じ**（DIGITAIL_ID / DIGITAIL_PW）。新しく登録するものは無い。
 
-【設定（GitHub の Secrets / Variables）】
-  必須:
-    NEBRASKA_LOGIN_URL   ログイン画面のURL
-    NEBRASKA_ID          ログインID
-    NEBRASKA_PW          パスワード
-  任意（実物を見てから埋める。空なら既定値で試す）:
-    NEBRASKA_BASE_URL          サイトの入口URL（省略時はログインURLのドメイン）
-    NEBRASKA_ID_SELECTOR       ID入力欄の目印
-    NEBRASKA_PW_SELECTOR       パスワード入力欄の目印
-    NEBRASKA_SUBMIT_SELECTOR   ログインボタンの目印
-    NEBRASKA_BROADCAST_URL     配信実績CSVのURL（{from} {to} {account} を差し込める）
-    NEBRASKA_FRIENDS_URL       友だち数CSVのURL（同上）
-    NEBRASKA_SOURCES_URL       流入経路CSVのURL（同上）
-    NEBRASKA_ACCOUNTS_URL      アカウント一覧のURL
-    NEBRASKA_COLMAP            列名の対応表（JSON）。CSVの見出しが想定と違うときに使う
-                               例: {"delivered":"送信数","opened":"開封"}
+【どこから何を取るか】※2026-08-28 に実機で確認
+  友だち数 … /{slug}/kpi/members/friends/download?interval=day&from=&to=
+             CSVで返る。列は「日付, 新規友だち登録数, 累積友だち登録数」
+  配信履歴 … /{slug}/messages/history
+             CSVの出口が無い（/download は404）ので、画面の表を読む。
+             列は「配信日時 / 配信人数 / メッセージタイプ / 開封率 / メッセージ」。
+             10件ずつのページ送りなので、次ページを押しながら集める。
 
-【まだ確認できていないこと】
-  ネブラスカの実際のURL・画面構成・CSVの列名は未確認。
-  --probe を1回流すと、ログイン後の画面にあるリンク・ボタン・入力欄を
-  debug/ に書き出すので、それを見て上の変数を埋める。
+【取れないもの（画面に無い）】
+  ・クリック数／クリック人数  … 配信履歴に列が無い
+  ・ブロック数               … 友だちCSVに列が無い
+  ・友だち追加の経路別        … 画面が見当たらない
+  ・クーポン使用数           … クーポン一覧はあるが実績の数字が無い
+  いずれも列は用意してあるので、画面に出るようになれば入れられる。
+
+【店舗】
+  来店数と同じ digitel_fetch.discover_stores() で「店舗名 → スラッグ」を拾う。
+  NOTIME（DIGITAIL_ID/PW）と SELFURUGI（DIGITAIL_SF_ID/PW）の2アカウントを回る。
+  line_accounts.account_id はデジテールのスラッグ（例 notime_fukui）。
+  店舗との紐付け（line_accounts.store_id ＝ POS店舗）は取り込みのたびに
+  店名から自動で埋める（link_stores）。表記が違っても拾えるが、
+  1つに絞れないものは空のままログに出す。人が入れた紐付けは上書きしない。
+
+【設定（任意・GitHub の Variables）】
+  DIGITEL_LINE_FRIENDS_PATH   友だちCSVのパス。画面が変わったときだけ使う
+  DIGITEL_LINE_COLMAP         CSVの見出しが変わったときの対応表(JSON)
+  DIGITEL_LINE_HISTORY_FROM   --all の開始日。既定 "2019-01-01"
 """
 from __future__ import annotations
 
@@ -43,10 +48,13 @@ import argparse
 import json
 import os
 import sys
-from datetime import date, datetime, timedelta
+import time
+from datetime import datetime, timedelta
 
-from .browser import browser_page, dump_controls, dump_page
+from . import digitel_fetch
+from .browser import browser_page, dump_page
 from .settings import (
+    DIGITEL_BASE_URL,
     JST,
     EtlError,
     load_dotenv,
@@ -75,108 +83,67 @@ def _require(name: str) -> str:
     return v
 
 
-def _base_url() -> str:
-    base = _env("NEBRASKA_BASE_URL")
-    if base:
-        return base.rstrip("/")
-    login = _require("NEBRASKA_LOGIN_URL")
-    # ログインURLからドメインだけ取り出す
-    parts = login.split("/")
-    return "/".join(parts[:3]) if len(parts) >= 3 else login
-
-
-# CSVの見出し → こちらの列名。実物に合わせて NEBRASKA_COLMAP で上書きできる。
-# 1つの列に複数の呼び名を並べてあるのは、配信ツールによって言い回しが違うため。
+# CSVの見出し → こちらの列名。実物に合わせて DIGITEL_LINE_COLMAP で上書きできる。
+# 1つの列に複数の呼び名を並べてあるのは、画面の言い回しが分からないうちに
+# 決め打ちすると外れるため。
 DEFAULT_ALIASES: dict[str, list[str]] = {
-    "broadcast_id": ["配信ID", "メッセージID", "ID", "broadcast_id"],
     "sent_at":      ["配信日時", "送信日時", "配信日", "日時", "sent_at"],
     "title":        ["配信名", "メッセージ名", "タイトル", "件名", "title"],
     "kind":         ["配信種別", "種別", "配信タイプ", "type"],
-    "target":       ["配信対象", "ターゲット", "セグメント", "target"],
     "delivered":    ["配信通数", "送信数", "配信数", "delivered", "sent"],
     "opened":       ["開封数", "インプレッション", "表示回数", "opened", "impressions"],
     "clicked":      ["クリック数", "クリック", "clicked", "clicks"],
-    "click_users":  ["クリックユーザー数", "クリック人数", "click_users"],
     "blocked":      ["ブロック数", "ブロック", "blocked"],
     "coupon_used":  ["クーポン使用数", "クーポン利用数", "coupon_used"],
     # 友だち数（日次）
     "date":         ["日付", "date", "集計日"],
     "friends":      ["友だち数", "有効友だち数", "friends"],
-    "followers":    ["累計友だち数", "追加友だち数(累計)", "followers"],
-    "added":        ["新規友だち数", "友だち追加数", "追加", "added"],
+    "followers":    ["累積友だち登録数", "累計友だち数", "追加友だち数(累計)", "followers"],
+    # ↓ 実物のCSVで確認済み（/{slug}/kpi/members/friends/download）
+    "added":        ["新規友だち登録数", "新規友だち数", "友だち追加数", "追加", "added"],
     "net":          ["純増", "増減", "net"],
     "targeted":     ["ターゲットリーチ", "配信可能数", "targeted"],
     # 流入経路
     "source":       ["経路", "流入経路", "追加経路", "source"],
 }
 
+# CSVで取れるのは友だち数だけ（配信履歴は画面の表を読む）。
+# 画面が変わったら Variables（DIGITEL_LINE_FRIENDS_PATH）で差し替えられる。
+DEFAULT_PATHS = {
+    "FRIENDS": "/{slug}/kpi/members/friends/download?interval=day&from={from}&to={to}",
+}
+
 
 def _aliases() -> dict[str, list[str]]:
-    """既定の対応表に、NEBRASKA_COLMAP で指定された呼び名を足す。"""
+    """既定の対応表に、DIGITEL_LINE_COLMAP で指定された呼び名を足す。"""
     out = {k: list(v) for k, v in DEFAULT_ALIASES.items()}
-    raw = _env("NEBRASKA_COLMAP")
+    raw = _env("DIGITEL_LINE_COLMAP")
     if not raw:
         return out
     try:
         extra = json.loads(raw)
     except json.JSONDecodeError as e:
-        raise EtlError(f"NEBRASKA_COLMAP がJSONとして読めません: {e}") from e
+        raise EtlError(f"DIGITEL_LINE_COLMAP がJSONとして読めません: {e}") from e
     for key, names in extra.items():
         vals = names if isinstance(names, list) else [names]
         out.setdefault(key, [])
-        # 指定されたものを先頭に置く（既定より優先する）
         out[key] = [str(v) for v in vals] + [v for v in out[key] if v not in vals]
     return out
 
 
-# ============================================================
-#  ログイン
-# ============================================================
-def login(page) -> None:
-    """ネブラスカにログインする。目印は環境変数で差し替えられる。"""
-    url = _require("NEBRASKA_LOGIN_URL")
-    user = _require("NEBRASKA_ID")
-    pw = _require("NEBRASKA_PW")
-
-    page.goto(url, wait_until="domcontentloaded")
-
-    # 目印の指定が無ければ、よくある形をこの順で試す
-    id_sel = _env("NEBRASKA_ID_SELECTOR")
-    pw_sel = _env("NEBRASKA_PW_SELECTOR") or 'input[type="password"]'
-    go_sel = _env("NEBRASKA_SUBMIT_SELECTOR") or 'button[type="submit"]'
-    id_candidates = [id_sel] if id_sel else [
-        'input[type="email"]', 'input[name="email"]', 'input[name="login_id"]',
-        'input[name="username"]', 'input[name="id"]', 'input[type="text"]',
-    ]
-
-    filled = False
-    for sel in id_candidates:
-        try:
-            page.fill(sel, user, timeout=4000)
-            filled = True
-            break
-        except Exception:
-            continue
-    if not filled:
-        dump_controls(page, "nebraska_login_notfound")
-        raise EtlError(
-            "ネブラスカのログイン画面で、ID入力欄が見つかりませんでした。\n"
-            "  → debug/ に画面の入力欄・ボタンの一覧を書き出しました。\n"
-            "  → それを見て NEBRASKA_ID_SELECTOR を指定してください。"
-        )
-
-    page.fill(pw_sel, pw)
-    page.click(go_sel)
-    page.wait_for_load_state("domcontentloaded")
-
-    # ログインできたか。まだログイン画面にいるなら失敗とみなす
-    if "login" in (page.url or "").lower() and "dashboard" not in (page.url or "").lower():
-        dump_page(page, "nebraska_login_failed")
-        raise EtlError(
-            "ネブラスカにログインできませんでした（ID/PW誤り・2段階認証・画面変更の可能性）。\n"
-            f"  → まずご自分のブラウザで {url} に入れるか確かめてください。\n"
-            "  → debug/ に画面を保存しました。"
-        )
+def _url_for(kind: str, slug: str, start: str, end: str) -> str:
+    """CSVのURLを組み立てる。パスは Variables で差し替えられる。"""
+    tmpl = _env(f"DIGITEL_LINE_{kind}_PATH") or DEFAULT_PATHS[kind]
+    path = (tmpl.replace("{slug}", slug)
+                .replace("{from}", start).replace("{to}", end)
+                .replace("{start}", start).replace("{end}", end))
+    if not path.startswith("http"):
+        path = DIGITEL_BASE_URL + ("" if path.startswith("/") else "/") + path
+    # 期間の指定がパスに無ければクエリで付ける（来店CSVと同じ形）
+    if "{" not in tmpl and "start" not in path and "from" not in path:
+        sep = "&" if "?" in path else "?"
+        path = f"{path}{sep}start={start}&end={end}"
+    return path
 
 
 # ============================================================
@@ -184,48 +151,54 @@ def login(page) -> None:
 # ============================================================
 def probe(headless: bool = True) -> int:
     """
-    ログインしたあと、画面にあるリンク・ボタン・入力欄を debug/ に書き出す。
-    ネブラスカの画面構成が分からないので、まずこれを1回流して中身を見る。
+    デジテールにログインして、LINE配信データの置き場所を探す。
+    来店・売上と同じログイン（DIGITAIL_ID / DIGITAIL_PW）を使う。
     """
     with browser_page(headless=headless) as (page, context):
-        login(page)
+        digitel_fetch.login(page)
         print(f"  ログイン後のURL: {page.url}")
-        dump_controls(page, "nebraska_top")
-        dump_page(page, "nebraska_top")
 
-        # 画面内のリンクを一覧にする。CSVの出口や「分析」ページを見つける手がかりにする。
-        links = page.eval_on_selector_all(
-            "a[href]",
-            "els => els.map(e => ({t: (e.innerText||'').trim().slice(0,40), h: e.getAttribute('href')}))",
-        )
-        seen, rows = set(), []
-        for l in links:
-            h = l.get("h") or ""
-            if not h or h.startswith("#") or h in seen:
+        stores = digitel_fetch.discover_stores(page)
+        print(f"  見つかった店舗: {len(stores)}件")
+        for nm, sl in list(sorted(stores.items()))[:10]:
+            print(f"     {nm} → {sl}")
+        if not stores:
+            dump_page(page, "digitel_line_probe_nostores")
+            raise EtlError("店舗を1件も見つけられませんでした。debug/ を確認してください。")
+
+        slug = sorted(stores.values())[0]
+        print(f"\n  この店舗で調べます: {slug}")
+
+        # 画面内のリンクからLINEらしきものを拾う
+        for path in ("", "/line", "/kpi", "/kpi/line", "/message", "/broadcast"):
+            url = f"{DIGITEL_BASE_URL}/{slug}{path}"
+            try:
+                resp = page.goto(url, wait_until="domcontentloaded", timeout=20_000)
+                code = resp.status if resp else "?"
+            except Exception as e:
+                print(f"    {url} → 開けません（{str(e)[:60]}）")
                 continue
-            seen.add(h)
-            rows.append(f"  {l.get('t') or '(文字なし)':<42} {h}")
-        print(f"\n  ---- 画面内のリンク {len(rows)}件 ----")
-        for r in rows[:120]:
-            print(r)
+            page.wait_for_timeout(1200)
+            try:
+                hrefs = page.eval_on_selector_all(
+                    "a[href]", "els => els.map(e => e.getAttribute('href')).filter(Boolean)")
+            except Exception:
+                hrefs = []
+            line_links = [h for h in hrefs if any(
+                k in h.lower() for k in ("line", "message", "broadcast", "friend"))]
+            mark = "★" if line_links else " "
+            print(f"  {mark} {url} → HTTP {code} / リンク{len(hrefs)}件")
+            for h in line_links[:10]:
+                print(f"       → {h}")
 
-        hints = [r for r in rows if any(
-            k in r.lower() for k in
-            ("csv", "download", "export", "分析", "配信", "友だち", "友達", "レポート", "統計")
-        )]
-        if hints:
-            print("\n  ---- CSV・分析まわりに見えるもの ----")
-            for r in hints:
-                print(r)
-        print("\n  この一覧をもとに NEBRASKA_BROADCAST_URL などを決めてください。")
+        dump_page(page, "digitel_line_probe")
+        print("\n  ★ が付いたURLと、その下のリンクを見て")
+        print("     DIGITEL_LINE_BROADCAST_PATH などを Variables に設定してください。")
     return 0
 
 
-# ============================================================
-#  CSVの取得
-# ============================================================
 def _fetch_csv(context, url: str) -> str:
-    """ログイン済みの状態でCSVのURLを取りに行く（デジテールと同じやり方）。"""
+    """ログイン済みの状態でCSVのURLを取りに行く（来店数の取り込みと同じやり方）。"""
     resp = context.request.get(url, timeout=120_000)
     if resp.status != 200:
         raise EtlError(f"CSVの取得に失敗しました（HTTP {resp.status}） URL: {url}")
@@ -238,84 +211,237 @@ def _fetch_csv(context, url: str) -> str:
     return body.decode("utf-8", errors="replace")
 
 
-def _url_for(kind: str, start: str, end: str, account: str = "") -> str:
-    """URLの雛形に期間とアカウントを差し込む。"""
-    tmpl = _env(f"NEBRASKA_{kind}_URL")
-    if not tmpl:
-        raise EtlError(
-            f"NEBRASKA_{kind}_URL が未設定です。\n"
-            "  → 先に `python -m etl.line_fetch --probe` を流して、\n"
-            "     ネブラスカのどのURLでCSVが取れるかを確かめてください。"
-        )
-    return (tmpl.replace("{from}", start).replace("{to}", end)
-                .replace("{account}", account).replace("{start}", start).replace("{end}", end))
+# ============================================================
+#  配信履歴（画面の表を読む）
+# ============================================================
+#   /{slug}/messages/history には CSVダウンロードが無い（/download は404）。
+#   Remixのローダー（.data）は返るが独自形式で壊れやすいので、画面の表を読む。
+#   列: 配信日時 / 配信人数 / メッセージタイプ / 開封率 / メッセージ
+def fetch_broadcasts(page, slug: str) -> list[dict]:
+    url = f"{DIGITEL_BASE_URL}/{slug}/messages/history"
+    page.goto(url, wait_until="networkidle", timeout=60_000)
+    page.wait_for_timeout(1500)
+
+    rows: list[dict] = []
+    seen_first = ""
+    for _ in range(200):                     # 200ページ＝2000件で打ち切り（無限ループ避け）
+        try:
+            got = page.evaluate(r"""() => {
+              const tb = document.querySelector("table tbody");
+              if(!tb) return [];
+              return Array.from(tb.querySelectorAll("tr")).map(tr =>
+                Array.from(tr.querySelectorAll("td"))
+                     .map(td => (td.innerText||'').trim().replace(/\s+/g,' ')));
+            }""")
+        except Exception:
+            got = []
+        if not got:
+            break
+        first = "|".join(got[0]) if got and got[0] else ""
+        if first and first == seen_first:    # ページが進んでいない
+            break
+        seen_first = first
+        rows.extend(got)
+
+        # 次のページへ。押せなくなったら終わり
+        try:
+            nxt = page.locator("button[aria-label='Go to next page'], "
+                               "button:has-text('Go to next page')").first
+            if nxt.is_disabled():
+                break
+            nxt.click(timeout=4_000)
+            page.wait_for_timeout(1200)
+        except Exception:
+            break
+    return rows
 
 
 # ============================================================
 #  取り込み本体
 # ============================================================
-def run(start: str, end: str, headless: bool = True) -> int:
-    import pandas as pd
+# ============================================================
+#  LINEアカウント → POS店舗 の紐付け
+# ============================================================
+#   画面の店舗別の絞り込みは line_accounts.store_id（POS店舗）で効く。
+#   ここが空だと「店舗」の選択肢が1つも出ず、全店合計しか見られない。
+#   デジテールの店名とPOSの店名は表記が違うので（セルフルギ⇔SELFURUGI、
+#   GARAGE の有無、全角スペース）、正規化して突き合わせる。
+#
+#   ・すでに入っている紐付けは触らない（人が直したものを上書きしない）
+#   ・候補が1つに絞れないものは空のまま残し、名前をログに出す
+#     （間違った店に付けるくらいなら、空にして気づけるようにする）
+def _norm(name: str) -> str:
+    s = (name or "").upper()
+    s = s.replace("セルフルギ", "SELFURUGI").replace("ノータイム", "NOTIME")
+    for ch in (" ", "\u3000", "_", "-", "・"):
+        s = s.replace(ch, "")
+    return s
 
-    from .line_rows import broadcast_rows, daily_rows, source_rows
 
+def link_stores(sb: Supabase) -> int:
+    """store_id が空の line_accounts を、店名からPOS店舗に紐付ける。"""
+    try:
+        accts = sb.select("line_accounts", {"select": "account_id,name,store_id"})
+        stores = sb.select("stores", {"select": "id,name"})
+    except Exception as e:                                   # noqa: BLE001
+        print(f"  [紐付け] 店舗を読めませんでした: {e}")
+        return 0
+
+    todo = [a for a in accts if a.get("store_id") is None and a.get("name")]
+    if not todo:
+        return 0
+    taken = {a["store_id"] for a in accts if a.get("store_id") is not None}
+
+    exact: dict[str, list[int]] = {}
+    for s in stores:
+        exact.setdefault(_norm(s["name"]), []).append(s["id"])
+    # 2周目のゆるい突き合わせ用（GARAGE の有無だけが違う店を拾う）
+    loose: dict[str, list[int]] = {}
+    for s in stores:
+        loose.setdefault(_norm(s["name"]).replace("GARAGE", ""), []).append(s["id"])
+
+    done = 0
+    for a in todo:
+        key = _norm(a["name"])
+        ids = exact.get(key) or []
+        if len(ids) != 1:
+            # 完全一致で決まらなかったものだけ、GARAGE を外して見直す。
+            # 先に決まった店は候補から外す（鎌ヶ谷のように GARAGE 有無で
+            # 2店ある地域を取り違えないため）
+            ids = [i for i in (loose.get(key.replace("GARAGE", "")) or [])
+                   if i not in taken]
+        if len(ids) != 1:
+            print(f"  [紐付け] 店舗を決められません: {a['name']}"
+                  f"（候補 {len(ids)}件・空のままにします）")
+            continue
+        try:
+            sb.update("line_accounts", {"account_id": f"eq.{a['account_id']}"},
+                      {"store_id": ids[0]})
+        except Exception as e:                               # noqa: BLE001
+            print(f"  [紐付け] {a['name']} を紐付けられませんでした: {e}")
+            continue
+        taken.add(ids[0])
+        done += 1
+    if done:
+        print(f"  [紐付け] {done}件のLINEアカウントをPOS店舗に紐付けました")
+    return done
+
+
+def _run_account(sb: Supabase, user: str | None, pw: str | None, label: str,
+                 end: str, history_from: str, recent_days: int,
+                 headless: bool, deadline: float) -> dict:
+    """
+    1アカウントぶん取り込む。
+
+    期間は**店舗ごと**に決める。まだ1行も無い店は全期間、ある店は直近ぶんだけ。
+    こうしておくと、途中で時間切れになっても次の回が続きから取りに行ける
+    （全体で1回だけ判定すると、1店でも入った時点で以降ずっと直近だけになり、
+      残りの店の過去分が永久に入らない）。
+    """
+    from .line_rows import broadcast_rows_from_table, daily_rows
+
+    aliases = _aliases()
+    total = {"accounts": 0, "daily": 0, "broadcasts": 0, "skipped": 0}
+
+    with browser_page(headless=headless) as (page, context):
+        digitel_fetch.login(page, user, pw)
+        stores = digitel_fetch.discover_stores(page)
+        print(f"  [{label}] 店舗 {len(stores)}件")
+        if not stores:
+            return total
+
+        acct_rows = [{"account_id": slug, "name": name} for name, slug in sorted(stores.items())]
+        sb.upsert("line_accounts", acct_rows, on_conflict="account_id")
+        total["accounts"] = len(acct_rows)
+        link_stores(sb)
+
+        for name, slug in sorted(stores.items()):
+            if time.monotonic() > deadline:
+                total["skipped"] += 1
+                continue
+
+            # この店にデータがあるか。無ければ全期間を取りに行く
+            try:
+                seen = sb.select("line_daily",
+                                 {"select": "date", "account_id": f"eq.{slug}", "limit": "1"})
+            except Exception:
+                seen = []
+            if seen:
+                start = (datetime.strptime(end, "%Y-%m-%d")
+                         - timedelta(days=recent_days)).strftime("%Y-%m-%d")
+            else:
+                start = history_from
+
+            try:
+                text = _fetch_csv(context, _url_for("FRIENDS", slug, start, end))
+                d = daily_rows(text, slug, aliases)
+                if d:
+                    sb.upsert("line_daily", d, on_conflict="date,account_id")
+                total["daily"] += len(d)
+                print(f"    {name}: 友だち {len(d)}日ぶん（{start}〜{end}）")
+            except Exception as e:                       # noqa: BLE001
+                print(f"    ⚠️ {name}: 友だちを取れません: {str(e)[:120]}")
+
+            try:
+                table = fetch_broadcasts(page, slug)
+                b = broadcast_rows_from_table(table, slug, start, end)
+                if b:
+                    sb.upsert("line_broadcasts", b, on_conflict="broadcast_id")
+                total["broadcasts"] += len(b)
+                print(f"    {name}: 配信 {len(b)}件")
+            except Exception as e:                       # noqa: BLE001
+                print(f"    ⚠️ {name}: 配信履歴を取れません: {str(e)[:120]}")
+
+    return total
+
+
+def run(start: str, end: str, headless: bool = True,
+        history_from: str = "", recent_days: int = 14,
+        budget_min: int = 25) -> int:
+    """
+    取り込みの入口。
+
+    start は「全期間の開始日」として使う（店舗ごとに、未取得なら全期間・
+    取得済みなら直近 recent_days ぶん、と自動で切り替わる）。
+    budget_min を過ぎたら新しい店に着手しない。日次ETLの制限時間を
+    食いつぶして、売上・来店のダッシュボード更新まで巻き込まないため。
+    """
     load_dotenv()
     sb = Supabase()
     run_id = new_run_id()
-    aliases = _aliases()
+    deadline = time.monotonic() + budget_min * 60
+    grand = {"accounts": 0, "daily": 0, "broadcasts": 0, "skipped": 0}
 
-    with browser_page(headless=headless) as (page, context):
-        login(page)
+    accounts = [(None, None, "NOTIME")]
+    sf_id, sf_pw = _env("DIGITAIL_SF_ID"), _env("DIGITAIL_SF_PW")
+    if sf_id and sf_pw:
+        accounts.append((sf_id, sf_pw, "SELFURUGI"))
+    else:
+        print("  ℹ️ DIGITAIL_SF_ID / PW が未設定のため SELFURUGI はスキップ")
 
-        # アカウント一覧。1アカウントだけの運用なら NEBRASKA_ACCOUNTS_URL は空でよい。
-        accounts: list[dict] = []
-        if _env("NEBRASKA_ACCOUNTS_URL"):
-            text = _fetch_csv(context, _url_for("ACCOUNTS", start, end))
-            df = pd.read_csv(__import__("io").StringIO(text))
-            for _, r in df.iterrows():
-                accounts.append({k: r.get(k) for k in df.columns})
-        if not accounts:
-            accounts = [{"account_id": _env("NEBRASKA_ACCOUNT_ID", "default"),
-                         "name": _env("NEBRASKA_ACCOUNT_NAME", "LINE公式アカウント")}]
+    for user, pw, label in accounts:
+        try:
+            t = _run_account(sb, user, pw, label, end,
+                             history_from or start, recent_days, headless, deadline)
+            for k in grand:
+                grand[k] += t.get(k, 0)
+        except Exception as e:                           # noqa: BLE001
+            print(f"  ⚠️ [{label}] 取り込みに失敗: {str(e)[:200]}")
 
-        # 台帳を先に入れる（配信・日次が外部キーで参照するため）
-        acct_rows = [{"account_id": str(a.get("account_id") or "default"),
-                      "name": a.get("name"),
-                      "basic_id": a.get("basic_id")} for a in accounts]
-        sb.upsert("line_accounts", acct_rows, on_conflict="account_id")
-        print(f"  アカウント: {len(acct_rows)}件")
-
-        total = {"broadcasts": 0, "daily": 0, "sources": 0}
-        for a in acct_rows:
-            aid = a["account_id"]
-
-            for kind, table, builder, key in (
-                ("BROADCAST", "line_broadcasts", broadcast_rows, "broadcast_id"),
-                ("FRIENDS",   "line_daily",      daily_rows,     "date,account_id"),
-                ("SOURCES",   "line_sources",    source_rows,    "date,account_id,source"),
-            ):
-                if not _env(f"NEBRASKA_{kind}_URL"):
-                    print(f"  ℹ️ NEBRASKA_{kind}_URL 未設定のためスキップ")
-                    continue
-                text = _fetch_csv(context, _url_for(kind, start, end, aid))
-                rows = builder(text, aid, aliases)
-                if rows:
-                    sb.upsert(table, rows, on_conflict=key)
-                total[table.replace("line_", "")] = total.get(table.replace("line_", ""), 0) + len(rows)
-                print(f"  {a.get('name') or aid} / {table}: {len(rows)}行")
-
-    print(f"\n✅ 取り込み完了 {start}〜{end} "
-          f"（配信 {total.get('broadcasts', 0)} / 日次 {total.get('daily', 0)} / 経路 {total.get('sources', 0)}）"
-          f"  run_id={run_id}")
+    print(f"\n✅ LINE取り込み完了（アカウント {grand['accounts']} / "
+          f"友だち {grand['daily']}行 / 配信 {grand['broadcasts']}件）  run_id={run_id}")
+    if grand["skipped"]:
+        print(f"  ⏭️ 時間の都合で {grand['skipped']}店は次回にまわしました"
+              f"（未取得の店は次の回で全期間を取りにいきます）")
     return 0
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="LINE配信データ（ネブラスカ）を取り込む")
+    ap = argparse.ArgumentParser(description="LINE配信データ（デジテールストア）を取り込む")
     ap.add_argument("--from", dest="start", default="", help="開始日 YYYY-MM-DD")
     ap.add_argument("--to", dest="end", default="", help="終了日 YYYY-MM-DD（空なら今日）")
     ap.add_argument("--all", action="store_true", help="取れる限り過去まで遡る")
-    ap.add_argument("--probe", action="store_true", help="画面構成を調べて debug/ に書き出す")
+    ap.add_argument("--probe", action="store_true", help="どこにデータがあるか調べる")
     ap.add_argument("--headed", action="store_true", help="ブラウザの画面を出す（調査用）")
     args = ap.parse_args()
 
@@ -325,8 +451,7 @@ def main() -> int:
 
     end = validate_date(args.end) if args.end else datetime.now(JST).date().isoformat()
     if args.all:
-        # 「過去分すべて」。LINE公式アカウントの提供開始より前は無いので、そこで止める。
-        start = _env("NEBRASKA_HISTORY_FROM", "2019-01-01")
+        start = _env("DIGITEL_LINE_HISTORY_FROM", "2019-01-01")
     elif args.start:
         start = validate_date(args.start)
     else:
