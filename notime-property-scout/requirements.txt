@@ -4,7 +4,7 @@
 
 requests>=2.31        # HTTP取得（§5.4：3秒間隔・robots尊重・UAに連絡先）
 beautifulsoup4>=4.12  # HTMLパース（§5.1.1 連合隊カード）
-lxml>=4.9             # bs4のパーサ
+lxml>=6.1.2             # bs4のパーサ
 PyYAML>=6.0           # cities.yaml / registry.yaml
 
 # 第2段階以降で追加予定（MVPでは未使用）:
