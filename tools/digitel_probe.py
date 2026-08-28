@@ -174,54 +174,78 @@ def main() -> int:
             print("  店舗スラッグを取れなかったので調べられません")
         else:
             print(f"  調査対象の店舗: {slug}")
-            # 店舗ページ以降で飛ぶ通信を記録する（CSVのAPIはここに出る）
             seen_req: list[str] = []
             page.on("request", lambda r: seen_req.append(f"{r.method} {r.url}"))
 
-            for path in ("", "/kpi", "/kpi/visits", "/line", "/kpi/line",
-                         "/message", "/messages", "/broadcast", "/marketing"):
-                url = f"{DIGITEL_BASE_URL}/{slug}{path}"
+            # ① 店舗ページでナビゲーションを開き、メニューの行き先を全部拾う。
+            #    メニューに「メッセージ配信」「LINE公式アカウント」があるのは確認済み。
+            #    どのURLに飛ぶのかをここで確定させる。
+            page.goto(f"{DIGITEL_BASE_URL}/{slug}", wait_until="networkidle", timeout=25_000)
+            page.wait_for_timeout(1200)
+            for sel in ("button:has-text('ナビゲーションを開く')",
+                        "[aria-label='ナビゲーションを開く']",
+                        "button[aria-haspopup='menu']", "nav button"):
                 try:
-                    resp = page.goto(url, wait_until="networkidle", timeout=25_000)
-                    code = resp.status if resp else "?"
-                except Exception as e:
-                    print(f"    {url} → 開けません（{str(e)[:70]}）")
+                    page.locator(sel).first.click(timeout=3_000)
+                    page.wait_for_timeout(900)
+                    break
+                except Exception:
                     continue
-                page.wait_for_timeout(1500)
+            try:
+                nav = page.evaluate(r"""() => Array.from(document.querySelectorAll("a[href]"))
+                    .map(a => ({t:(a.innerText||'').trim().replace(/\s+/g,' ').slice(0,24),
+                                h:a.getAttribute('href')}))
+                    .filter(x => x.h && !x.h.startsWith('#'))""")
+            except Exception:
+                nav = []
+            print(f"\n  ---- ナビゲーションの行き先 {len(nav)}件 ----")
+            for x in nav:
+                star = "★" if any(k in x["t"] for k in ("配信", "LINE", "会員", "メッセージ")) else " "
+                print(f"   {star} {x['t'] or '(文字なし)':<24} {x['h']}")
+
+            # ② メニュー項目を順に押して、遷移先URLを記録する（リンクでなくボタンの場合）
+            for label_txt in ("メッセージ配信", "LINE公式アカウント", "KPIデータ"):
                 try:
-                    info = page.evaluate(r"""() => {
-                      const links = Array.from(document.querySelectorAll("a[href]"))
-                        .map(a => ({t:(a.innerText||'').trim().replace(/\s+/g,' ').slice(0,30),
-                                    h:a.getAttribute('href')}))
-                        .filter(x => x.h && !x.h.startsWith('#'));
-                      const btns = Array.from(document.querySelectorAll("button,[role=tab],[role=menuitem]"))
-                        .map(b => (b.innerText||'').trim().replace(/\s+/g,' ').slice(0,30))
-                        .filter(Boolean);
-                      return {title: document.title, links, btns,
-                              body: (document.body.innerText||'').replace(/\s+/g,' ').slice(0,600)};
-                    }""")
+                    page.goto(f"{DIGITEL_BASE_URL}/{slug}", wait_until="networkidle", timeout=20_000)
+                    page.wait_for_timeout(800)
+                    for sel in ("button:has-text('ナビゲーションを開く')", "nav button"):
+                        try:
+                            page.locator(sel).first.click(timeout=2_500); page.wait_for_timeout(600); break
+                        except Exception:
+                            continue
+                    page.get_by_text(label_txt, exact=False).first.click(timeout=5_000)
+                    page.wait_for_load_state("networkidle", timeout=15_000)
+                    page.wait_for_timeout(1200)
+                    print(f"\n  ★「{label_txt}」→ {page.url}")
+                    sub = page.evaluate(r"""() => ({
+                      links: Array.from(document.querySelectorAll("a[href]"))
+                        .map(a=>({t:(a.innerText||'').trim().replace(/\s+/g,' ').slice(0,24),h:a.getAttribute('href')}))
+                        .filter(x=>x.h&&!x.h.startsWith('#')),
+                      btns: Array.from(document.querySelectorAll("button")).map(b=>(b.innerText||'').trim()).filter(Boolean),
+                      body: (document.body.innerText||'').replace(/\s+/g,' ').slice(0,400)})""")
+                    for x in sub["links"][:20]:
+                        print(f"        {x['t'] or '?':<24} {x['h']}")
+                    print(f"        ボタン: {', '.join(dict.fromkeys(sub['btns']))[:250]}")
+                    print(f"        画面: {sub['body'][:250]}")
                 except Exception as e:
-                    print(f"    {url} → 読めません（{str(e)[:60]}）"); continue
+                    print(f"\n  「{label_txt}」を押せません: {str(e)[:90]}")
 
-                lineish = [x for x in info["links"]
-                           if any(k in (x["t"]+x["h"]).lower()
-                                  for k in ("line", "配信", "友だち", "友達", "message", "broadcast"))]
-                mark = "★" if lineish else " "
-                print(f"\n  {mark} {url} → HTTP {code}  「{info['title']}」")
-                if info["links"]:
-                    print(f"      リンク({len(info['links'])}件): "
-                          + ", ".join(f"{x['t'] or '?'}→{x['h']}" for x in info["links"][:25]))
-                if info["btns"]:
-                    print(f"      ボタン/タブ: {', '.join(dict.fromkeys(info['btns']))[:400]}")
-                if code == 200 and not info["links"]:
-                    print(f"      画面の文字: {info['body'][:300]}")
+            # ③ 会員関連（友だち数）のCSVが取れるか、実際に叩いて確かめる
+            print("\n  ---- 会員関連データ(友だち数)のCSVを試す ----")
+            for path in (f"/{slug}/kpi/members/friends/download?interval=day&from=2026-08-01&to=2026-08-27",
+                         f"/{slug}/kpi/members/download?interval=day&from=2026-08-01&to=2026-08-27"):
+                url = DIGITEL_BASE_URL + path
+                try:
+                    r = context.request.get(url, timeout=60_000)
+                    body = r.body()[:400].decode("utf-8", errors="replace")
+                    print(f"   {url}\n     → HTTP {r.status} / 先頭: {body[:250]!r}")
+                except Exception as e:
+                    print(f"   {url} → 失敗 {str(e)[:70]}")
 
-            # LINEに関係しそうな通信だけ抜き出す
             hits = [u for u in dict.fromkeys(seen_req)
-                    if any(k in u.lower() for k in
-                           ("line", "message", "broadcast", "friend", "download", "csv", "export"))]
+                    if any(k in u.lower() for k in ("line", "message", "broadcast", "friend", "member", "download"))]
             if hits:
-                print("\n  ★ データ取得らしき通信:")
+                print("\n  ★ 関連する通信:")
                 for u in hits[:40]:
                     print(f"       {u}")
 
