@@ -509,6 +509,128 @@
     border-radius:9px;padding:7px 11px;font-size:12px;font-weight:700;
     text-decoration:none;cursor:pointer;}
   .homebtn:hover{border-color:var(--accent);}
+/* ============================================================
+   LINE分析ダッシュボード（.lv）
+   ------------------------------------------------------------
+   他のタブとは別の作りにしてある（依頼により、レイアウトを揃えない）。
+   色は data-viz の検証済みパレットを使い、検証を通してある:
+     カテゴリ  青 #2a78d6 / 緑 #1baf7a / 橙 #eb6834（暗色は別ステップ）
+     発散      青 ←→ 赤（平均より上/下。中央は無彩色）
+   validate_palette.js で light(#ffffff) / dark(#161b22) の両方 PASS。
+   緑だけ明色面で 2.82:1（3:1未満）なので、緑を使う図には必ず
+   数値ラベルか表を添える（パレット側の「relief rule」）。
+   ============================================================ */
+.lv{
+  --lv-s1:#2a78d6;            /* 配信まわり */
+  --lv-s2:#1baf7a;            /* 友だちまわり */
+  --lv-s3:#eb6834;            /* 3つめ */
+  --lv-pos:#2a78d6;           /* 平均より上 */
+  --lv-neg:#e34948;           /* 平均より下 */
+  --lv-mid:#c3c2b7;           /* 発散の中央 */
+  --lv-grid:#e1e0d9;
+  --lv-axis:#c3c2b7;
+  --lv-wash:rgba(42,120,214,.10);
+  --lv-wash2:rgba(27,175,122,.10);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .lv{
+  --lv-s1:#3987e5; --lv-s2:#199e70; --lv-s3:#d95926;
+  --lv-pos:#3987e5; --lv-neg:#e66767; --lv-mid:#383835;
+  --lv-grid:#2c2c2a; --lv-axis:#383835;
+  --lv-wash:rgba(57,135,229,.14); --lv-wash2:rgba(25,158,112,.14);
+}}
+:root[data-theme="dark"] .lv{
+  --lv-s1:#3987e5; --lv-s2:#199e70; --lv-s3:#d95926;
+  --lv-pos:#3987e5; --lv-neg:#e66767; --lv-mid:#383835;
+  --lv-grid:#2c2c2a; --lv-axis:#383835;
+  --lv-wash:rgba(57,135,229,.14); --lv-wash2:rgba(25,158,112,.14);
+}
+
+.lv{max-width:1180px;margin:0 auto;padding:0 2px 40px;}
+
+/* --- 絞り込み（1行にまとめて図の上に置く） --- */
+.lv-filters{display:flex;flex-wrap:wrap;align-items:center;gap:8px;
+  padding:12px 14px;margin:14px 0 18px;background:var(--surface);
+  border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);}
+.lv-filters .lv-lab{font-size:11.5px;font-weight:700;color:var(--ink2);margin-right:2px;}
+.lv-filters .lv-sep{width:1px;align-self:stretch;background:var(--border);margin:0 4px;}
+/* ラベルと入力はひとまとまりで折り返す（スマホ幅で「店舗」だけ前の行に残らないように） */
+.lv-filters .lv-fg{display:inline-flex;align-items:center;gap:8px;flex-wrap:nowrap;}
+@media(max-width:640px){ .lv-filters .lv-sep{display:none;} }
+.lv-chip{border:1px solid var(--border);background:transparent;color:var(--ink2);
+  border-radius:8px;padding:6px 11px;font-size:12px;font-weight:700;cursor:pointer;}
+.lv-chip:hover{color:var(--ink);border-color:var(--lv-s1);}
+.lv-chip.on{background:var(--lv-s1);border-color:var(--lv-s1);color:#fff;}
+
+/* --- ヘッドライン --- */
+.lv-hero{display:grid;grid-template-columns:minmax(240px,1.2fr) repeat(auto-fit,minmax(150px,1fr));
+  gap:12px;margin-bottom:18px;}
+.lv-hero .lv-big,.lv-tile{background:var(--surface);border:1px solid var(--border);
+  border-radius:12px;padding:16px 18px;box-shadow:var(--shadow);}
+.lv-big .lv-k,.lv-tile .lv-k{font-size:11.5px;font-weight:700;color:var(--ink2);letter-spacing:.02em;}
+.lv-big .lv-v{font-size:52px;line-height:1.05;font-weight:650;color:var(--ink);margin:8px 0 2px;}
+.lv-tile .lv-v{font-size:26px;line-height:1.15;font-weight:650;color:var(--ink);margin:6px 0 2px;}
+.lv-n{font-size:11.5px;color:var(--muted);line-height:1.5;}
+.lv-d{font-size:12px;font-weight:700;margin-top:3px;}
+.lv-d.up{color:var(--good);} .lv-d.dn{color:var(--bad);} .lv-d.flat{color:var(--muted);}
+
+/* --- カード --- */
+.lv-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;
+  padding:16px 18px 18px;box-shadow:var(--shadow);margin-bottom:18px;}
+.lv-card>h3{margin:0;font-size:15px;font-weight:700;color:var(--ink);letter-spacing:.01em;}
+.lv-card>.lv-sub{margin:5px 0 14px;font-size:12px;color:var(--ink2);line-height:1.65;}
+.lv-card>.lv-sub b{color:var(--ink);}
+.lv-grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:18px;}
+
+/* --- 凡例（2系列以上は必ず出す） --- */
+.lv-leg{display:flex;flex-wrap:wrap;gap:14px;margin:0 0 10px;font-size:11.5px;color:var(--ink2);}
+.lv-leg span{display:inline-flex;align-items:center;gap:6px;font-weight:600;}
+.lv-leg i{display:inline-block;width:14px;height:3px;border-radius:2px;}
+.lv-leg i.sq{width:11px;height:11px;border-radius:3px;}
+
+/* --- 図の入れもの --- */
+.lv-plot{position:relative;width:100%;}
+.lv-scroll{max-height:520px;overflow-y:auto;overflow-x:hidden;}
+.lv-plot svg{display:block;width:100%;height:auto;overflow:visible;}
+.lv-empty{padding:16px 2px;font-size:12px;color:var(--muted);}
+
+/* --- ツールチップ --- */
+.lv-tip{position:fixed;z-index:60;pointer-events:none;opacity:0;transition:opacity .09s;
+  background:var(--ink);color:var(--surface);border-radius:8px;padding:8px 10px;
+  font-size:11.5px;line-height:1.5;max-width:280px;box-shadow:0 4px 14px rgba(0,0,0,.28);}
+.lv-tip .t{font-weight:700;font-size:12px;margin-bottom:4px;opacity:.92;}
+.lv-tip .r{display:flex;align-items:center;gap:7px;white-space:nowrap;}
+.lv-tip .r i{display:inline-block;width:12px;height:3px;border-radius:2px;flex:none;}
+.lv-tip .r b{font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;}
+.lv-tip .r span{opacity:.78;}
+
+/* --- 表（図と同じ数字を、ホバーなしで読めるように） --- */
+.lv-tbl{width:100%;border-collapse:collapse;font-size:12px;}
+.lv-tbl th,.lv-tbl td{padding:7px 9px;border-bottom:1px solid var(--border);text-align:right;
+  font-variant-numeric:tabular-nums;white-space:nowrap;}
+.lv-tbl th{color:var(--ink2);font-weight:700;font-size:11px;text-align:right;
+  position:sticky;top:0;background:var(--surface);z-index:1;}
+.lv-tbl th:first-child,.lv-tbl td:first-child{text-align:left;font-variant-numeric:normal;}
+.lv-tbl td.wrap{white-space:normal;min-width:220px;color:var(--ink2);}
+.lv-tbl tr:hover td{background:var(--surface2);}
+.lv-more{margin-top:10px;font-size:12px;}
+.lv-more>summary{cursor:pointer;color:var(--lv-s1);font-weight:700;list-style:none;}
+.lv-more>summary::-webkit-details-marker{display:none;}
+.lv-more>summary::before{content:"▸ ";}
+.lv-more[open]>summary::before{content:"▾ ";}
+.lv-more .lv-scroll{margin-top:8px;}
+
+/* --- 同じ配信の店舗差 --- */
+.lv-camp{border-top:1px solid var(--border);padding:12px 0 4px;}
+.lv-camp:first-of-type{border-top:0;}
+.lv-camp .ct{font-size:12.5px;font-weight:700;color:var(--ink);line-height:1.5;}
+.lv-camp .cm{font-size:11.5px;color:var(--muted);margin:3px 0 8px;}
+
+@media(max-width:640px){
+  .lv-hero{grid-template-columns:repeat(auto-fit,minmax(140px,1fr));}
+  .lv-big .lv-v{font-size:40px;}
+  .lv-card{padding:14px 12px 16px;}
+  .lv-filters{padding:10px;}
+}
 </style>
 </head>
 <body>
@@ -1433,29 +1555,46 @@ function renderIg(){
   wireCommon();
 }
 // ============================================================
-//  LINE（配信・友だち）
-//    取り込みは etl/line_fetch.py（ネブラスカ）→ sql/034_line.sql の表。
-//    アカウントと店舗の紐付けは line_accounts.store_id（＝POS店舗 stores.id）。
-//    紐付いていないアカウントは「店舗別」で絞れないので、その旨を画面に出す。
+//  LINE 分析ダッシュボード
+// ------------------------------------------------------------
+//  取り込みは etl/line_fetch.py（デジテールストア）→ sql/034_line.sql の表。
+//  アカウントと店舗の紐付けは line_accounts.store_id（＝POS店舗 stores.id）で、
+//  取り込みのたびに店名から自動で埋まる（etl/line_fetch.py の link_stores）。
+//
+//  【この画面の作り】
+//  他のタブとは別の組み方にしてある（依頼）。共通の drawMultiChart は使わない。
+//  あれは左右で目盛りが違う2軸グラフで、単位の違う2本を1枚に重ねると
+//  「交差した＝逆転した」と読めてしまう。ここでは1枚1目盛りで通し、
+//  比べたいものは同じ単位（%・pp・円）に直してから並べる。
+//
+//  【何が取れて、何が取れないか】※2026-08-28 に実機で確認
+//    取れる  … 配信日時 / 配信通数 / 開封率 / 本文 / 友だち登録数(累積) / 新規追加
+//    取れない … クリック数・クーポン使用数（配信履歴に列が無い）
+//               ブロック数・有効友だち数（友だちCSVに列が無い）
+//               友だち追加の経路（画面が見当たらない）
+//  なので「開封されたか」までを配信の成果とし、その先は売上で見る。
 // ============================================================
-let LINE_STORE="";     // 絞り込み中のPOS店舗id（""＝すべて）
+let LINE_STORE="";                 // 絞り込み中のPOS店舗id（""＝すべて）
 let LINE_INIT=false;
+let LINE_BASE="all";               // 比較の基準: all=全体平均 / store=その店の平均 / recent=直近10本
+let LINE_RANK="or";                // 店舗別の並び: or=開封率 / n=配信数 / fr=友だち数
 
 const lineAccts =()=>DATA.lineAccounts||[];
 const lineBcAll =()=>DATA.lineBc||[];
+
 // 友だち数の代用について。
 // デジテールの友だちCSVにあるのは「日付 / 新規友だち登録数 / 累積友だち登録数」で、
-// 有効友だち数（ブロックした人を引いた数）の列が無い（2026-08-28 に実機で確認）。
-// fr が空なら累積(fo)を入れて、代用したことを cum で覚えておく（画面に断りを出す）。
+// 有効友だち数（ブロックした人を引いた数）の列が無い。fr が空なら累積(fo)を入れ、
+// 代用したことを cum で覚えておく（画面に断りを出す）。
 let LINE_DAY_CACHE=null;
 function lineDayAll(){
   if(!LINE_DAY_CACHE)LINE_DAY_CACHE=(DATA.lineDaily||[])
     .map(r=>(r.fr==null&&r.fo!=null)?Object.assign({},r,{fr:r.fo,cum:1}):r);
   return LINE_DAY_CACHE;
 }
-const lineCum=()=>lineDayAll().some(r=>r.cum);
-const lineSrcAll=()=>DATA.lineSrc||[];
-const lineHas   =()=>lineBcAll().length>0||lineDayAll().length>0;
+const lineCum =()=>lineDayAll().some(r=>r.cum);
+const lineHas =()=>lineBcAll().length>0||lineDayAll().length>0;
+const lineNoMap=()=>lineAccts().filter(a=>a.si==null).length;
 
 // 期間と店舗で絞る。si（POS店舗id）は line_accounts.store_id 由来
 function lineIn(r){
@@ -1463,245 +1602,914 @@ function lineIn(r){
   if(LINE_STORE&&String(r.si||"")!==String(LINE_STORE))return false;
   return true;
 }
-const lineBc =()=>lineBcAll().filter(lineIn);
+const lineBc =()=>lineBcAll().filter(lineIn).slice().sort((a,b)=>a.d<b.d?-1:1);
 const lineDay=()=>lineDayAll().filter(lineIn);
-const lineSrc=()=>lineSrcAll().filter(lineIn);
 
 // 店舗の選択肢＝LINEアカウントが紐付いているPOS店舗だけ。
 // 紐付いていない店を並べても中身が空になるだけなので出さない。
 function lineStoreOpts(){
   const ids=[...new Set(lineAccts().map(a=>a.si).filter(v=>v!=null))];
-  return ids.map(id=>({id,name:(DATA.stores||[]).find(s=>String(s.id)===String(id))?.name||("店舗"+id)}))
+  return ids.map(id=>({id,name:lvStoreName(id)}))
             .filter(x=>x.name).sort((a,b)=>a.name.localeCompare(b.name,"ja"));
 }
-const lineNoMap=()=>lineAccts().filter(a=>a.si==null).length;
-
-// 率は「合計÷合計」で出す。配信ごとの率を平均すると、通数の少ない配信が
-// 同じ重みで効いてしまい実態とずれる（広告のCTRと同じ考え方）
-function lineTotals(rows){
-  const t={n:rows.length,sd:0,op:0,ck:0,cu:0,bl:0,cp:0};
-  for(const r of rows){t.sd+=r.sd||0;t.op+=r.op||0;t.ck+=r.ck||0;t.cu+=r.cu||0;t.bl+=r.bl||0;t.cp+=r.cp||0;}
-  // 開封率は配信ごとの率(or)を配信通数で重み付けして出す。
-  // デジテールは率しか出さないので、件数(op)は率からの割り戻し。
-  // 率が無い配信が混ざっても崩れないよう、率のある行だけで計算する。
-  const wr=rows.filter(r=>r.or!=null&&r.sd);
-  const wsd=wr.reduce((a,r)=>a+r.sd,0);
-  t.opr=wsd?wr.reduce((a,r)=>a+r.or*r.sd,0)/wsd:(t.sd?t.op/t.sd*100:null);
-  t.ckr=t.op?t.ck/t.op*100:null;      // クリック率＝クリック÷開封（開封した人のうち何%が押したか）
-  t.ctr=t.sd?t.ck/t.sd*100:null;      // 配信あたりのクリック率
-  return t;
+function lvStoreName(id){
+  return (DATA.stores||[]).find(s=>String(s.id)===String(id))?.name||("店舗"+id);
 }
 
+// ============================================================
+//  数の下ごしらえ
+// ============================================================
+// 開封率は「合計÷合計」で出す。配信ごとの率をそのまま平均すると、
+// 100通の配信と5,000通の配信が同じ重みになって実態とずれる（広告のCTRと同じ）。
+function lvAvgOr(rows){
+  const ok=rows.filter(r=>r.or!=null&&r.sd);
+  const sd=ok.reduce((a,r)=>a+r.sd,0);
+  return sd?ok.reduce((a,r)=>a+r.or*r.sd,0)/sd:null;
+}
+function lvStats(vals){
+  const v=vals.filter(x=>x!=null&&isFinite(x));
+  if(!v.length)return {n:0,mean:null,sd:0,min:null,max:null};
+  const mean=v.reduce((a,x)=>a+x,0)/v.length;
+  const sd=v.length>1?Math.sqrt(v.reduce((a,x)=>a+(x-mean)*(x-mean),0)/(v.length-1)):0;
+  return {n:v.length,mean,sd,min:Math.min(...v),max:Math.max(...v)};
+}
+// 比べる基準。3通りから選ばせる（同じ配信でも、何と比べるかで話が変わるため）
+function lvBaseFor(b,rows){
+  if(LINE_BASE==="store"){
+    const same=rows.filter(r=>String(r.si||"")===String(b.si||""));
+    return {v:lvAvgOr(same),label:"この店の平均",n:same.length};
+  }
+  if(LINE_BASE==="recent"){
+    const prev=rows.filter(r=>r.d<b.d).slice(-10);
+    return prev.length?{v:lvAvgOr(prev),label:"直前10本の平均",n:prev.length}:{v:null,label:"直前10本の平均",n:0};
+  }
+  return {v:lvAvgOr(rows),label:"全体の平均",n:rows.length};
+}
+const LV_BASE_LABEL={all:"全体の平均",store:"その店の平均",recent:"直前10本の平均"};
+
+// --- 配信の売上リフト -----------------------------------------------
+//  配信日から3日間(D0〜D+2)の税抜売上を、直前4週の「同じ曜日の3日間」と比べる。
+//  ・3日にするのは、LINEを見てその日のうちに来る人ばかりではないため
+//  ・曜日をそろえるのは、土日に配信すれば当然売れるのを「効果」と誤読しないため
+//  ・4週ぶんの平均を基準にするのは、1週前だけだとその週の特殊要因を拾うため
+//  基準の週が2週ぶんも取れない配信は、数字を出さずに空欄にする（推測しない）。
+let LV_SALES_IDX=null;
+function lvSalesIdx(){
+  if(LV_SALES_IDX)return LV_SALES_IDX;
+  const m=new Map();
+  for(const r of (DATA.daily||[])) m.set(r.s+"|"+r.d,(m.get(r.s+"|"+r.d)||0)+(r.ex||0));
+  LV_SALES_IDX=m; return m;
+}
+function lvWin(sid,from,days){
+  const ix=lvSalesIdx(); let sum=0,hit=0;
+  for(let i=0;i<days;i++){
+    const d=addDays(from,i), v=ix.get(sid+"|"+d);
+    if(v!=null){sum+=v;hit++;}
+  }
+  return hit?{sum,hit}:null;
+}
+function lvLift(b,days){
+  days=days||3;
+  if(b.si==null)return null;
+  const now=lvWin(b.si,b.d,days);
+  if(!now||now.hit<days)return null;                  // 配信後の3日がまだ揃っていない
+  const base=[];
+  for(let k=1;k<=4;k++){
+    const w=lvWin(b.si,addDays(b.d,-7*k),days);
+    if(w&&w.hit===days)base.push(w.sum);
+  }
+  if(base.length<2)return null;                       // 基準が足りない
+  const bm=base.reduce((a,x)=>a+x,0)/base.length;
+  if(!(bm>0))return null;
+  return {now:now.sum,base:bm,pct:(now.sum/bm-1)*100,weeks:base.length};
+}
+
+// --- 同じ本文を複数店に送ったもの ------------------------------------
+//  本文の先頭40文字が同じなら同じ配信とみなす。同じ内容を送っているのに
+//  店で開封率が違うなら、内容ではなく友だちの質・配信時間・店の事情の話になる。
+function lvCampaigns(rows){
+  const g=new Map();
+  for(const r of rows){
+    const key=((r.t||"").replace(/\s+/g," ").trim().slice(0,40))||"（名称なし）";
+    if(!g.has(key))g.set(key,[]);
+    g.get(key).push(r);
+  }
+  return [...g.entries()].filter(([,v])=>v.length>=2)
+    .map(([k,v])=>({key:k,rows:v.slice().sort((a,b)=>(b.or||0)-(a.or||0)),
+                    or:lvAvgOr(v),sd:v.reduce((a,r)=>a+(r.sd||0),0)}))
+    .sort((a,b)=>b.rows.length-a.rows.length||(b.sd-a.sd));
+}
+// ============================================================
+//  図の部品（この画面だけで使う）
+// ------------------------------------------------------------
+//  ・1枚のグラフに目盛りは1つだけ（左右で違う目盛りは作らない）
+//  ・棒は太さ24pxまで、値の出る側の角だけ丸める。線は2px、点は直径8px以上
+//  ・目盛り線は1pxの実線で薄く。文字に系列の色は使わない（色は印の側だけ）
+//  ・ホバーは全部の図に付ける。当たり判定は見た目より広く取る
+//  ・数字はホバーしなくても読めるように、どの図にも表を添える
+// ============================================================
+const LV_NS="http://www.w3.org/2000/svg";
+// 目盛りは「きりのいい数字」にする。等分すると 24.8% / 49.7% のような
+// 読みにくい数字が並ぶので、1・2・2.5・5 の刻みに寄せてから並べる。
+function lvTicks(lo,hi,want){
+  want=want||4;
+  const span=(hi-lo)||1;
+  const raw=span/(want-1);
+  const mag=Math.pow(10,Math.floor(Math.log10(raw)));
+  const step=[1,2,2.5,5,10].map(m=>m*mag).find(v=>v>=raw)||10*mag;
+  const out=[];
+  for(let v=Math.ceil(lo/step)*step; v<=hi+step*1e-9; v+=step) out.push(Math.round(v*1e6)/1e6);
+  return out.length?out:[lo,hi];
+}
+function lvEl(t,a){const e=document.createElementNS(LV_NS,t);
+  for(const k in (a||{})) e.setAttribute(k,a[k]); return e;}
+
+// ツールチップ。中身は textContent で入れる（本文や店名は外から来た文字列なので）
+let LV_TIP=null;
+function lvTip(){
+  if(!LV_TIP){LV_TIP=document.createElement("div");LV_TIP.className="lv-tip";
+    document.body.appendChild(LV_TIP);}
+  return LV_TIP;
+}
+function lvTipShow(ev,title,rows){
+  const t=lvTip(); t.innerHTML="";
+  if(title){const h=document.createElement("div");h.className="t";h.textContent=title;t.appendChild(h);}
+  for(const r of rows){
+    const d=document.createElement("div");d.className="r";
+    if(r.c){const i=document.createElement("i");i.style.background=r.c;d.appendChild(i);}
+    const b=document.createElement("b");b.textContent=r.v;d.appendChild(b);
+    if(r.k){const s=document.createElement("span");s.textContent=r.k;d.appendChild(s);}
+    t.appendChild(d);
+  }
+  t.style.opacity="1";
+  const w=t.offsetWidth,h=t.offsetHeight;
+  let x=ev.clientX+14,y=ev.clientY-h-12;
+  if(x+w>innerWidth-8)x=ev.clientX-w-14;
+  if(y<8)y=ev.clientY+16;
+  t.style.left=x+"px"; t.style.top=y+"px";
+}
+function lvTipHide(){ if(LV_TIP)LV_TIP.style.opacity="0"; }
+// 印より広い当たり判定を透明の矩形で足す。ホバー中は印を少し持ち上げる
+function lvHit(g,box,mark,title,rows){
+  const h=lvEl("rect",{x:box.x,y:box.y,width:Math.max(box.w,1),height:Math.max(box.h,24),
+    fill:"transparent",tabindex:"0"});
+  const on=ev=>{lvTipShow(ev,title,rows); if(mark)mark.setAttribute("opacity","0.72");};
+  const off=()=>{lvTipHide(); if(mark)mark.setAttribute("opacity","1");};
+  h.addEventListener("pointermove",on); h.addEventListener("pointerenter",on);
+  h.addEventListener("pointerleave",off);
+  h.addEventListener("focus",e=>{const r=h.getBoundingClientRect();
+    lvTipShow({clientX:r.left+r.width/2,clientY:r.top},title,rows);});
+  h.addEventListener("blur",off);
+  g.appendChild(h);
+}
+const lvVar=(el,n)=>getComputedStyle(el).getPropertyValue(n).trim();
+
+// --- ① 平均からのズレを横棒で（発散） --------------------------------
+//  rows: {label, sub, dev(pp), value, tip:[{k,v}]}
+//  0 を真ん中に置いて、右＝平均より上／左＝平均より下。
+//  色だけに頼らないよう、値のラベルを棒の先に必ず出す（符号付き）。
+function lvDevBars(box,rows,opt){
+  opt=opt||{}; box.innerHTML="";
+  if(!rows.length){box.innerHTML='<div class="lv-empty">この期間に配信がありません。</div>';return;}
+  const cs=getComputedStyle(box);
+  const POS=lvVar(box,"--lv-pos"),NEG=lvVar(box,"--lv-neg"),
+        GRID=lvVar(box,"--lv-grid"),AXIS=lvVar(box,"--lv-axis"),
+        INK=cs.getPropertyValue("--ink").trim()||"#000",
+        INK2=cs.getPropertyValue("--ink2").trim()||"#555",
+        MUT=cs.getPropertyValue("--muted").trim()||"#888";
+  const W=Math.max(box.clientWidth||760,320);
+  const LAB=Math.min(Math.max(W*0.30,120),260);      // 左のラベル欄
+  const VAL=54;                                       // 右の数値欄
+  const RH=Math.max(opt.rowH||22,18), BAR=Math.min(RH-8,24);
+  const H=rows.length*RH+34;
+  const x0=LAB, x1=W-VAL, mid=(x0+x1)/2;
+  // opt.max を渡すと目盛りの幅を固定できる。複数の小さな図を並べるとき、
+  // 図ごとに幅が変わると「棒が長い＝差が大きい」と読めなくなるため。
+  const m=opt.max||Math.max(0.5,...rows.map(r=>Math.abs(r.dev||0)));
+  const sx=v=>mid+(x1-x0)/2*(v/m);
+  const svg=lvEl("svg",{viewBox:`0 0 ${W} ${H}`,role:"img"});
+  svg.setAttribute("aria-label",opt.aria||"平均からのズレ");
+  // 目盛り（0を挟んで左右対称・きりのいい数字）
+  const half=lvTicks(0,m,3).filter(v=>v>0);
+  for(const t of half.map(v=>-v).reverse().concat(half)){
+    if(Math.abs(sx(t)-mid)<12)continue;
+    svg.appendChild(lvEl("line",{x1:sx(t),x2:sx(t),y1:16,y2:H-16,stroke:GRID,"stroke-width":1}));
+    const lb=lvEl("text",{x:sx(t),y:11,"text-anchor":"middle","font-size":9.5,fill:MUT});
+    lb.textContent=(t>0?"+":"")+(Math.round(t*10)/10); svg.appendChild(lb);
+  }
+  // 0（＝基準）の線だけ濃く
+  svg.appendChild(lvEl("line",{x1:mid,x2:mid,y1:12,y2:H-14,stroke:AXIS,"stroke-width":1}));
+  rows.forEach((r,i)=>{
+    const y=22+i*RH, dev=r.dev||0, up=dev>=0, c=up?POS:NEG;
+    const a=Math.min(sx(dev),mid), b=Math.abs(sx(dev)-mid);
+    const g=lvEl("g");
+    // 値の出る側だけ角を丸める（棒の付け根は角のまま）
+    const rr=Math.min(4,b);
+    const p=up
+      ? `M${mid} ${y} H${mid+b-rr} a${rr} ${rr} 0 0 1 ${rr} ${rr} V${y+BAR-rr} a${rr} ${rr} 0 0 1 -${rr} ${rr} H${mid} Z`
+      : `M${mid} ${y} H${mid-b+rr} a${rr} ${rr} 0 0 0 -${rr} ${rr} V${y+BAR-rr} a${rr} ${rr} 0 0 0 ${rr} ${rr} H${mid} Z`;
+    const bar=lvEl("path",{d:b<1?`M${mid} ${y} h1 v${BAR} h-1 Z`:p,fill:c});
+    g.appendChild(bar);
+    const nm=lvEl("text",{x:LAB-10,y:y+BAR-2,"text-anchor":"end","font-size":11,fill:INK});
+    nm.textContent=r.label; g.appendChild(nm);
+    if(r.sub){const s=lvEl("text",{x:LAB-10,y:y+BAR-2,"text-anchor":"end","font-size":10,fill:MUT,dy:0});
+      s.textContent=""; }
+    // 棒の先に符号付きの数値（色に頼らせない）
+    const vl=lvEl("text",{x:W-VAL+8,y:y+BAR-2,"font-size":11,fill:INK2,
+      "font-variant-numeric":"tabular-nums"});
+    vl.textContent=(dev>0?"+":"")+F1(dev)+(opt.unit||"pp"); g.appendChild(vl);
+    svg.appendChild(g);
+    lvHit(svg,{x:0,y:y-((RH-BAR)/2),w:W,h:RH},bar,r.label,r.tip||[]);
+  });
+  box.appendChild(svg);
+}
+
+// --- ② 分布（点を並べて、平均と ±1σ を重ねる） -----------------------
+//  points: {v, label, tip:[]}
+//  61本ぶんの開封率が「どのあたりに散っているか」を見るための図。
+//  平均だけ見て高い低いを言わないための下敷き。
+function lvDots(box,points,opt){
+  opt=opt||{}; box.innerHTML="";
+  if(points.length<2){box.innerHTML='<div class="lv-empty">分布を出すには配信が2本以上必要です。</div>';return;}
+  const cs=getComputedStyle(box);
+  const POS=lvVar(box,"--lv-pos"),NEG=lvVar(box,"--lv-neg"),
+        GRID=lvVar(box,"--lv-grid"),AXIS=lvVar(box,"--lv-axis"),
+        SURF=cs.getPropertyValue("--surface").trim()||"#fff",
+        INK=cs.getPropertyValue("--ink").trim()||"#000",
+        MUT=cs.getPropertyValue("--muted").trim()||"#888";
+  const st=lvStats(points.map(p=>p.v));
+  const W=Math.max(box.clientWidth||760,320),H=210,PADL=14,PADR=14,TOP=52,BOT=30;
+  const lo=Math.max(0,Math.floor((st.min-3)/5)*5), hi=Math.min(100,Math.ceil((st.max+3)/5)*5);
+  const sx=v=>PADL+(W-PADL-PADR)*(v-lo)/((hi-lo)||1);
+  const svg=lvEl("svg",{viewBox:`0 0 ${W} ${H}`,role:"img"});
+  svg.setAttribute("aria-label",opt.aria||"開封率の分布");
+  // ±1σ の帯。帯の呼び名は図の外の凡例に出す
+  // （図の中に置くと、平均の文字と必ずぶつかる幅しか無い）
+  if(st.sd>0){
+    const a=sx(Math.max(lo,st.mean-st.sd)),b=sx(Math.min(hi,st.mean+st.sd));
+    svg.appendChild(lvEl("rect",{x:a,y:TOP-10,width:Math.max(b-a,1),height:H-TOP-BOT+20,
+      fill:"var(--lv-wash)"}));
+  }
+  // 目盛り
+  for(let v=lo;v<=hi;v+=5){
+    svg.appendChild(lvEl("line",{x1:sx(v),x2:sx(v),y1:TOP-10,y2:H-BOT+6,stroke:GRID,"stroke-width":1}));
+    const t=lvEl("text",{x:sx(v),y:H-BOT+20,"text-anchor":"middle","font-size":10,fill:MUT});
+    t.textContent=v+"%"; svg.appendChild(t);
+  }
+  // 平均の線（この図は「1本ずつの単純平均」）
+  svg.appendChild(lvEl("line",{x1:sx(st.mean),x2:sx(st.mean),y1:TOP-24,y2:H-BOT+6,
+    stroke:MUT,"stroke-width":1}));
+  const ml=lvEl("text",{x:sx(st.mean),y:TOP-28,"text-anchor":"middle","font-size":10.5,fill:INK,
+    "font-weight":700});
+  ml.textContent="単純平均 "+F1(st.mean)+"%"; svg.appendChild(ml);
+  // 通数で重みづけした平均も引く。上のカードや他の図はこちらを使っているので、
+  // 2つの数字が食い違って見えないよう、同じ図の中で並べて示す。
+  if(opt.wmean!=null&&isFinite(opt.wmean)&&opt.wmean>lo&&opt.wmean<hi&&
+     Math.abs(opt.wmean-st.mean)>0.15){
+    const wx=sx(opt.wmean);
+    svg.appendChild(lvEl("line",{x1:wx,x2:wx,y1:TOP-10,y2:H-BOT+6,stroke:MUT,
+      "stroke-width":1,"stroke-dasharray":"3 3"}));
+    const wl=lvEl("text",{x:wx,y:TOP-14,"text-anchor":"middle","font-size":10,fill:MUT});
+    wl.textContent="通数で重みづけ "+F1(opt.wmean)+"%"; svg.appendChild(wl);
+  }
+  // 点。重なりを避けて縦にずらす（同じ値の並びが潰れないように）
+  const R=5, band=H-TOP-BOT, used=[];
+  const sorted=points.slice().sort((a,b)=>a.v-b.v);
+  for(const p of sorted){
+    const x=sx(p.v); let lane=0;
+    while(used.some(u=>u.lane===lane&&Math.abs(u.x-x)<R*2+1))lane++;
+    used.push({x,lane});
+    const y=TOP+band/2+((lane%2?1:-1)*Math.ceil(lane/2))*(R*2+1);
+    const c=p.v>=st.mean?POS:NEG;
+    const dot=lvEl("circle",{cx:x,cy:Math.max(TOP,Math.min(H-BOT,y)),r:R,fill:c,
+      stroke:SURF,"stroke-width":2});
+    svg.appendChild(dot);
+    lvHit(svg,{x:x-13,y:Math.max(TOP,Math.min(H-BOT,y))-13,w:26,h:26},dot,p.label,p.tip||[]);
+  }
+  box.appendChild(svg);
+}
+// --- ③ 折れ線（目盛りは1つだけ。十字カーソルでその日を読む） ----------
+//  series: [{key,label,color,vals,fmt,area}]
+//  marks : [{i,label}]  … 配信した日に印を立てる
+function lvLine(box,labels,series,opt){
+  opt=opt||{}; box.innerHTML="";
+  const act=series.filter(s=>s.vals.some(v=>v!=null));
+  if(!labels.length||!act.length){box.innerHTML='<div class="lv-empty">この期間のデータがありません。</div>';return;}
+  const cs=getComputedStyle(box);
+  const GRID=lvVar(box,"--lv-grid"),AXIS=lvVar(box,"--lv-axis"),
+        SURF=cs.getPropertyValue("--surface").trim()||"#fff",
+        INK=cs.getPropertyValue("--ink").trim()||"#000",
+        MUT=cs.getPropertyValue("--muted").trim()||"#888";
+  const W=Math.max(box.clientWidth||760,320),H=opt.h||230,
+        PADL=54,PADR=opt.padR||58,PADT=opt.marks?26:14,PADB=26;
+  const n=labels.length;
+  const xs=i=>PADL+(W-PADL-PADR)*(n<=1?0.5:i/(n-1));
+  const all=act.flatMap(s=>s.vals).filter(v=>v!=null);
+  let lo=opt.zero===false?Math.min(...all):Math.min(0,...all), hi=Math.max(...all);
+  if(hi===lo)hi=lo+1; hi+=(hi-lo)*0.08; if(opt.zero!==false)lo=Math.min(0,lo);
+  const ys=v=>PADT+(H-PADT-PADB)*(1-(v-lo)/(hi-lo));
+  const svg=lvEl("svg",{viewBox:`0 0 ${W} ${H}`,role:"img"});
+  svg.setAttribute("aria-label",opt.aria||"推移");
+  // 横の目盛り（4本・きりのいい数字）
+  for(const v of lvTicks(lo,hi,4)){
+    const y=ys(v);
+    svg.appendChild(lvEl("line",{x1:PADL,x2:W-PADR,y1:y,y2:y,stroke:GRID,"stroke-width":1}));
+    const t=lvEl("text",{x:PADL-8,y:y+3.5,"text-anchor":"end","font-size":10,fill:MUT,
+      "font-variant-numeric":"tabular-nums"});
+    t.textContent=(opt.fmtAxis||NUM)(v); svg.appendChild(t);
+  }
+  // 配信の印（縦のごく細い線＋上に小さな三角）
+  if(opt.marks&&opt.marks.length){
+    for(const m of opt.marks){
+      const x=xs(m.i);
+      svg.appendChild(lvEl("line",{x1:x,x2:x,y1:PADT-6,y2:H-PADB,stroke:AXIS,
+        "stroke-width":1,opacity:.55}));
+      svg.appendChild(lvEl("path",{d:`M${x-4} ${PADT-12} L${x+4} ${PADT-12} L${x} ${PADT-5} Z`,
+        fill:lvVar(box,"--lv-s1")}));
+    }
+    const lg=lvEl("text",{x:PADL,y:11,"font-size":10,fill:MUT});
+    lg.textContent="▲ = LINEを配信した日"; svg.appendChild(lg);
+  }
+  // 面と線
+  act.forEach(s=>{
+    const pts=s.vals.map((v,i)=>v==null?null:[xs(i),ys(v)]).filter(Boolean);
+    if(!pts.length)return;
+    if(s.area){
+      const d=`M${pts[0][0]} ${ys(Math.max(lo,0))} `+pts.map(p=>`L${p[0]} ${p[1]}`).join(" ")+
+              ` L${pts[pts.length-1][0]} ${ys(Math.max(lo,0))} Z`;
+      svg.appendChild(lvEl("path",{d,fill:s.color,opacity:.10}));
+    }
+    svg.appendChild(lvEl("path",{d:"M"+pts.map(p=>`${p[0]} ${p[1]}`).join(" L"),
+      fill:"none",stroke:s.color,"stroke-width":2,"stroke-linejoin":"round","stroke-linecap":"round"}));
+    // 終点に印と直接ラベル（凡例に頼らず読めるように）
+    const last=pts[pts.length-1];
+    svg.appendChild(lvEl("circle",{cx:last[0],cy:last[1],r:4.5,fill:s.color,stroke:SURF,"stroke-width":2}));
+    const lb=lvEl("text",{x:last[0]+9,y:last[1]+4,"font-size":11,fill:INK,"font-weight":600,
+      "font-variant-numeric":"tabular-nums"});
+    const lv=s.vals.filter(v=>v!=null).slice(-1)[0];
+    lb.textContent=(s.fmt||NUM)(lv); svg.appendChild(lb);
+  });
+  // 横軸のラベル（端と中間だけ。全部出すと潰れる）
+  const ticks=n<=2?[0,n-1]:[0,Math.floor((n-1)/2),n-1];
+  [...new Set(ticks)].forEach(i=>{
+    const t=lvEl("text",{x:xs(i),y:H-8,"text-anchor":i===0?"start":(i===n-1?"end":"middle"),
+      "font-size":10,fill:MUT});
+    t.textContent=labels[i]; svg.appendChild(t);
+  });
+  // 十字カーソル。点でなく日を狙わせる
+  const cross=lvEl("line",{x1:0,x2:0,y1:PADT,y2:H-PADB,stroke:AXIS,"stroke-width":1,opacity:0});
+  svg.appendChild(cross);
+  const dots=act.map(s=>{const c=lvEl("circle",{r:4.5,fill:s.color,stroke:SURF,"stroke-width":2,opacity:0});
+    svg.appendChild(c);return c;});
+  const cap=lvEl("rect",{x:PADL-6,y:0,width:W-PADL-PADR+12,height:H,fill:"transparent"});
+  const move=ev=>{
+    const r=svg.getBoundingClientRect();
+    const px=(ev.clientX-r.left)/r.width*W;
+    let i=Math.round((px-PADL)/((W-PADL-PADR)||1)*(n-1)); i=Math.max(0,Math.min(n-1,i));
+    cross.setAttribute("x1",xs(i));cross.setAttribute("x2",xs(i));cross.setAttribute("opacity",".7");
+    const rows=[];
+    act.forEach((s,k)=>{const v=s.vals[i];
+      if(v==null){dots[k].setAttribute("opacity",0);return;}
+      dots[k].setAttribute("cx",xs(i));dots[k].setAttribute("cy",ys(v));dots[k].setAttribute("opacity",1);
+      rows.push({c:s.color,v:(s.fmt||NUM)(v),k:s.label});});
+    lvTipShow(ev,(opt.dateOf?opt.dateOf(i):labels[i]),rows);
+  };
+  cap.addEventListener("pointermove",move);
+  cap.addEventListener("pointerleave",()=>{cross.setAttribute("opacity",0);
+    dots.forEach(d=>d.setAttribute("opacity",0));lvTipHide();});
+  svg.appendChild(cap);
+  box.appendChild(svg);
+}
+
+// --- ④ 縦棒（1目盛り。値は上端に出す） --------------------------------
+//  rows: {label, v, c, tip:[]}
+function lvCols(box,rows,opt){
+  opt=opt||{}; box.innerHTML="";
+  if(!rows.length){box.innerHTML='<div class="lv-empty">この期間のデータがありません。</div>';return;}
+  const cs=getComputedStyle(box);
+  const GRID=lvVar(box,"--lv-grid"),AXIS=lvVar(box,"--lv-axis"),
+        INK=cs.getPropertyValue("--ink").trim()||"#000",
+        MUT=cs.getPropertyValue("--muted").trim()||"#888";
+  const W=Math.max(box.clientWidth||760,320),H=opt.h||210,PADL=44,PADR=12,PADT=16,PADB=opt.padB||34;
+  const n=rows.length, slot=(W-PADL-PADR)/n, BAR=Math.min(slot-6,24);
+  const vals=rows.map(r=>r.v).filter(v=>v!=null);
+  let lo=Math.min(0,...vals),hi=Math.max(0,...vals); if(hi===lo)hi=lo+1;
+  const pad=(hi-lo)*0.12; hi+=pad; if(lo<0)lo-=pad;
+  const ys=v=>PADT+(H-PADT-PADB)*(1-(v-lo)/(hi-lo));
+  const svg=lvEl("svg",{viewBox:`0 0 ${W} ${H}`,role:"img"});
+  svg.setAttribute("aria-label",opt.aria||"内訳");
+  for(const v of lvTicks(lo,hi,4)){
+    const y=ys(v);
+    svg.appendChild(lvEl("line",{x1:PADL,x2:W-PADR,y1:y,y2:y,stroke:GRID,"stroke-width":1}));
+    const t=lvEl("text",{x:PADL-8,y:y+3.5,"text-anchor":"end","font-size":10,fill:MUT,
+      "font-variant-numeric":"tabular-nums"});
+    t.textContent=(opt.fmtAxis||NUM)(v); svg.appendChild(t);
+  }
+  const zy=ys(0);
+  svg.appendChild(lvEl("line",{x1:PADL,x2:W-PADR,y1:zy,y2:zy,stroke:AXIS,"stroke-width":1}));
+  // 基準線（全体の平均）。棒を「平均より上か下か」で塗り分けると色だけが
+  // 意味を持ってしまうので、線を1本引いて棒は1色のままにする。
+  // 線の呼び名は図の外の凡例に出す（中に置くと棒の値ラベルと必ずぶつかる）。
+  if(opt.ref!=null&&opt.ref>lo&&opt.ref<hi){
+    const ry=ys(opt.ref);
+    svg.appendChild(lvEl("line",{x1:PADL,x2:W-PADR,y1:ry,y2:ry,stroke:MUT,"stroke-width":1}));
+  }
+  rows.forEach((r,i)=>{
+    if(r.v==null)return;
+    const cx=PADL+slot*i+slot/2, up=r.v>=0;
+    const y=up?ys(r.v):zy, h=Math.abs(ys(r.v)-zy), rr=Math.min(4,h);
+    const d=up
+      ? `M${cx-BAR/2} ${zy} V${y+rr} a${rr} ${rr} 0 0 1 ${rr} -${rr} H${cx+BAR/2-rr} a${rr} ${rr} 0 0 1 ${rr} ${rr} V${zy} Z`
+      : `M${cx-BAR/2} ${zy} V${y+h-rr} a${rr} ${rr} 0 0 0 ${rr} ${rr} H${cx+BAR/2-rr} a${rr} ${rr} 0 0 0 ${rr} -${rr} V${zy} Z`;
+    const bar=lvEl("path",{d:h<1?`M${cx-BAR/2} ${zy} h${BAR} v1 h-${BAR} Z`:d,fill:r.c||lvVar(box,"--lv-s1")});
+    svg.appendChild(bar);
+    // 本数が少ないときだけ値を直接出す（全部に出すと読まれない）
+    if(n<=14){
+      const t=lvEl("text",{x:cx,y:up?y-5:y+h+12,"text-anchor":"middle","font-size":10.5,fill:INK,
+        "font-weight":600,"font-variant-numeric":"tabular-nums"});
+      t.textContent=(opt.fmt||NUM)(r.v); svg.appendChild(t);
+    }
+    if(r.label&&(n<=14||i%Math.ceil(n/12)===0)){
+      const t=lvEl("text",{x:cx,y:H-12,"text-anchor":"middle","font-size":10,fill:MUT});
+      t.textContent=r.label; svg.appendChild(t);
+      if(r.label2){const t2=lvEl("text",{x:cx,y:H-2,"text-anchor":"middle","font-size":9,fill:MUT});
+        t2.textContent=r.label2; svg.appendChild(t2);}
+    }
+    lvHit(svg,{x:cx-slot/2,y:PADT,w:slot,h:H-PADT-PADB},bar,r.tipTitle||r.label,r.tip||[]);
+  });
+  box.appendChild(svg);
+}
+// ============================================================
+//  画面を組み立てる
+// ============================================================
 function renderLine(){
   document.getElementById("app").classList.add("adsview");
   {const tb=document.querySelector(".tabbar"); if(tb)tb.style.display="none";}
   syncAdminTab();
   if(!LINE_INIT){
+    // この画面の既定は「全期間」。配信は17か月で61本しかないので、
+    // 他のタブと同じ直近4週にすると2〜3本しか入らず、平均との比較が成り立たない。
     const r=adPeriodRestore("notime-linetab-period");
     if(r){ state.from=r[0]; state.to=r[1]; state.kind=r[2]; savePeriod(); }
-    else adApply4w();
-    try{LINE_STORE=localStorage.getItem("notime-linestore")||"";}catch(e){}
+    else lvAllPeriod();
+    try{
+      LINE_STORE=localStorage.getItem("notime-linestore")||"";
+      LINE_BASE =localStorage.getItem("notime-linebase")||"all";
+    }catch(e){}
     LINE_INIT=true;
   }
   const opts=lineStoreOpts();
   if(LINE_STORE&&!opts.some(o=>String(o.id)===String(LINE_STORE))){
     LINE_STORE=""; try{localStorage.setItem("notime-linestore","");}catch(e){}
   }
-  const last=lineBcAll().reduce((a,r)=>r.d>a?r.d:a,"")||lineDayAll().reduce((a,r)=>r.d>a?r.d:a,"");
-
   document.getElementById("app").innerHTML=mktHead("line")+`
-    <div class="panel">
-      <h2 data-en="Filter">条件</h2>
-      <div class="adperiod">
-        <button class="chip" id="ad4w">直近4週</button>
-        <button class="chip pchip" data-preset="thismonth">今月</button>
-        <button class="chip pchip" data-preset="lastmonth">前月</button>
-        <button class="chip pchip" data-preset="thisweek">今週</button>
-        <button class="chip pchip" data-preset="lastweek">前週</button>
-        <button class="chip pchip" data-preset="prevday">前日</button>
-      </div>
-      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+  <div class="lv">
+    <div class="lv-filters">
+      <span class="lv-fg">
+        <span class="lv-lab">期間</span>
+        <button class="lv-chip" id="lv-all">全期間</button>
+        <button class="lv-chip pchip" data-preset="thismonth">今月</button>
+        <button class="lv-chip pchip" data-preset="lastmonth">前月</button>
+        <button class="lv-chip" id="lv-90">直近90日</button>
+      </span>
+      <span class="lv-fg">
         <input type="date" id="from" min="${DATA._min}" max="${DATA._max}" value="${state.from}">
-        <span class="sub">〜</span>
+        <span class="lv-lab">〜</span>
         <input type="date" id="to" min="${DATA._min}" max="${DATA._max}" value="${state.to}">
-        <span class="sub" id="periodlabel"></span>
-      </div>
-      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px">
-        <span class="sub" style="font-weight:700">店舗</span>
-        <select id="linestore" style="max-width:220px">
+      </span>
+      <span class="lv-sep"></span>
+      <span class="lv-fg">
+        <span class="lv-lab">店舗</span>
+        <select id="lv-store" style="max-width:210px">
           <option value="">すべての店舗</option>
           ${opts.map(o=>`<option value="${esc(String(o.id))}"${String(LINE_STORE)===String(o.id)?" selected":""}>${esc(o.name)}</option>`).join("")}
         </select>
-        <span class="sub">POS店舗（売上・来店と同じ区分）</span>
+      </span>
+      <span class="lv-sep"></span>
+      <span class="lv-fg">
+        <span class="lv-lab">比べる相手</span>
+        <select id="lv-base">
+          ${Object.entries(LV_BASE_LABEL).map(([k,v])=>
+            `<option value="${k}"${LINE_BASE===k?" selected":""}>${esc(v)}</option>`).join("")}
+        </select>
+      </span>
+    </div>
+
+    <div class="lv-hero" id="lv-hero"></div>
+
+    <div class="lv-card">
+      <h3>配信ごとの成果 — <span id="lv-basettl">平均</span>とのズレ</h3>
+      <p class="lv-sub">1本ずつの開封率が、比べる相手より<b>何ポイント上か下か</b>。
+        右へ伸びるほど良い配信。開封率そのものではなく差で並べているので、
+        「よく開かれる店だから高いだけ」を取り除いて見られます。</p>
+      <div class="lv-leg">
+        <span><i class="sq" style="background:var(--lv-pos)"></i>基準より上</span>
+        <span><i class="sq" style="background:var(--lv-neg)"></i>基準より下</span>
       </div>
-      <div class="dtop four" id="linecards"></div>
+      <div class="lv-plot lv-scroll" id="lv-dev"></div>
+      <details class="lv-more"><summary>数字で見る（配信の一覧）</summary>
+        <div class="lv-scroll" id="lv-devtbl"></div></details>
     </div>
 
-    <div class="panel">
-      <h2 data-en="Friends">友だち数の推移</h2>
-      <p class="note">友だち数と、その日の新規追加・ブロック。${lineCum()
-        ?"デジテールから取れるのは<b>累積の友だち登録数</b>で、ブロックした人は引かれていません（有効友だち数の列が画面に無いため）。"
-        :"友だち数（有効）。過去に遡れないので毎日ためています。"}</p>
-      <div class="chart" id="linefriends"></div>
+    <div class="lv-card">
+      <h3>開封率の散らばり</h3>
+      <p class="lv-sub">1つの点が1本の配信。<b>帯の中に入っていれば「ふつう」</b>で、
+        そこから外れた配信だけを見に行けば足ります。平均だけを見て良し悪しを
+        決めないための下敷きです。<br>
+        ここでの<b>単純平均</b>は1本を1票として数えたもの、<b>通数で重みづけ</b>は
+        上のカードや他の図と同じ出し方です。小さな配信がよく開かれると2つはずれます。</p>
+      <div class="lv-leg">
+        <span><i class="sq" style="background:var(--lv-wash);outline:1px solid var(--border)"></i>ふつうの範囲（単純平均±1σ）</span>
+        <span><i class="sq" style="background:var(--lv-pos)"></i>単純平均より上</span>
+        <span><i class="sq" style="background:var(--lv-neg)"></i>単純平均より下</span>
+      </div>
+      <div class="lv-plot" id="lv-dist"></div>
     </div>
 
-    <div class="panel">
-      <h2 data-en="Broadcasts">配信の成果</h2>
-      <p class="note">配信ごとの通数・開封・クリック。開封率＝開封÷配信通数、クリック率＝クリック÷開封。
-        デジテールの配信履歴に出るのは<b>開封「率」まで</b>で、クリック数・クーポン使用数の列が無いため、
-        その2列は空欄のままです（開封件数は率から割り戻した概数）。</p>
-      <div class="tblwrap"><table class="kmat" id="linebc"></table></div>
+    <div class="lv-grid2">
+      <div class="lv-card">
+        <h3>店舗ごとの開封率 — 全社平均とのズレ</h3>
+        <p class="lv-sub">店の平均開封率が、全社の平均より何ポイント上か下か。
+          配信の本数が少ない店は、たまたま良かった/悪かっただけのことがあるので
+          <b>本数も併せて</b>見てください。</p>
+        <div class="lv-plot" id="lv-store-dev"></div>
+        <details class="lv-more"><summary>数字で見る（店舗の一覧）</summary>
+          <div class="lv-scroll" id="lv-storetbl"></div></details>
+      </div>
+      <div class="lv-card">
+        <h3>配信のタイミング</h3>
+        <p class="lv-sub">曜日ごとの平均開封率。棒の下の数字は<b>その曜日に送った本数</b>で、
+          1〜2本しかない曜日は参考程度に。</p>
+        <div class="lv-leg" id="lv-timeleg"></div>
+        <div class="lv-plot" id="lv-dow"></div>
+        <div class="lv-plot" style="margin-top:14px" id="lv-hour"></div>
+      </div>
     </div>
 
-    <div class="panel">
-      <h2 data-en="Sales">配信と売上の重なり</h2>
-      <p class="note">配信した日に印を付けて、税抜売上と並べています。配信の翌日以降に動いたかを見るためのものです。</p>
-      <div class="chart" id="linesales"></div>
+    <div class="lv-card">
+      <h3>同じ内容を複数店に送ったとき、どれだけ差が出たか</h3>
+      <p class="lv-sub">本文が同じ配信を店ごとに並べています。内容が同じなら、
+        差の原因は<b>内容ではなく、友だちの集まり方・配信の時間帯・店の事情</b>のほうです。
+        いちばん開かれた店と開かれなかった店の幅を見てください。
+        <b>目盛りはすべての配信で共通</b>なので、棒の長さをそのまま配信どうしで比べられます。</p>
+      <div id="lv-camp"></div>
     </div>
 
-    <div class="panel">
-      <h2 data-en="Sources">友だち追加の経路</h2>
-      <p class="note">期間中に友だちが増えた経路（検索・QRコード・URL など）の内訳。
-        デジテールに経路別の画面が見当たらないため、いまは取り込めていません。
-        画面に出るようになれば、ためる先（<code>line_sources</code>）は用意してあります。</p>
-      <div class="tblwrap"><table class="kmat" id="linesrc"></table></div>
+    <div class="lv-card">
+      <h3>配信のあと、売上は動いたか</h3>
+      <p class="lv-sub">配信日からの3日間（当日・翌日・翌々日）の税抜売上を、
+        <b>直前4週の「同じ曜日の3日間」の平均</b>と比べています。曜日をそろえているので、
+        「土日に送ったから売れた」を効果と読み違えません。
+        基準の週が2週ぶんも取れない配信と、3日ぶんの売上がまだ出そろっていない配信は
+        数字を出していません。</p>
+      <div class="lv-leg">
+        <span><i class="sq" style="background:var(--lv-pos)"></i>いつもの週より多い</span>
+        <span><i class="sq" style="background:var(--lv-neg)"></i>いつもの週より少ない</span>
+      </div>
+      <div class="lv-plot lv-scroll" id="lv-lift"></div>
+      <details class="lv-more"><summary>数字で見る（配信ごとの売上）</summary>
+        <div class="lv-scroll" id="lv-lifttbl"></div></details>
     </div>
 
-    <p class="note" style="margin-top:16px" id="linefoot">
-      ${last?`直近の取り込み: <b>${esc(last)}</b>`:""}
-      ${adMore("", `配信ごとの成果は配信IDで過去に遡れるので、初回に全期間を一括で取り込みます。`+
-        `友だち数は「その時点の値」しか取れないため、毎日1回ためています（Instagramのフォロワー数と同じ）。`+
-        `店舗との紐付けは line_accounts.store_id（POS店舗）なので、売上・来店と同じ軸で並べられます。`)}
-    </p>`;
+    <div class="lv-card">
+      <h3 id="lv-frttl">友だち登録数の推移</h3>
+      <p class="lv-sub" id="lv-frsub"></p>
+      <div class="lv-plot" id="lv-fr"></div>
+      <h3 style="margin-top:22px">新しく登録した人（月ごと）</h3>
+      <p class="lv-sub">配信の多かった月に登録が増えているか、という見方をします。</p>
+      <div class="lv-plot" id="lv-add"></div>
+    </div>
+
+    <p class="lv-n" id="lv-foot" style="margin-top:6px"></p>
+  </div>`;
   wireCommon();
-  const sel=document.getElementById("linestore");
+  const on=(id,fn)=>{const e=document.getElementById(id);if(e)e.onclick=fn;};
+  on("lv-all",()=>{lvAllPeriod();syncDateInputs();savePeriod();draw();});
+  on("lv-90",()=>{state.to=DATA._max;state.from=clampLo(addDays(DATA._max,-89));
+    state.kind="custom";syncDateInputs();savePeriod();draw();});
+  const sel=document.getElementById("lv-store");
   if(sel)sel.onchange=e=>{LINE_STORE=e.target.value;
-    try{localStorage.setItem("notime-linestore",LINE_STORE);}catch(err){}
-    draw();};
+    try{localStorage.setItem("notime-linestore",LINE_STORE);}catch(err){} draw();};
+  const bs=document.getElementById("lv-base");
+  if(bs)bs.onchange=e=>{LINE_BASE=e.target.value;
+    try{localStorage.setItem("notime-linebase",LINE_BASE);}catch(err){} draw();};
   draw();
 }
-
+function lvAllPeriod(){
+  // 配信・友だちのある範囲いっぱい（売上の範囲ではなく、LINEの範囲に合わせる）
+  const ds=lineBcAll().map(r=>r.d).concat(lineDayAll().map(r=>r.d));
+  state.from=ds.length?clampLo(ds.reduce((a,b)=>a<b?a:b)):DATA._min;
+  state.to  =DATA._max;
+  state.kind="custom";
+}
+// ============================================================
+//  数字を入れる
+// ============================================================
 function drawLine(){
   adPeriodSave("notime-linetab-period",state.kind,state.from,state.to);
-  const bc=lineBc(), day=lineDay(), src=lineSrc(), t=lineTotals(bc);
+  const bc=lineBc(), day=lineDay();
+  const el=id=>document.getElementById(id);
+  const t=el("lv-basettl"); if(t)t.textContent=LV_BASE_LABEL[LINE_BASE];
 
-  // ---- 上のカード ----
-  const dsum=day.reduce((a,r)=>{a.ad+=r.ad||0;a.bl+=r.bl||0;return a;},{ad:0,bl:0});
+  lvHero(bc,day);
+  lvDrawDev(bc);
+  lvDrawDist(bc);
+  lvDrawStores(bc,day);
+  lvDrawTiming(bc);
+  lvDrawCampaigns(bc);
+  lvDrawLift(bc);
+  lvDrawFriends(day,bc);
+  lvDrawFoot();
+}
+
+// --- ヘッドライン ----------------------------------------------------
+//  大きい数字は1枚に1つだけ（平均開封率）。他は小さめのタイルにそろえる。
+//  変化は「同じ長さの直前の期間」と比べる。
+function lvHero(bc,day){
+  const box=document.getElementById("lv-hero"); if(!box)return;
+  const span=daysBetween(state.from,state.to);
+  const pf=addDays(state.from,-span), pt=addDays(state.from,-1);
+  const inPrev=r=>r.d>=pf&&r.d<=pt&&(!LINE_STORE||String(r.si||"")===String(LINE_STORE));
+  const pbc=lineBcAll().filter(inPrev);
+  const or=lvAvgOr(bc), por=lvAvgOr(pbc);
+  const sd=bc.reduce((a,r)=>a+(r.sd||0),0), psd=pbc.reduce((a,r)=>a+(r.sd||0),0);
+  const add=day.reduce((a,r)=>a+(r.ad||0),0);
+  const padd=lineDayAll().filter(inPrev).reduce((a,r)=>a+(r.ad||0),0);
   // 友だち数はアカウントごとに「期間内の最後の値」を取って足す。
   // 単純に最新の1行を見ると、複数店を選んでいるときに1店の数しか出ない。
-  const lastFr=(()=>{
-    const last={};
-    for(const r of day){ if(r.fr==null)continue;
-      if(!last[r.a]||r.d>last[r.a].d)last[r.a]=r; }
-    const vs=Object.values(last);
-    return vs.length?vs.reduce((a,r)=>a+r.fr,0):null;
-  })();
-  const cards=[
-    {k:"配信数",   v:t.n?NUM(t.n)+"本":"—",                  n:"期間中に送った配信の本数"},
-    {k:"配信通数", v:t.sd?NUM(t.sd)+"通":"—",                n:"のべ何通届いたか"},
-    {k:"開封率",   v:t.opr==null?"—":F1(t.opr)+"%",          n:"開封 ÷ 配信通数"},
-    {k:"クリック率",v:t.ckr==null?"—":F1(t.ckr)+"%",         n:"クリック ÷ 開封"},
-    {k:lineCum()?"友だち登録数":"友だち数",
-                   v:lastFr==null?"—":NUM(lastFr)+"人",      n:lineCum()?"期間の最終日の累積":"期間の最終日の値"},
-    {k:"新規追加", v:dsum.ad?NUM(dsum.ad)+"人":"—",          n:"期間中の合計"},
-    {k:"ブロック", v:dsum.bl?NUM(dsum.bl)+"人":"—",          n:"期間中の合計"},
-    {k:"クーポン使用",v:t.cp?NUM(t.cp)+"回":"—",             n:"配信したクーポンの使用"},
-  ];
-  const cbox=document.getElementById("linecards");
-  if(cbox)cbox.innerHTML=cards.map(c=>
-    `<div class="card"><div class="k">${esc(c.k)}</div>`+
-    `<div class="val">${c.v}</div><div class="knote">${esc(c.n)}</div></div>`).join("");
+  const lastOf=rows=>{const m={};
+    for(const r of rows){ if(r.fr==null)continue; if(!m[r.a]||r.d>m[r.a].d)m[r.a]=r; }
+    const v=Object.values(m); return v.length?v.reduce((a,r)=>a+r.fr,0):null;};
+  const fr=lastOf(day), pfr=lastOf(lineDayAll().filter(inPrev));
+  const delta=(now,prev,unit,inv)=>{
+    // 前の期間にデータが無いときは、行そのものを出さない。
+    //「前の期間: —」が5枚並ぶと、読む人が何かの欠測だと思ってしまう。
+    if(now==null||prev==null||!prev)return "";
+    const d=now-prev, up=d>0, good=inv?!up:up;
+    const cls=Math.abs(d)<1e-9?"flat":(good?"up":"dn");
+    return `<div class="lv-d ${cls}">${d>0?"▲":(d<0?"▼":"—")} ${F1(Math.abs(d))}${unit} <span class="lv-n">前の同じ長さの期間と比べて</span></div>`;
+  };
+  const cum=lineCum();
+  box.innerHTML=`
+    <div class="lv-big">
+      <div class="lv-k">平均開封率（配信通数で重みづけ）</div>
+      <div class="lv-v">${or==null?"—":F1(or)+"%"}</div>
+      ${delta(or,por,"pt")}
+      <div class="lv-n" style="margin-top:8px">
+        本ごとの率をそのまま平均せず、通数で重みづけしています。
+        100通の配信と5,000通の配信を同じ重みで扱わないためです。</div>
+    </div>
+    <div class="lv-tile"><div class="lv-k">配信数</div>
+      <div class="lv-v">${NUM(bc.length)}<span style="font-size:15px">本</span></div>
+      ${delta(bc.length,pbc.length,"本")}</div>
+    <div class="lv-tile"><div class="lv-k">配信通数</div>
+      <div class="lv-v">${NUM(sd)}<span style="font-size:15px">通</span></div>
+      ${delta(sd,psd,"通")}<div class="lv-n" style="margin-top:6px">のべ何通届いたか</div></div>
+    <div class="lv-tile"><div class="lv-k">${cum?"友だち登録数（累積）":"友だち数"}</div>
+      <div class="lv-v">${fr==null?"—":NUM(fr)+'<span style="font-size:15px">人</span>'}</div>
+      ${delta(fr,pfr,"人")}<div class="lv-n" style="margin-top:6px">期間の最終日の値</div></div>
+    <div class="lv-tile"><div class="lv-k">期間中の新規登録</div>
+      <div class="lv-v">${add?NUM(add)+'<span style="font-size:15px">人</span>':"—"}</div>
+      ${delta(add,padd,"人")}</div>`;
+}
 
-  // ---- 友だち数の推移 ----
-  const fbox=document.getElementById("linefriends");
-  if(fbox){
-    const days=[...new Set(day.map(r=>r.d))].sort();
-    if(!days.length){ fbox.innerHTML=`<p class="note">この期間の友だちデータがありません。</p>`; }
-    else{
-      const at=(d,k)=>{const rs=day.filter(r=>r.d===d);
-        const v=rs.reduce((a,r)=>a+(r[k]==null?0:r[k]),0);
-        return rs.some(r=>r[k]!=null)?v:null;};
-      drawMultiChart(fbox, days.map(d=>d.slice(5)), [
-        {key:"fr",label:lineCum()?"友だち登録数(累積)":"友だち数",color:"#06c755",
-         vals:days.map(d=>at(d,"fr")),fmt:v=>NUM(v)+"人"},
-        {key:"ad",label:"新規追加",color:"#2e9e5b",vals:days.map(d=>at(d,"ad")),fmt:v=>NUM(v)+"人"},
-        {key:"bl",label:"ブロック",color:"#c0392b",vals:days.map(d=>at(d,"bl")),fmt:v=>NUM(v)+"人"},
-      ], days.map(()=>false));
-    }
-  }
+// --- 配信ごとのズレ --------------------------------------------------
+function lvDrawDev(bc){
+  const box=document.getElementById("lv-dev"); if(!box)return;
+  const rows=bc.filter(r=>r.or!=null).map(r=>{
+    const b=lvBaseFor(r,bc);
+    return b.v==null?null:{r,base:b,dev:r.or-b.v};
+  }).filter(Boolean).sort((a,b)=>b.dev-a.dev);
+  lvDevBars(box,rows.map(x=>({
+    label:lvBcLabel(x.r),
+    dev:x.dev,
+    tip:[{c:x.dev>=0?lvVar(box,"--lv-pos"):lvVar(box,"--lv-neg"),v:F1(x.r.or)+"%",k:"開封率"},
+         {v:F1(x.base.v)+"%",k:x.base.label},
+         {v:NUM(x.r.sd||0)+"通",k:"配信通数"},
+         {v:(x.r.t||"（本文なし）").slice(0,60),k:""}]
+  })),{aria:"配信ごとの開封率と基準との差",rowH:22});
+  // 表（ホバーしなくても同じ数字が読める）
+  const tb=document.getElementById("lv-devtbl");
+  if(tb)tb.innerHTML=rows.length?`<table class="lv-tbl">
+    <thead><tr><th>配信日</th><th>店舗</th><th>通数</th><th>開封率</th>
+      <th>${esc(LV_BASE_LABEL[LINE_BASE])}</th><th>差</th><th style="text-align:left">本文</th></tr></thead>
+    <tbody>${rows.map(x=>`<tr><td>${esc(x.r.d)}</td><td>${esc(lvStoreName(x.r.si))}</td>
+      <td>${NUM(x.r.sd||0)}</td><td>${F1(x.r.or)}%</td><td>${F1(x.base.v)}%</td>
+      <td>${x.dev>0?"+":""}${F1(x.dev)}pp</td>
+      <td class="wrap">${esc((x.r.t||"").slice(0,80))}</td></tr>`).join("")}</tbody></table>`
+    :`<div class="lv-empty">この期間に配信がありません。</div>`;
+}
+function lvBcLabel(r){
+  const nm=lvStoreName(r.si)||"";
+  return r.d.slice(5)+" "+(LINE_STORE?"":nm.replace(/^SELFURUGI/,"SF").replace(/^NOTIME/,"NT"));
+}
 
-  // ---- 配信一覧 ----
-  const tb=document.getElementById("linebc");
-  if(tb){
-    if(!bc.length){ tb.innerHTML=`<tbody><tr><td class="sub" style="padding:8px">この期間の配信がありません。</td></tr></tbody>`; }
-    else{
-      const rows=bc.slice().sort((a,b)=>a.d<b.d?1:-1);
-      const nm=id=>(DATA.stores||[]).find(s=>String(s.id)===String(id))?.name||"—";
-      const showStore=!LINE_STORE;
-      tb.innerHTML=`<thead><tr><th>配信日</th>${showStore?"<th>店舗</th>":""}<th>配信名</th>`+
-        `<th>通数</th><th>開封</th><th>開封率</th><th>クリック</th><th>クリック率</th><th>クーポン</th></tr></thead><tbody>`+
-        rows.map(r=>{
-          const opr=(r.or!=null)?r.or:(r.sd?r.op/r.sd*100:null), ckr=r.op?r.ck/r.op*100:null;
-          return `<tr><td>${esc(r.d)}</td>${showStore?`<td>${esc(nm(r.si))}</td>`:""}`+
-            `<td>${esc(r.t||"（名称なし）")}</td>`+
-            `<td>${r.sd?NUM(r.sd):"—"}</td><td>${r.op?NUM(r.op):"—"}</td>`+
-            `<td>${opr==null?"—":F1(opr)+"%"}</td>`+
-            `<td>${r.ck?NUM(r.ck):"—"}</td><td>${ckr==null?"—":F1(ckr)+"%"}</td>`+
-            `<td>${r.cp?NUM(r.cp):"—"}</td></tr>`;
-        }).join("")+
-        `<tr class="prow"><td${showStore?' colspan="3"':' colspan="2"'}>合計 ${t.n}本</td>`+
-        `<td>${NUM(t.sd)}</td><td>${NUM(t.op)}</td><td>${t.opr==null?"—":F1(t.opr)+"%"}</td>`+
-        `<td>${NUM(t.ck)}</td><td>${t.ckr==null?"—":F1(t.ckr)+"%"}</td><td>${NUM(t.cp)}</td></tr>`+
-        `</tbody>`;
-    }
-  }
+// --- 分布 ------------------------------------------------------------
+function lvDrawDist(bc){
+  const box=document.getElementById("lv-dist"); if(!box)return;
+  const pts=bc.filter(r=>r.or!=null).map(r=>({
+    v:r.or,label:r.d+" "+lvStoreName(r.si),
+    tip:[{v:F1(r.or)+"%",k:"開封率"},{v:NUM(r.sd||0)+"通",k:"配信通数"},
+         {v:(r.t||"").slice(0,60),k:""}]}));
+  lvDots(box,pts,{aria:"開封率の分布",wmean:lvAvgOr(bc)});
+}
 
-  // ---- 配信と売上の重なり ----
-  const sbox=document.getElementById("linesales");
-  if(sbox){
-    const dl=(DATA.daily||[]).filter(r=>r.d>=state.from&&r.d<=state.to
-      &&(!LINE_STORE||String(r.s)===String(LINE_STORE)));
-    const days=[...new Set(dl.map(r=>r.d))].sort();
-    if(!days.length){ sbox.innerHTML=`<p class="note">この期間の売上データがありません。</p>`; }
-    else{
-      const exAt=d=>dl.filter(r=>r.d===d).reduce((a,r)=>a+(r.ex||0),0);
-      const sentAt=d=>bc.filter(r=>r.d===d).reduce((a,r)=>a+(r.sd||0),0);
-      drawMultiChart(sbox, days.map(d=>d.slice(5)), [
-        {key:"ex",  label:"税抜売上", color:"var(--accent)",vals:days.map(exAt),  fmt:v=>YEN(v)+"円"},
-        {key:"sent",label:"LINE配信通数",color:"#06c755",  vals:days.map(d=>sentAt(d)||null),fmt:v=>NUM(v)+"通"},
-      ], days.map(()=>false));
-    }
-  }
+// --- 店舗別 ----------------------------------------------------------
+function lvDrawStores(bc,day){
+  const box=document.getElementById("lv-store-dev"); if(!box)return;
+  const all=lvAvgOr(bc);
+  const g=new Map();
+  for(const r of bc){ const k=String(r.si||""); if(!g.has(k))g.set(k,[]); g.get(k).push(r); }
+  const frBy={}; for(const r of day){ if(r.fr==null)continue;
+    if(!frBy[r.si]||r.d>frBy[r.si].d)frBy[r.si]=r; }
+  const rows=[...g.entries()].map(([sid,rs])=>({
+    sid,name:lvStoreName(sid),n:rs.length,or:lvAvgOr(rs),
+    sd:rs.reduce((a,r)=>a+(r.sd||0),0),fr:frBy[sid]?frBy[sid].fr:null
+  })).filter(x=>x.or!=null).sort((a,b)=>(b.or-a.or));
+  if(all==null||!rows.length){box.innerHTML='<div class="lv-empty">この期間に配信がありません。</div>';}
+  else lvDevBars(box,rows.map(x=>({
+    label:x.name+"（"+x.n+"本）",dev:x.or-all,
+    tip:[{c:x.or>=all?lvVar(box,"--lv-pos"):lvVar(box,"--lv-neg"),v:F1(x.or)+"%",k:"この店の平均開封率"},
+         {v:F1(all)+"%",k:"全社平均"},{v:x.n+"本",k:"配信数"},
+         {v:NUM(x.sd)+"通",k:"配信通数の合計"},
+         {v:x.fr==null?"—":NUM(x.fr)+"人",k:"友だち登録数"}]
+  })),{aria:"店舗ごとの平均開封率と全社平均との差",rowH:24});
+  const tb=document.getElementById("lv-storetbl");
+  if(tb)tb.innerHTML=rows.length?`<table class="lv-tbl">
+    <thead><tr><th>店舗</th><th>配信数</th><th>通数</th><th>平均開封率</th><th>全社差</th><th>友だち</th></tr></thead>
+    <tbody>${rows.map(x=>`<tr><td>${esc(x.name)}</td><td>${x.n}</td><td>${NUM(x.sd)}</td>
+      <td>${F1(x.or)}%</td><td>${x.or-all>0?"+":""}${F1(x.or-all)}pp</td>
+      <td>${x.fr==null?"—":NUM(x.fr)}</td></tr>`).join("")}
+      <tr><td><b>全社</b></td><td>${bc.length}</td>
+      <td>${NUM(bc.reduce((a,r)=>a+(r.sd||0),0))}</td><td><b>${F1(all)}%</b></td><td>—</td><td>—</td></tr>
+    </tbody></table>`:"";
+}
+// --- 配信のタイミング（曜日・時間帯） --------------------------------
+const LV_DOW=["日","月","火","水","木","金","土"];
+function lvDrawTiming(bc){
+  const box=document.getElementById("lv-dow"); if(!box)return;
+  const g=LV_DOW.map(()=>[]);
+  for(const r of bc){ if(r.or==null)continue;
+    g[new Date(r.d+"T00:00:00Z").getUTCDay()].push(r); }
+  const all=lvAvgOr(bc);
+  const leg=document.getElementById("lv-timeleg");
+  if(leg)leg.innerHTML=`<span><i class="sq" style="background:var(--lv-s1)"></i>平均開封率</span>`+
+    (all==null?"":`<span><i style="background:var(--muted)"></i>全体の平均 ${F1(all)}%</span>`);
+  const rows=LV_DOW.map((nm,i)=>{
+    const or=lvAvgOr(g[i]);
+    return {label:nm,label2:g[i].length?g[i].length+"本":"—",v:or,
+      c:lvVar(box,"--lv-s1"),tipTitle:nm+"曜日",
+      tip:[{c:lvVar(box,"--lv-s1"),v:or==null?"—":F1(or)+"%",k:"平均開封率"},
+           {v:g[i].length+"本",k:"配信数"},
+           {v:all==null?"—":F1(all)+"%",k:"全体の平均"}]};
+  });
+  lvCols(box,rows,{h:210,fmt:v=>F1(v)+"%",fmtAxis:v=>F1(v)+"%",padB:40,
+    ref:all,refLabel:"全体の平均",aria:"曜日ごとの平均開封率"});
+  // 時間帯。ほとんど朝に送っているので、時台でまとめる
+  const hb=document.getElementById("lv-hour"); if(!hb)return;
+  const hg=new Map();
+  for(const r of bc){ if(r.or==null||!r.ts)continue;
+    const h=Number(String(r.ts).slice(11,13)); if(!isFinite(h))continue;
+    if(!hg.has(h))hg.set(h,[]); hg.get(h).push(r); }
+  const hrs=[...hg.keys()].sort((a,b)=>a-b);
+  if(!hrs.length){hb.innerHTML='<div class="lv-empty">配信時刻が取れていません。</div>';return;}
+  lvCols(hb,hrs.map(h=>{
+    const or=lvAvgOr(hg.get(h));
+    return {label:h+"時",label2:hg.get(h).length+"本",v:or,
+      c:lvVar(hb,"--lv-s1"),tipTitle:h+"時台",
+      tip:[{c:lvVar(hb,"--lv-s1"),v:F1(or)+"%",k:"平均開封率"},
+           {v:hg.get(h).length+"本",k:"配信数"},
+           {v:all==null?"—":F1(all)+"%",k:"全体の平均"}]};
+  }),{h:190,fmt:v=>F1(v)+"%",fmtAxis:v=>F1(v)+"%",padB:40,
+      ref:all,refLabel:"全体の平均",aria:"時間帯ごとの平均開封率"});
+}
 
-  // ---- 経路別 ----
-  const sb2=document.getElementById("linesrc");
-  if(sb2){
-    const agg={};
-    for(const r of src)agg[r.s||"不明"]=(agg[r.s||"不明"]||0)+(r.ad||0);
-    const list=Object.entries(agg).sort((a,b)=>b[1]-a[1]);
-    const tot=list.reduce((a,x)=>a+x[1],0);
-    sb2.innerHTML=list.length
-      ? `<thead><tr><th>経路</th><th>新規友だち</th><th>構成比</th></tr></thead><tbody>`+
-        list.map(([k,v])=>`<tr><td>${esc(k)}</td><td>${NUM(v)}人</td>`+
-          `<td>${tot?F1(v/tot*100):"0.0"}%</td></tr>`).join("")+
-        `<tr class="prow"><td>合計</td><td>${NUM(tot)}人</td><td>100.0%</td></tr></tbody>`
-      : `<tbody><tr><td class="sub" style="padding:8px">経路別のデータは取り込めていません（上の説明のとおり）。</td></tr></tbody>`;
+// --- 同じ内容の配信を店で比べる --------------------------------------
+function lvDrawCampaigns(bc){
+  const box=document.getElementById("lv-camp"); if(!box)return;
+  const cs=lvCampaigns(bc.filter(r=>r.or!=null)).slice(0,8);
+  if(!cs.length){
+    box.innerHTML=`<div class="lv-empty">この期間に、同じ内容を2店以上へ送った配信がありません。</div>`;
+    return;
   }
+  box.innerHTML=cs.map((c,ci)=>{
+    const hi=c.rows[0], lo=c.rows[c.rows.length-1];
+    const gap=hi.or-lo.or;
+    return `<div class="lv-camp">
+      <div class="ct">${esc(c.key)}…</div>
+      <div class="cm">${esc(c.rows[0].d)} ごろ・${c.rows.length}店へ ${NUM(c.sd)}通
+        ／ いちばん開かれた店といちばん開かれなかった店の差 <b>${F1(gap)}pt</b></div>
+      <div class="lv-plot" id="lv-camp-${ci}"></div>
+    </div>`;
+  }).join("");
+  // 目盛りは全部の配信で共通にする。図ごとに幅を変えると、差が2ptの配信も
+  // 18ptの配信も同じ長さの棒になって、並べて見る意味が無くなる。
+  const mx=Math.max(0.5,...cs.flatMap(c=>{const a=lvAvgOr(c.rows);
+    return c.rows.map(r=>Math.abs(r.or-a));}));
+  cs.forEach((c,ci)=>{
+    const b=document.getElementById("lv-camp-"+ci); if(!b)return;
+    const avg=lvAvgOr(c.rows);
+    lvDevBars(b,c.rows.map(r=>({
+      label:lvStoreName(r.si),dev:r.or-avg,
+      tip:[{c:r.or>=avg?lvVar(b,"--lv-pos"):lvVar(b,"--lv-neg"),v:F1(r.or)+"%",k:"開封率"},
+           {v:F1(avg)+"%",k:"この配信の平均"},{v:NUM(r.sd||0)+"通",k:"配信通数"}]
+    })),{rowH:24,max:mx,aria:"同じ配信の店舗差"});
+  });
+}
 
-  // ---- 取り込みがまだのときの案内 ----
-  const foot=document.getElementById("linefoot");
-  if(foot&&!lineHas()){
-    foot.insertAdjacentHTML("afterbegin",
-      `<b>まだLINEのデータが入っていません。</b> ためる側（<code>line_accounts</code>・`+
-      `<code>line_broadcasts</code>・<code>line_daily</code>・<code>line_sources</code>）は用意してあります。`+
-      `毎日の日次ETL（デジテール＝来店数と同じログイン）で入ります。`+
-      `手で動かすときは Actions →「NOTIME 日次ETL」→ only に line。<br>`);
-  }else if(foot&&lineNoMap()){
-    foot.insertAdjacentHTML("afterbegin",
-      `<b>店舗と紐付いていないLINEアカウントが ${lineNoMap()} 件あります。</b>`+
-      `そのぶんは「すべての店舗」にだけ出ます。`+
-      `<code>line_accounts.store_id</code> にPOS店舗idを入れると店舗別で見られます。<br>`);
+// --- 売上リフト ------------------------------------------------------
+function lvDrawLift(bc){
+  const box=document.getElementById("lv-lift"); if(!box)return;
+  const rows=bc.map(r=>{const l=lvLift(r,3); return l?{r,l}:null;})
+               .filter(Boolean).sort((a,b)=>b.l.pct-a.l.pct);
+  if(!rows.length){
+    box.innerHTML=`<div class="lv-empty">この期間には、比べられる配信がありません。
+      （直前4週のうち2週ぶんの売上が要ります。配信の直後で3日ぶんが揃っていない場合も出ません）</div>`;
+    const tb0=document.getElementById("lv-lifttbl"); if(tb0)tb0.innerHTML="";
+    return;
   }
+  lvDevBars(box,rows.map(x=>({
+    label:lvBcLabel(x.r),dev:x.l.pct,
+    tip:[{c:x.l.pct>=0?lvVar(box,"--lv-pos"):lvVar(box,"--lv-neg"),
+          v:(x.l.pct>0?"+":"")+F1(x.l.pct)+"%",k:"いつもの週との差"},
+         {v:YEN(x.l.now)+"円",k:"配信後3日の税抜売上"},
+         {v:YEN(x.l.base)+"円",k:"直前"+x.l.weeks+"週の同曜日3日の平均"},
+         {v:F1(x.r.or||0)+"%",k:"開封率"}]
+  })),{unit:"%",rowH:22,aria:"配信ごとの売上リフト"});
+  const st=lvStats(rows.map(x=>x.l.pct));
+  const tb=document.getElementById("lv-lifttbl");
+  if(tb)tb.innerHTML=`<table class="lv-tbl">
+    <thead><tr><th>配信日</th><th>店舗</th><th>開封率</th><th>配信後3日</th>
+      <th>いつもの週</th><th>差</th></tr></thead>
+    <tbody>${rows.map(x=>`<tr><td>${esc(x.r.d)}</td><td>${esc(lvStoreName(x.r.si))}</td>
+      <td>${x.r.or==null?"—":F1(x.r.or)+"%"}</td><td>${YEN(x.l.now)}</td>
+      <td>${YEN(x.l.base)}</td><td>${x.l.pct>0?"+":""}${F1(x.l.pct)}%</td></tr>`).join("")}
+      <tr><td colspan="5"><b>${rows.length}本の平均</b></td>
+      <td><b>${st.mean>0?"+":""}${F1(st.mean)}%</b></td></tr></tbody></table>`;
+}
+
+// --- 友だち ----------------------------------------------------------
+function lvDrawFriends(day,bc){
+  const box=document.getElementById("lv-fr"); if(!box)return;
+  const cum=lineCum();
+  const ttl=document.getElementById("lv-frttl");
+  if(ttl)ttl.textContent=cum?"友だち登録数（累積）の推移":"友だち数の推移";
+  const sub=document.getElementById("lv-frsub");
+  if(sub)sub.innerHTML=cum
+    ? `デジテールから取れるのは<b>累積の友だち登録数</b>で、ブロックした人は引かれていません
+       （有効友だち数の列が画面にありません）。線が寝てきたら、登録が止まっているサインです。`
+    : `友だち数（有効）。過去に遡れないので毎日ためています。`;
+  const days=[...new Set(day.map(r=>r.d))].sort();
+  if(!days.length){box.innerHTML='<div class="lv-empty">この期間の友だちデータがありません。</div>';}
+  else{
+    const at=d=>{const rs=day.filter(r=>r.d===d);
+      const v=rs.reduce((a,r)=>a+(r.fr==null?0:r.fr),0);
+      return rs.some(r=>r.fr!=null)?v:null;};
+    const ix={}; days.forEach((d,i)=>ix[d]=i);
+    const marks=[...new Set(bc.map(r=>r.d))].filter(d=>ix[d]!=null).map(d=>({i:ix[d]}));
+    lvLine(box,days.map(d=>d.slice(5)),[{key:"fr",
+      label:cum?"友だち登録数（累積）":"友だち数",color:lvVar(box,"--lv-s2"),
+      vals:days.map(at),fmt:v=>NUM(v)+"人",area:true}],
+      {h:250,marks,zero:false,fmtAxis:NUM,dateOf:i=>days[i],
+       aria:"友だち登録数の推移"});
+  }
+  // 月ごとの新規登録
+  const ab=document.getElementById("lv-add"); if(!ab)return;
+  const mg=new Map();
+  for(const r of day){ const m=r.d.slice(0,7);
+    mg.set(m,(mg.get(m)||0)+(r.ad||0)); }
+  const bm=new Map();
+  for(const r of bc){ const m=r.d.slice(0,7); bm.set(m,(bm.get(m)||0)+1); }
+  const ms=[...mg.keys()].sort();
+  if(!ms.length){ab.innerHTML='<div class="lv-empty">この期間のデータがありません。</div>';return;}
+  lvCols(ab,ms.map(m=>({label:m.slice(2).replace("-","/"),v:mg.get(m),
+    c:lvVar(ab,"--lv-s2"),tipTitle:m,
+    tip:[{c:lvVar(ab,"--lv-s2"),v:NUM(mg.get(m))+"人",k:"新規登録"},
+         {v:(bm.get(m)||0)+"本",k:"その月の配信数"}]})),
+    {h:200,fmt:NUM,fmtAxis:NUM,aria:"月ごとの新規友だち登録数"});
+}
+
+// --- 注記 ------------------------------------------------------------
+function lvDrawFoot(){
+  const f=document.getElementById("lv-foot"); if(!f)return;
+  const last=lineBcAll().reduce((a,r)=>r.d>a?r.d:a,"")||
+             lineDayAll().reduce((a,r)=>r.d>a?r.d:a,"");
+  const parts=[];
+  if(!lineHas()){
+    parts.push(`<b>まだLINEのデータが入っていません。</b>
+      毎日の日次ETL（デジテール＝来店数と同じログイン）で入ります。`);
+  }else{
+    parts.push(`直近の取り込み: <b>${esc(last)}</b>（毎朝6時に自動更新）`);
+  }
+  if(lineNoMap()){
+    parts.push(`店舗と紐付いていないLINEアカウントが ${lineNoMap()} 件あります。
+      そのぶんは「すべての店舗」にだけ出ます。`);
+  }
+  parts.push(`<b>この画面に無いもの</b>：クリック数・クーポン使用数（デジテールの配信履歴に列がありません）、
+    ブロック数・有効友だち数（友だちCSVに列がありません）、友だち追加の経路（画面が見当たりません）。
+    ためる先は用意してあるので、向こうの画面に出るようになれば足せます。`);
+  parts.push(`開封件数はデジテールが率でしか出さないため、率から割り戻した概数です。`);
+  f.innerHTML=parts.join("<br>");
 }
 
 function renderAds(){
