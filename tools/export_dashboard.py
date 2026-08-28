@@ -655,6 +655,58 @@ def build_data(sb: Supabase) -> dict:
     except Exception as _e:
         print(f"  （クリエイティブ別は取れませんでした。その欄は空になります: {_e}）")
 
+
+    # --- LINE配信（ネブラスカ取り込み・sql/034）------------------------------
+    #   広告と同じく「取れていなければ欄が空になるだけ」にする。表がまだ無い
+    #   環境でも export 全体を落とさない（try で丸ごと囲う）。
+    line_accounts: list[dict] = []
+    line_bc: list[dict] = []
+    line_daily: list[dict] = []
+    line_src: list[dict] = []
+    try:
+        for a in _select_all(sb, "line_accounts", "account_id,name,basic_id,store_id,active", order="account_id"):
+            line_accounts.append({
+                "id": a["account_id"], "name": a.get("name") or a["account_id"],
+                # si=POS店舗ID。売上・来店と突き合わせるときの結び目（広告の si と同じ意味）
+                "si": a.get("store_id"), "active": a.get("active", True),
+            })
+        acct_sid = {a["id"]: a["si"] for a in line_accounts}
+        for r in _select_all(sb, "line_broadcasts",
+                             "broadcast_id,account_id,business_date,title,kind,"
+                             "delivered,opened,clicked,click_users,blocked,coupon_used",
+                             order="business_date"):
+            if not r.get("business_date"):
+                continue
+            line_bc.append({
+                "d": r["business_date"], "a": r["account_id"],
+                "si": acct_sid.get(r["account_id"]),
+                "t": r.get("title"), "k": r.get("kind"),
+                "sd": int(r.get("delivered") or 0),
+                "op": int(r.get("opened") or 0),
+                "ck": int(r.get("clicked") or 0),
+                "cu": int(r.get("click_users") or 0),
+                "bl": int(r.get("blocked") or 0),
+                "cp": int(r.get("coupon_used") or 0),
+            })
+        for r in _select_all(sb, "line_daily",
+                             "date,account_id,friends,added,blocked,net,targeted",
+                             order="date"):
+            line_daily.append({
+                "d": r["date"], "a": r["account_id"], "si": acct_sid.get(r["account_id"]),
+                "fr": r.get("friends"), "ad": r.get("added"),
+                "bl": r.get("blocked"), "nt": r.get("net"), "tg": r.get("targeted"),
+            })
+        for r in _select_all(sb, "line_sources", "date,account_id,source,added", order="date"):
+            line_src.append({"d": r["date"], "a": r["account_id"],
+                             "si": acct_sid.get(r["account_id"]),
+                             "s": r.get("source"), "ad": int(r.get("added") or 0)})
+        if line_bc or line_daily:
+            nomap = sum(1 for a in line_accounts if not a["si"])
+            print(f"\n  LINE: 配信 {len(line_bc)}件 / 日次 {len(line_daily)}行 / "
+                  f"経路 {len(line_src)}行（店舗未紐付け {nomap}アカウント）")
+    except Exception as _e:
+        print(f"  （LINEは取れませんでした。その欄は空になります: {_e}）")
+
     # --- 割り当て先に選べる店舗（納品先）------------------------------------
     #   未紐付けキャンペーンを画面から割り当てるときのプルダウン用。
     #   POS店舗と結び付いている納品先だけを出す（結び付いていない先を選んでも
@@ -675,6 +727,10 @@ def build_data(sb: Supabase) -> dict:
         "metaAds": meta_ads,
         "metaDests": dests,
         "metaSync": meta_sync,
+        "lineAccounts": line_accounts,
+        "lineBc": line_bc,
+        "lineDaily": line_daily,
+        "lineSrc": line_src,
         "stores": [{"id": s["id"], "name": name_by_id.get(s["id"], str(s["id"])),
                     "own": own_by_id.get(s["id"]),      # null＝区分が未設定
                     "kv": kv_by_id.get(s["id"], True),
