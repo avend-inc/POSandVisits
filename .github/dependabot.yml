@@ -1,0 +1,31 @@
+# 依存ライブラリの脆弱性を自動で見つけて、更新PRを出す。
+# ETL は毎日 POS のサイトへログインしに行くので、requests / playwright が
+# 古いまま放置されると影響が大きい。
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "02:00"
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 5
+    labels: [dependencies]
+
+  - package-ecosystem: pip
+    directory: "/notime-property-scout"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "02:00"
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 3
+    labels: [dependencies]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+      timezone: Asia/Tokyo
+    labels: [dependencies]

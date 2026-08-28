@@ -67,7 +67,9 @@ let SB=null;
 
 // ===== 教師データ由来のベンチマーク（弊社店のみ。競合は除外）=====
 //  ※ 数値は Google Sheets「店舗教師データ」から算出。店舗追加時は再生成すること。
-const BENCH=[{"n":"鎌ヶ谷","g":"urbanA","p3":18547,"p10":245631,"p20":783348,"p30":1620433,"p40":2850962,"traf":25215,"indep":0.086,"muni":"千葉県鎌ケ谷市"},{"n":"旭川末広","g":"road_success","p3":10409,"p10":39763,"p20":42088,"p30":43191,"p40":45965,"traf":20141,"indep":0.865,"muni":"北海道旭川市"},{"n":"上田原","g":"fail","p3":6318,"p10":22882,"p20":31762,"p30":54285,"p40":108278,"traf":13354,"indep":0.211,"muni":"長野県上田市"},{"n":"仙台吉成","g":"fail","p3":14252,"p10":155323,"p20":222515,"p30":244953,"p40":276356,"traf":null,"indep":0.562,"muni":"宮城県仙台市"},{"n":"伊勢崎","g":"fail","p3":9243,"p10":64410,"p20":187979,"p30":286272,"p40":359266,"traf":29013,"indep":0.179,"muni":"群馬県伊勢崎市"},{"n":"徳島沖浜","g":"road_success","p3":11074,"p10":43138,"p20":63269,"p30":72024,"p40":77387,"traf":null,"indep":0.557,"muni":"徳島県徳島市"},{"n":"熊谷","g":"urbanA","p3":11300,"p10":54355,"p20":159834,"p30":349186,"p40":745004,"traf":12798,"indep":0.073,"muni":"埼玉県熊谷市"},{"n":"富山田中町","g":"road_success","p3":15833,"p10":55289,"p20":80401,"p30":107210,"p40":127310,"traf":24587,"indep":0.434,"muni":"富山県富山市"},{"n":"倉敷","g":"fail","p3":12850,"p10":63641,"p20":152793,"p30":204112,"p40":241276,"traf":null,"indep":0.264,"muni":"岡山県倉敷市"},{"n":"静岡","g":"fail","p3":18235,"p10":79775,"p20":94581,"p30":140276,"p40":195994,"traf":22421,"indep":0.407,"muni":"静岡県静岡市"},{"n":"GARAGE静岡","g":"fail","p3":18895,"p10":88622,"p20":109311,"p30":138101,"p40":185365,"traf":8586,"indep":0.478,"muni":"静岡県静岡市"},{"n":"伊予松前","g":"road_success","p3":5652,"p10":66535,"p20":80844,"p30":83397,"p40":86577,"traf":26057,"indep":0.769,"muni":"愛媛県伊予郡"},{"n":"山形","g":"road_success","p3":16964,"p10":36403,"p20":52385,"p30":66765,"p40":78329,"traf":25004,"indep":0.465,"muni":"山形県山形市"},{"n":"福井","g":"road_success","p3":10744,"p10":43795,"p20":68233,"p30":83750,"p40":93106,"traf":null,"indep":0.47,"muni":"福井県福井市"},{"n":"高松","g":"fail","p3":13529,"p10":55025,"p20":73323,"p30":101968,"p40":124576,"traf":16811,"indep":0.442,"muni":"香川県高松市"}];
+// 基準店は bukken_teacher_bench（RLSで社内のみ）から読む。
+// 直書きだとページのソースから誰でも読めてしまうため移した。
+let BENCH=[];
 
 // ===== 検証済みの閾値（MD §1.2。ハードコードではなく確定した定数として保持）=====
 const CFG={
@@ -82,6 +84,19 @@ const CFG={
 
 const NUM=n=>(n==null||isNaN(n))?"—":Number(n).toLocaleString("ja-JP");
 const road=()=>BENCH.filter(b=>b.g==="road_success");
+
+// ベンチのレンジ表示。以前はここに実数値を直接書いていたが、
+// それだとデータをDBに移した意味が無いので、読み込んだ BENCH から出す。
+function rangeText(){
+  const r=road();
+  const lo=(k)=>Math.min(...r.map(b=>b[k]).filter(v=>v!=null));
+  const hi=(k)=>Math.max(...r.map(b=>b[k]).filter(v=>v!=null));
+  if(!r.length)return "";
+  const t=r.filter(b=>b.traf!=null).length
+    ? ` ／ 通行量 ${NUM(lo("traf"))}〜${NUM(hi("traf"))}` : "";
+  return `10km20-34 レンジ ${NUM(lo("p10"))}〜${NUM(hi("p10"))}${t}。`;
+}
+
 const urbanA=()=>BENCH.filter(b=>b.g==="urbanA");
 
 // 候補のバンド値が、路面成功店のどこに位置するか（○○以上・△△以下）
@@ -212,7 +227,7 @@ function renderForm(){
     <table class="bench"><tr><th>店</th><th>3km</th><th>10km</th><th>40km</th><th>独立度</th><th>通行量</th></tr>
     ${road().map(b=>`<tr><td>${b.n}</td><td>${NUM(b.p3)}</td><td>${NUM(b.p10)}</td><td>${NUM(b.p40)}</td><td>${b.indep}</td><td>${NUM(b.traf)}</td></tr>`).join("")}
     </table>
-    <p class="hint" style="margin-top:6px">10km20-34 レンジ 36,403〜66,535 ／ 通行量 20,141〜26,057。競合(Syndi・ヒューマンイズデッド)はベンチから除外。</p>
+    <p class="hint" style="margin-top:6px">${rangeText()}競合はベンチから除外。</p>
   </details></div>`;
   document.getElementById("run").onclick=run;
 }
@@ -264,6 +279,10 @@ async function boot(){
     }
     document.getElementById("logoutbtn").style.display="";
     document.getElementById("logoutbtn").onclick=async()=>{try{await SB.auth.signOut();}catch(e){}location.reload();};
+    const {data,error}=await SB.from("bukken_teacher_bench").select("*").order("n");
+    if(error)throw new Error("基準データを読み込めませんでした（権限がない可能性があります）");
+    BENCH=data||[];
+    if(!BENCH.length){document.getElementById("main").innerHTML='<div class="msg">基準データがありません。</div>';return;}
     renderForm();
   }catch(e){ document.getElementById("main").innerHTML='<div class="msg">読み込みに失敗しました：'+String(e.message||e)+'</div>'; }
 }

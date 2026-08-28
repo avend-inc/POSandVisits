@@ -1113,7 +1113,7 @@ function loadSel(){
   return new Set(allIds);
 }
 
-function render(){ if(VIEW==="ads")renderAds(); else if(VIEW==="ig")renderIg(); else if(state.detail)renderDetail(); else renderMain(); }
+function render(){ if(VIEW==="ads")renderAds(); else if(VIEW==="ig")renderIg(); else if(VIEW==="line")renderLine(); else if(state.detail)renderDetail(); else renderMain(); }
 
 // ============================================================
 //  広告タブ（Meta広告）
@@ -1398,6 +1398,7 @@ function mktHead(active){
     <div class="seg mktseg">
       <a href="index.html?view=ads&g=own"${active==="ads"?' class="on"':""}>Meta広告</a>
       <a href="index.html?view=ig"${active==="ig"?' class="on"':""}>Instagram</a>
+      <a href="index.html?view=line"${active==="line"?' class="on"':""}>LINE</a>
     </div>`;
 }
 // Instagram。取り込みの土台（sql/023）はあるが、まだ画面に出していない。
@@ -1431,6 +1432,246 @@ function renderIg(){
     </p>`;
   wireCommon();
 }
+// ============================================================
+//  LINE（配信・友だち）
+//    取り込みは etl/line_fetch.py（ネブラスカ）→ sql/034_line.sql の表。
+//    アカウントと店舗の紐付けは line_accounts.store_id（＝POS店舗 stores.id）。
+//    紐付いていないアカウントは「店舗別」で絞れないので、その旨を画面に出す。
+// ============================================================
+let LINE_STORE="";     // 絞り込み中のPOS店舗id（""＝すべて）
+let LINE_INIT=false;
+
+const lineAccts =()=>DATA.lineAccounts||[];
+const lineBcAll =()=>DATA.lineBc||[];
+const lineDayAll=()=>DATA.lineDaily||[];
+const lineSrcAll=()=>DATA.lineSrc||[];
+const lineHas   =()=>lineBcAll().length>0||lineDayAll().length>0;
+
+// 期間と店舗で絞る。si（POS店舗id）は line_accounts.store_id 由来
+function lineIn(r){
+  if(r.d<state.from||r.d>state.to)return false;
+  if(LINE_STORE&&String(r.si||"")!==String(LINE_STORE))return false;
+  return true;
+}
+const lineBc =()=>lineBcAll().filter(lineIn);
+const lineDay=()=>lineDayAll().filter(lineIn);
+const lineSrc=()=>lineSrcAll().filter(lineIn);
+
+// 店舗の選択肢＝LINEアカウントが紐付いているPOS店舗だけ。
+// 紐付いていない店を並べても中身が空になるだけなので出さない。
+function lineStoreOpts(){
+  const ids=[...new Set(lineAccts().map(a=>a.si).filter(v=>v!=null))];
+  return ids.map(id=>({id,name:(DATA.stores||[]).find(s=>String(s.id)===String(id))?.name||("店舗"+id)}))
+            .filter(x=>x.name).sort((a,b)=>a.name.localeCompare(b.name,"ja"));
+}
+const lineNoMap=()=>lineAccts().filter(a=>a.si==null).length;
+
+// 率は「合計÷合計」で出す。配信ごとの率を平均すると、通数の少ない配信が
+// 同じ重みで効いてしまい実態とずれる（広告のCTRと同じ考え方）
+function lineTotals(rows){
+  const t={n:rows.length,sd:0,op:0,ck:0,cu:0,bl:0,cp:0};
+  for(const r of rows){t.sd+=r.sd||0;t.op+=r.op||0;t.ck+=r.ck||0;t.cu+=r.cu||0;t.bl+=r.bl||0;t.cp+=r.cp||0;}
+  t.opr=t.sd?t.op/t.sd*100:null;      // 開封率＝開封÷配信通数
+  t.ckr=t.op?t.ck/t.op*100:null;      // クリック率＝クリック÷開封（開封した人のうち何%が押したか）
+  t.ctr=t.sd?t.ck/t.sd*100:null;      // 配信あたりのクリック率
+  return t;
+}
+
+function renderLine(){
+  document.getElementById("app").classList.add("adsview");
+  {const tb=document.querySelector(".tabbar"); if(tb)tb.style.display="none";}
+  syncAdminTab();
+  if(!LINE_INIT){
+    const r=adPeriodRestore("notime-linetab-period");
+    if(r){ state.from=r[0]; state.to=r[1]; state.kind=r[2]; savePeriod(); }
+    else adApply4w();
+    try{LINE_STORE=localStorage.getItem("notime-linestore")||"";}catch(e){}
+    LINE_INIT=true;
+  }
+  const opts=lineStoreOpts();
+  if(LINE_STORE&&!opts.some(o=>String(o.id)===String(LINE_STORE))){
+    LINE_STORE=""; try{localStorage.setItem("notime-linestore","");}catch(e){}
+  }
+  const last=lineBcAll().reduce((a,r)=>r.d>a?r.d:a,"")||lineDayAll().reduce((a,r)=>r.d>a?r.d:a,"");
+
+  document.getElementById("app").innerHTML=mktHead("line")+`
+    <div class="panel">
+      <h2 data-en="Filter">条件</h2>
+      <div class="adperiod">
+        <button class="chip" id="ad4w">直近4週</button>
+        <button class="chip pchip" data-preset="thismonth">今月</button>
+        <button class="chip pchip" data-preset="lastmonth">前月</button>
+        <button class="chip pchip" data-preset="thisweek">今週</button>
+        <button class="chip pchip" data-preset="lastweek">前週</button>
+        <button class="chip pchip" data-preset="prevday">前日</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+        <input type="date" id="from" min="${DATA._min}" max="${DATA._max}" value="${state.from}">
+        <span class="sub">〜</span>
+        <input type="date" id="to" min="${DATA._min}" max="${DATA._max}" value="${state.to}">
+        <span class="sub" id="periodlabel"></span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+        <span class="sub" style="font-weight:700">店舗</span>
+        <select id="linestore" style="max-width:220px">
+          <option value="">すべての店舗</option>
+          ${opts.map(o=>`<option value="${esc(String(o.id))}"${String(LINE_STORE)===String(o.id)?" selected":""}>${esc(o.name)}</option>`).join("")}
+        </select>
+        <span class="sub">POS店舗（売上・来店と同じ区分）</span>
+      </div>
+      <div class="dtop four" id="linecards"></div>
+    </div>
+
+    <div class="panel">
+      <h2 data-en="Friends">友だち数の推移</h2>
+      <p class="note">友だち数（有効）と、その日の新規追加・ブロック。友だち数は過去に遡れないので毎日ためています。</p>
+      <div class="chart" id="linefriends"></div>
+    </div>
+
+    <div class="panel">
+      <h2 data-en="Broadcasts">配信の成果</h2>
+      <p class="note">配信ごとの通数・開封・クリック。開封率＝開封÷配信通数、クリック率＝クリック÷開封。</p>
+      <div class="tblwrap"><table class="kmat" id="linebc"></table></div>
+    </div>
+
+    <div class="panel">
+      <h2 data-en="Sales">配信と売上の重なり</h2>
+      <p class="note">配信した日に印を付けて、税抜売上と並べています。配信の翌日以降に動いたかを見るためのものです。</p>
+      <div class="chart" id="linesales"></div>
+    </div>
+
+    <div class="panel">
+      <h2 data-en="Sources">友だち追加の経路</h2>
+      <p class="note">期間中に友だちが増えた経路の内訳。</p>
+      <div class="tblwrap"><table class="kmat" id="linesrc"></table></div>
+    </div>
+
+    <p class="note" style="margin-top:16px" id="linefoot">
+      ${last?`直近の取り込み: <b>${esc(last)}</b>`:""}
+      ${adMore("", `配信ごとの成果は配信IDで過去に遡れるので、初回に全期間を一括で取り込みます。`+
+        `友だち数は「その時点の値」しか取れないため、毎日1回ためています（Instagramのフォロワー数と同じ）。`+
+        `店舗との紐付けは line_accounts.store_id（POS店舗）なので、売上・来店と同じ軸で並べられます。`)}
+    </p>`;
+  wireCommon();
+  const sel=document.getElementById("linestore");
+  if(sel)sel.onchange=e=>{LINE_STORE=e.target.value;
+    try{localStorage.setItem("notime-linestore",LINE_STORE);}catch(err){}
+    draw();};
+  draw();
+}
+
+function drawLine(){
+  adPeriodSave("notime-linetab-period",state.kind,state.from,state.to);
+  const bc=lineBc(), day=lineDay(), src=lineSrc(), t=lineTotals(bc);
+
+  // ---- 上のカード ----
+  const dsum=day.reduce((a,r)=>{a.ad+=r.ad||0;a.bl+=r.bl||0;return a;},{ad:0,bl:0});
+  const lastFr=day.length?day.slice().sort((a,b)=>a.d<b.d?1:-1)[0].fr:null;
+  const cards=[
+    {k:"配信数",   v:t.n?NUM(t.n)+"本":"—",                  n:"期間中に送った配信の本数"},
+    {k:"配信通数", v:t.sd?NUM(t.sd)+"通":"—",                n:"のべ何通届いたか"},
+    {k:"開封率",   v:t.opr==null?"—":F1(t.opr)+"%",          n:"開封 ÷ 配信通数"},
+    {k:"クリック率",v:t.ckr==null?"—":F1(t.ckr)+"%",         n:"クリック ÷ 開封"},
+    {k:"友だち数", v:lastFr==null?"—":NUM(lastFr)+"人",      n:"期間の最終日の値"},
+    {k:"新規追加", v:dsum.ad?NUM(dsum.ad)+"人":"—",          n:"期間中の合計"},
+    {k:"ブロック", v:dsum.bl?NUM(dsum.bl)+"人":"—",          n:"期間中の合計"},
+    {k:"クーポン使用",v:t.cp?NUM(t.cp)+"回":"—",             n:"配信したクーポンの使用"},
+  ];
+  const cbox=document.getElementById("linecards");
+  if(cbox)cbox.innerHTML=cards.map(c=>
+    `<div class="card"><div class="k">${esc(c.k)}</div>`+
+    `<div class="val">${c.v}</div><div class="knote">${esc(c.n)}</div></div>`).join("");
+
+  // ---- 友だち数の推移 ----
+  const fbox=document.getElementById("linefriends");
+  if(fbox){
+    const days=[...new Set(day.map(r=>r.d))].sort();
+    if(!days.length){ fbox.innerHTML=`<p class="note">この期間の友だちデータがありません。</p>`; }
+    else{
+      const at=(d,k)=>{const rs=day.filter(r=>r.d===d);
+        const v=rs.reduce((a,r)=>a+(r[k]==null?0:r[k]),0);
+        return rs.some(r=>r[k]!=null)?v:null;};
+      drawMultiChart(fbox, days.map(d=>d.slice(5)), [
+        {key:"fr",label:"友だち数",color:"#06c755",vals:days.map(d=>at(d,"fr")),fmt:v=>NUM(v)+"人"},
+        {key:"ad",label:"新規追加",color:"#2e9e5b",vals:days.map(d=>at(d,"ad")),fmt:v=>NUM(v)+"人"},
+        {key:"bl",label:"ブロック",color:"#c0392b",vals:days.map(d=>at(d,"bl")),fmt:v=>NUM(v)+"人"},
+      ], days.map(()=>false));
+    }
+  }
+
+  // ---- 配信一覧 ----
+  const tb=document.getElementById("linebc");
+  if(tb){
+    if(!bc.length){ tb.innerHTML=`<tbody><tr><td class="sub" style="padding:8px">この期間の配信がありません。</td></tr></tbody>`; }
+    else{
+      const rows=bc.slice().sort((a,b)=>a.d<b.d?1:-1);
+      const nm=id=>(DATA.stores||[]).find(s=>String(s.id)===String(id))?.name||"—";
+      const showStore=!LINE_STORE;
+      tb.innerHTML=`<thead><tr><th>配信日</th>${showStore?"<th>店舗</th>":""}<th>配信名</th>`+
+        `<th>通数</th><th>開封</th><th>開封率</th><th>クリック</th><th>クリック率</th><th>クーポン</th></tr></thead><tbody>`+
+        rows.map(r=>{
+          const opr=r.sd?r.op/r.sd*100:null, ckr=r.op?r.ck/r.op*100:null;
+          return `<tr><td>${esc(r.d)}</td>${showStore?`<td>${esc(nm(r.si))}</td>`:""}`+
+            `<td>${esc(r.t||"（名称なし）")}</td>`+
+            `<td>${r.sd?NUM(r.sd):"—"}</td><td>${r.op?NUM(r.op):"—"}</td>`+
+            `<td>${opr==null?"—":F1(opr)+"%"}</td>`+
+            `<td>${r.ck?NUM(r.ck):"—"}</td><td>${ckr==null?"—":F1(ckr)+"%"}</td>`+
+            `<td>${r.cp?NUM(r.cp):"—"}</td></tr>`;
+        }).join("")+
+        `<tr class="prow"><td${showStore?' colspan="3"':' colspan="2"'}>合計 ${t.n}本</td>`+
+        `<td>${NUM(t.sd)}</td><td>${NUM(t.op)}</td><td>${t.opr==null?"—":F1(t.opr)+"%"}</td>`+
+        `<td>${NUM(t.ck)}</td><td>${t.ckr==null?"—":F1(t.ckr)+"%"}</td><td>${NUM(t.cp)}</td></tr>`+
+        `</tbody>`;
+    }
+  }
+
+  // ---- 配信と売上の重なり ----
+  const sbox=document.getElementById("linesales");
+  if(sbox){
+    const dl=(DATA.daily||[]).filter(r=>r.d>=state.from&&r.d<=state.to
+      &&(!LINE_STORE||String(r.s)===String(LINE_STORE)));
+    const days=[...new Set(dl.map(r=>r.d))].sort();
+    if(!days.length){ sbox.innerHTML=`<p class="note">この期間の売上データがありません。</p>`; }
+    else{
+      const exAt=d=>dl.filter(r=>r.d===d).reduce((a,r)=>a+(r.ex||0),0);
+      const sentAt=d=>bc.filter(r=>r.d===d).reduce((a,r)=>a+(r.sd||0),0);
+      drawMultiChart(sbox, days.map(d=>d.slice(5)), [
+        {key:"ex",  label:"税抜売上", color:"var(--accent)",vals:days.map(exAt),  fmt:v=>YEN(v)+"円"},
+        {key:"sent",label:"LINE配信通数",color:"#06c755",  vals:days.map(d=>sentAt(d)||null),fmt:v=>NUM(v)+"通"},
+      ], days.map(()=>false));
+    }
+  }
+
+  // ---- 経路別 ----
+  const sb2=document.getElementById("linesrc");
+  if(sb2){
+    const agg={};
+    for(const r of src)agg[r.s||"不明"]=(agg[r.s||"不明"]||0)+(r.ad||0);
+    const list=Object.entries(agg).sort((a,b)=>b[1]-a[1]);
+    const tot=list.reduce((a,x)=>a+x[1],0);
+    sb2.innerHTML=list.length
+      ? `<thead><tr><th>経路</th><th>新規友だち</th><th>構成比</th></tr></thead><tbody>`+
+        list.map(([k,v])=>`<tr><td>${esc(k)}</td><td>${NUM(v)}人</td>`+
+          `<td>${tot?F1(v/tot*100):"0.0"}%</td></tr>`).join("")+
+        `<tr class="prow"><td>合計</td><td>${NUM(tot)}人</td><td>100.0%</td></tr></tbody>`
+      : `<tbody><tr><td class="sub" style="padding:8px">この期間の経路データがありません。</td></tr></tbody>`;
+  }
+
+  // ---- 取り込みがまだのときの案内 ----
+  const foot=document.getElementById("linefoot");
+  if(foot&&!lineHas()){
+    foot.insertAdjacentHTML("afterbegin",
+      `<b>まだLINEのデータが入っていません。</b> ためる側（<code>line_accounts</code>・`+
+      `<code>line_broadcasts</code>・<code>line_daily</code>・<code>line_sources</code>）は用意してあります。`+
+      `<code>etl/line_fetch.py</code> にネブラスカのURLとID/PWを設定すると入り始めます。<br>`);
+  }else if(foot&&lineNoMap()){
+    foot.insertAdjacentHTML("afterbegin",
+      `<b>店舗と紐付いていないLINEアカウントが ${lineNoMap()} 件あります。</b>`+
+      `そのぶんは「すべての店舗」にだけ出ます。`+
+      `<code>line_accounts.store_id</code> にPOS店舗idを入れると店舗別で見られます。<br>`);
+  }
+}
+
 function renderAds(){
   // トップページと同じ見た目にする範囲を、この画面だけに閉じるための印。
   // 店舗一覧・店舗ページの .panel は今までどおり
@@ -3723,7 +3964,8 @@ function catNeed(f,t){
   ensureCatRange(f,t).then(()=>{ if(catCovered(f,t))draw(); });
   return false;
 }
-async function draw(){ if(VIEW==="ads"){ drawPeriod(); drawAds(); return; }
+async function draw(){ if(VIEW==="line"){ drawPeriod(); drawLine(); return; }
+  if(VIEW==="ads"){ drawPeriod(); drawAds(); return; }
   drawSlicer(); drawPeriod();
   // 描く前に、その期間のカテゴリ別がそろっているか確かめる
   await ensureCatRange(state.from,state.to);
@@ -4494,7 +4736,7 @@ function adBuyLine(weekly){
 // Edge Function "ask"（分析AI）を呼ぶ。まず直接 fetch し、だめなら supabase-js 経由で再試行する。
 // 直接 fetch にすることで、失敗時に HTTP ステータスと本文が読めて原因が分かる。
 async function callAsk(question,digest){
-  const body=JSON.stringify({question,digest,history:[]});
+  const body=JSON.stringify({question,digest});
   let firstErr=null;
   if(SUPA.url){
     try{
@@ -4516,7 +4758,7 @@ async function callAsk(question,digest){
   }
   // 予備：supabase-js の invoke（直接fetchが通らない環境向け）
   try{
-    const {data,error}=await SB.functions.invoke("ask",{body:{question,digest,history:[]}});
+    const {data,error}=await SB.functions.invoke("ask",{body:{question,digest}});
     if(error)throw error;
     if(data&&data.error)throw new Error(data.error);
     if(data&&data.answer)return data.answer;
