@@ -6,7 +6,7 @@
 
 # CSVの読み書き・集計
 pandas>=2.2
-numpy>=1.26
+numpy>=2.5.2
 
 # HTTP通信（Supabaseへの読み書きもこれ）
 requests>=2.32
