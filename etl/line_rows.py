@@ -123,7 +123,23 @@ def daily_rows(text: str, account_id: str, aliases: dict[str, list[str]]) -> lis
             "net": net,
             "targeted": _int(r.get(c["targeted"])) if c["targeted"] else None,
         })
-    return out
+    return _drop_before_open(out)
+
+
+def _drop_before_open(rows: list[dict]) -> list[dict]:
+    """アカウントが動き出す前の0埋めを捨てる。
+
+    デジテールの友だちCSVは from を指定しなくても 2019-01-01 から1日1行を返し、
+    開設前の日も 0 で埋めてくる。そのまま入れると友だち数のグラフが何年も 0 の
+    まま伸び、行数も膨らむ（2026-08-28 の初回取り込みで 61,512行 → 実データは
+    5,967行だった）。最初に数字が入る日より前を落とす。
+    数字が1日も無いアカウント（未開設）は空で返す。
+    """
+    rows.sort(key=lambda r: r["date"])
+    for i, r in enumerate(rows):
+        if (r.get("followers") or 0) > 0 or (r.get("friends") or 0) > 0:
+            return rows[i:]
+    return []
 
 
 # ============================================================

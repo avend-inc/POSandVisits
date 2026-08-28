@@ -1443,7 +1443,17 @@ let LINE_INIT=false;
 
 const lineAccts =()=>DATA.lineAccounts||[];
 const lineBcAll =()=>DATA.lineBc||[];
-const lineDayAll=()=>DATA.lineDaily||[];
+// 友だち数の代用について。
+// デジテールの友だちCSVにあるのは「日付 / 新規友だち登録数 / 累積友だち登録数」で、
+// 有効友だち数（ブロックした人を引いた数）の列が無い（2026-08-28 に実機で確認）。
+// fr が空なら累積(fo)を入れて、代用したことを cum で覚えておく（画面に断りを出す）。
+let LINE_DAY_CACHE=null;
+function lineDayAll(){
+  if(!LINE_DAY_CACHE)LINE_DAY_CACHE=(DATA.lineDaily||[])
+    .map(r=>(r.fr==null&&r.fo!=null)?Object.assign({},r,{fr:r.fo,cum:1}):r);
+  return LINE_DAY_CACHE;
+}
+const lineCum=()=>lineDayAll().some(r=>r.cum);
 const lineSrcAll=()=>DATA.lineSrc||[];
 const lineHas   =()=>lineBcAll().length>0||lineDayAll().length>0;
 
@@ -1529,7 +1539,9 @@ function renderLine(){
 
     <div class="panel">
       <h2 data-en="Friends">友だち数の推移</h2>
-      <p class="note">友だち数（有効）と、その日の新規追加・ブロック。友だち数は過去に遡れないので毎日ためています。</p>
+      <p class="note">友だち数と、その日の新規追加・ブロック。${lineCum()
+        ?"デジテールから取れるのは<b>累積の友だち登録数</b>で、ブロックした人は引かれていません（有効友だち数の列が画面に無いため）。"
+        :"友だち数（有効）。過去に遡れないので毎日ためています。"}</p>
       <div class="chart" id="linefriends"></div>
     </div>
 
@@ -1571,13 +1583,22 @@ function drawLine(){
 
   // ---- 上のカード ----
   const dsum=day.reduce((a,r)=>{a.ad+=r.ad||0;a.bl+=r.bl||0;return a;},{ad:0,bl:0});
-  const lastFr=day.length?day.slice().sort((a,b)=>a.d<b.d?1:-1)[0].fr:null;
+  // 友だち数はアカウントごとに「期間内の最後の値」を取って足す。
+  // 単純に最新の1行を見ると、複数店を選んでいるときに1店の数しか出ない。
+  const lastFr=(()=>{
+    const last={};
+    for(const r of day){ if(r.fr==null)continue;
+      if(!last[r.a]||r.d>last[r.a].d)last[r.a]=r; }
+    const vs=Object.values(last);
+    return vs.length?vs.reduce((a,r)=>a+r.fr,0):null;
+  })();
   const cards=[
     {k:"配信数",   v:t.n?NUM(t.n)+"本":"—",                  n:"期間中に送った配信の本数"},
     {k:"配信通数", v:t.sd?NUM(t.sd)+"通":"—",                n:"のべ何通届いたか"},
     {k:"開封率",   v:t.opr==null?"—":F1(t.opr)+"%",          n:"開封 ÷ 配信通数"},
     {k:"クリック率",v:t.ckr==null?"—":F1(t.ckr)+"%",         n:"クリック ÷ 開封"},
-    {k:"友だち数", v:lastFr==null?"—":NUM(lastFr)+"人",      n:"期間の最終日の値"},
+    {k:lineCum()?"友だち登録数":"友だち数",
+                   v:lastFr==null?"—":NUM(lastFr)+"人",      n:lineCum()?"期間の最終日の累積":"期間の最終日の値"},
     {k:"新規追加", v:dsum.ad?NUM(dsum.ad)+"人":"—",          n:"期間中の合計"},
     {k:"ブロック", v:dsum.bl?NUM(dsum.bl)+"人":"—",          n:"期間中の合計"},
     {k:"クーポン使用",v:t.cp?NUM(t.cp)+"回":"—",             n:"配信したクーポンの使用"},
@@ -1597,7 +1618,8 @@ function drawLine(){
         const v=rs.reduce((a,r)=>a+(r[k]==null?0:r[k]),0);
         return rs.some(r=>r[k]!=null)?v:null;};
       drawMultiChart(fbox, days.map(d=>d.slice(5)), [
-        {key:"fr",label:"友だち数",color:"#06c755",vals:days.map(d=>at(d,"fr")),fmt:v=>NUM(v)+"人"},
+        {key:"fr",label:lineCum()?"友だち登録数(累積)":"友だち数",color:"#06c755",
+         vals:days.map(d=>at(d,"fr")),fmt:v=>NUM(v)+"人"},
         {key:"ad",label:"新規追加",color:"#2e9e5b",vals:days.map(d=>at(d,"ad")),fmt:v=>NUM(v)+"人"},
         {key:"bl",label:"ブロック",color:"#c0392b",vals:days.map(d=>at(d,"bl")),fmt:v=>NUM(v)+"人"},
       ], days.map(()=>false));

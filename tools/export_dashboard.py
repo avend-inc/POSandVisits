@@ -690,12 +690,15 @@ def build_data(sb: Supabase) -> dict:
                 "bl": int(r.get("blocked") or 0),
                 "cp": int(r.get("coupon_used") or 0),
             })
+        # followers も出す。デジテールの友だちCSVにあるのは「累積友だち登録数」で、
+        # 有効友だち数(friends)の列が無い（2026-08-28 に実機で確認）。
+        # 画面は fr が空なら fo で代用する。
         for r in _select_all(sb, "line_daily",
-                             "date,account_id,friends,added,blocked,net,targeted",
+                             "date,account_id,friends,followers,added,blocked,net,targeted",
                              order="date"):
             line_daily.append({
                 "d": r["date"], "a": r["account_id"], "si": acct_sid.get(r["account_id"]),
-                "fr": r.get("friends"), "ad": r.get("added"),
+                "fr": r.get("friends"), "fo": r.get("followers"), "ad": r.get("added"),
                 "bl": r.get("blocked"), "nt": r.get("net"), "tg": r.get("targeted"),
             })
         for r in _select_all(sb, "line_sources", "date,account_id,source,added", order="date"):
