@@ -21,8 +21,16 @@ const DAILY_LIMIT = Number(Deno.env.get("ASK_DAILY_LIMIT") || "50");
 
 // 呼び出してよい画面のオリジン。以前は "*" で、どのサイトからでも叩けた。
 // ASK_ALLOWED_ORIGINS に カンマ区切りで設定する（未設定なら下の既定）。
+// 既定は実際に画面を配信している場所。増えたら ASK_ALLOWED_ORIGINS で足す
+// （カンマ区切り。設定するとこの既定は使われない）。
+//   ・avend-inventory.vercel.app … 在庫アプリのドメイン。/sales/ に売上アプリが載っている
+//   ・*-hiroki-nagumo-s-projects.vercel.app … Vercelのプレビュー/別名
+//   ・avend-inc.github.io … 旧GitHub Pages（畳むまでの間）
 const ALLOWED_ORIGINS = (Deno.env.get("ASK_ALLOWED_ORIGINS") ||
-  "https://avend-ims.vercel.app,https://avend-inc.github.io")
+  "https://avend-inventory.vercel.app," +
+  "https://avend-inventory-hiroki-nagumo-s-projects.vercel.app," +
+  "https://avend-inventory-git-main-hiroki-nagumo-s-projects.vercel.app," +
+  "https://avend-inc.github.io")
   .split(",").map((s) => s.trim()).filter(Boolean);
 
 function corsFor(req: Request): Record<string, string> {
