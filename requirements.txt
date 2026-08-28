@@ -17,4 +17,4 @@ playwright>=1.44
 # 以下は後で作るファイル用（push_sheets.py / push_slack.py）
 gspread>=6.0
 google-auth>=2.29
-anthropic>=0.34
+anthropic>=1.0.0
