@@ -659,6 +659,16 @@ def build_data(sb: Supabase) -> dict:
     # --- LINE配信（ネブラスカ取り込み・sql/034）------------------------------
     #   広告と同じく「取れていなければ欄が空になるだけ」にする。表がまだ無い
     #   環境でも export 全体を落とさない（try で丸ごと囲う）。
+    def _jst_min(v):
+        """timestamptz の文字列 → "YYYY-MM-DD HH:MM"（日本時間）。読めなければ空。"""
+        if not v:
+            return ""
+        try:
+            return datetime.fromisoformat(str(v).replace("Z", "+00:00")) \
+                           .astimezone(JST).strftime("%Y-%m-%d %H:%M")
+        except Exception:                                   # noqa: BLE001
+            return str(v)[:16]
+
     line_accounts: list[dict] = []
     line_bc: list[dict] = []
     line_daily: list[dict] = []
@@ -672,7 +682,7 @@ def build_data(sb: Supabase) -> dict:
             })
         acct_sid = {a["id"]: a["si"] for a in line_accounts}
         for r in _select_all(sb, "line_broadcasts",
-                             "broadcast_id,account_id,business_date,title,kind,"
+                             "broadcast_id,account_id,sent_at,business_date,title,kind,"
                              "delivered,opened,open_rate,clicked,click_users,blocked,coupon_used",
                              order="business_date"):
             if not r.get("business_date"):
@@ -680,6 +690,10 @@ def build_data(sb: Supabase) -> dict:
             line_bc.append({
                 "d": r["business_date"], "a": r["account_id"],
                 "si": acct_sid.get(r["account_id"]),
+                # ts=配信日時（日本時間）。時間帯ごとの開封率を見るのに要る。
+                #   sent_at は timestamptz なので、そのまま切り出すとUTCの時刻になり
+                #   9時間ずれる（19:03に送った配信が10時台に見える）。JSTへ直してから渡す。
+                "ts": _jst_min(r.get("sent_at")),
                 "t": r.get("title"), "k": r.get("kind"),
                 "sd": int(r.get("delivered") or 0),
                 "op": int(r.get("opened") or 0),
