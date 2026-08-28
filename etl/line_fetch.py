@@ -33,7 +33,9 @@ LINE配信データの取り込み（デジテールストア）
   来店数と同じ digitel_fetch.discover_stores() で「店舗名 → スラッグ」を拾う。
   NOTIME（DIGITAIL_ID/PW）と SELFURUGI（DIGITAIL_SF_ID/PW）の2アカウントを回る。
   line_accounts.account_id はデジテールのスラッグ（例 notime_fukui）。
-  店舗との紐付け（line_accounts.store_id ＝ POS店舗）は後から人が埋める。
+  店舗との紐付け（line_accounts.store_id ＝ POS店舗）は取り込みのたびに
+  店名から自動で埋める（link_stores）。表記が違っても拾えるが、
+  1つに絞れないものは空のままログに出す。人が入れた紐付けは上書きしない。
 
 【設定（任意・GitHub の Variables）】
   DIGITEL_LINE_FRIENDS_PATH   友だちCSVのパス。画面が変わったときだけ使う
@@ -257,6 +259,74 @@ def fetch_broadcasts(page, slug: str) -> list[dict]:
 # ============================================================
 #  取り込み本体
 # ============================================================
+# ============================================================
+#  LINEアカウント → POS店舗 の紐付け
+# ============================================================
+#   画面の店舗別の絞り込みは line_accounts.store_id（POS店舗）で効く。
+#   ここが空だと「店舗」の選択肢が1つも出ず、全店合計しか見られない。
+#   デジテールの店名とPOSの店名は表記が違うので（セルフルギ⇔SELFURUGI、
+#   GARAGE の有無、全角スペース）、正規化して突き合わせる。
+#
+#   ・すでに入っている紐付けは触らない（人が直したものを上書きしない）
+#   ・候補が1つに絞れないものは空のまま残し、名前をログに出す
+#     （間違った店に付けるくらいなら、空にして気づけるようにする）
+def _norm(name: str) -> str:
+    s = (name or "").upper()
+    s = s.replace("セルフルギ", "SELFURUGI").replace("ノータイム", "NOTIME")
+    for ch in (" ", "\u3000", "_", "-", "・"):
+        s = s.replace(ch, "")
+    return s
+
+
+def link_stores(sb: Supabase) -> int:
+    """store_id が空の line_accounts を、店名からPOS店舗に紐付ける。"""
+    try:
+        accts = sb.select("line_accounts", {"select": "account_id,name,store_id"})
+        stores = sb.select("stores", {"select": "id,name"})
+    except Exception as e:                                   # noqa: BLE001
+        print(f"  [紐付け] 店舗を読めませんでした: {e}")
+        return 0
+
+    todo = [a for a in accts if a.get("store_id") is None and a.get("name")]
+    if not todo:
+        return 0
+    taken = {a["store_id"] for a in accts if a.get("store_id") is not None}
+
+    exact: dict[str, list[int]] = {}
+    for s in stores:
+        exact.setdefault(_norm(s["name"]), []).append(s["id"])
+    # 2周目のゆるい突き合わせ用（GARAGE の有無だけが違う店を拾う）
+    loose: dict[str, list[int]] = {}
+    for s in stores:
+        loose.setdefault(_norm(s["name"]).replace("GARAGE", ""), []).append(s["id"])
+
+    done = 0
+    for a in todo:
+        key = _norm(a["name"])
+        ids = exact.get(key) or []
+        if len(ids) != 1:
+            # 完全一致で決まらなかったものだけ、GARAGE を外して見直す。
+            # 先に決まった店は候補から外す（鎌ヶ谷のように GARAGE 有無で
+            # 2店ある地域を取り違えないため）
+            ids = [i for i in (loose.get(key.replace("GARAGE", "")) or [])
+                   if i not in taken]
+        if len(ids) != 1:
+            print(f"  [紐付け] 店舗を決められません: {a['name']}"
+                  f"（候補 {len(ids)}件・空のままにします）")
+            continue
+        try:
+            sb.update("line_accounts", {"account_id": f"eq.{a['account_id']}"},
+                      {"store_id": ids[0]})
+        except Exception as e:                               # noqa: BLE001
+            print(f"  [紐付け] {a['name']} を紐付けられませんでした: {e}")
+            continue
+        taken.add(ids[0])
+        done += 1
+    if done:
+        print(f"  [紐付け] {done}件のLINEアカウントをPOS店舗に紐付けました")
+    return done
+
+
 def _run_account(sb: Supabase, user: str | None, pw: str | None, label: str,
                  end: str, history_from: str, recent_days: int,
                  headless: bool, deadline: float) -> dict:
@@ -283,6 +353,7 @@ def _run_account(sb: Supabase, user: str | None, pw: str | None, label: str,
         acct_rows = [{"account_id": slug, "name": name} for name, slug in sorted(stores.items())]
         sb.upsert("line_accounts", acct_rows, on_conflict="account_id")
         total["accounts"] = len(acct_rows)
+        link_stores(sb)
 
         for name, slug in sorted(stores.items()):
             if time.monotonic() > deadline:
