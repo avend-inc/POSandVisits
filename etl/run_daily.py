@@ -24,7 +24,7 @@ import argparse
 import os
 import sys
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from .settings import (
     JST,
@@ -519,15 +519,58 @@ def run_airregi(sb: Supabase, business_date: str, run_id: str,
 # ============================================================
 # メイン
 # ============================================================
+# ============================================================
+#  LINE（デジテールのLINE配信・友だち数）
+# ============================================================
+def run_line(sb: Supabase, business_date: str, run_id: str,
+             force: bool, headless: bool) -> list[StepResult]:
+    """
+    デジテールのLINE配信データを取り込む。ログインは来店数と同じ。
+
+    期間は line_fetch が**店舗ごと**に決める。
+      まだ1行も無い店 … 全期間（初回の一括取り込みが自動で走る）
+      すでにある店   … 直近14日（デジテールが後から数字を直すことがあるため）
+    途中で時間切れになっても、残りの店は次の回が全期間を取りにいく。
+
+    best-effort（ここが失敗しても売上・来店の取り込みは止めない）。
+    日次ETLの制限時間(60分)を食いつぶさないよう、25分で切り上げる。
+    """
+    from .line_fetch import run as line_run
+
+    history_from = os.environ.get("DIGITEL_LINE_HISTORY_FROM") or "2019-01-01"
+    print(f"\n--- LINE（未取得の店は {history_from} から / 取得済みの店は直近14日）---")
+    try:
+        # --force のときは、取得済みの店も全期間で取り直す
+        line_run(history_from, business_date, headless=headless,
+                 history_from=history_from,
+                 recent_days=(99999 if force else 14), budget_min=25)
+        msg = f"〜{business_date}"
+        try:
+            sb.log(run_id=run_id, source="line", business_date=business_date,
+                   store_id=None, status="success", message=msg)
+        except Exception:
+            pass
+        return [StepResult("line", "success", msg)]
+    except Exception as e:                                   # noqa: BLE001
+        detail = f"{type(e).__name__}: {e}"
+        print(f"  ⚠️ LINEの取り込みに失敗（他は続けます）: {detail[:200]}")
+        try:
+            sb.log(run_id=run_id, source="line", business_date=business_date,
+                   store_id=None, status="failed", message=detail[:2000])
+        except Exception:
+            pass
+        return [StepResult("line", "failed", detail)]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="NOTIME 日次ETL（cashier売上 / デジテール来店数 → Supabase）"
     )
     parser.add_argument("--date", help="対象の営業日 YYYY-MM-DD（省略時は前日）")
     parser.add_argument("--only",
-                        choices=["cashier", "digitel", "pos", "bundle", "smaregi", "airregi"],
+                        choices=["cashier", "digitel", "pos", "bundle", "smaregi", "airregi", "line"],
                         help="1種類だけ動かす（cashier / digitel / pos=Air/EZ接続 / "
-                             "bundle=バンドル名 / smaregi=隠岐 / airregi=下北沢Airレジ）")
+                             "bundle=バンドル名 / smaregi=隠岐 / airregi=下北沢Airレジ / line=LINE）")
     parser.add_argument("--force", action="store_true",
                         help="取り込み済みの日でも、もう一度取り込む")
     parser.add_argument("--headed", action="store_true",
@@ -581,6 +624,10 @@ def main() -> int:
         # Airレジ店（下北沢の2つ目のレジ）。AIRREGI_ID/PW が無ければ何もしない。
         results.extend(run_airregi(sb, business_date, run_id, args.force,
                                    headless, store_cache))
+    if args.only in (None, "line"):
+        # デジテールのLINE（配信履歴・友だち数）。来店数と同じログインを使う。
+        # 初回は全期間、以降は直近14日。best-effort。
+        results.extend(run_line(sb, business_date, run_id, args.force, headless))
 
     # ---- まとめ ----
     icons = {"success": "✅", "no_data": "ℹ️",
@@ -600,7 +647,7 @@ def main() -> int:
     #  ・bundle_master（SALEの名称マスタ）
     #  ・レジ接続の各店（ezregi#N / airregi#N）… 1店のログイン不調で全店の
     #    ダッシュボード更新まで止めない。失敗は ingest_log と下の一覧に残る。
-    BEST_EFFORT = {"bundle_master", "airregi"}
+    BEST_EFFORT = {"bundle_master", "airregi", "line"}
 
     def _is_best_effort(r) -> bool:
         return r.name in BEST_EFFORT or "#" in r.name

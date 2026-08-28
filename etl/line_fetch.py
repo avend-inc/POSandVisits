@@ -46,7 +46,8 @@ import argparse
 import json
 import os
 import sys
-from datetime import date, datetime, timedelta
+import time
+from datetime import datetime, timedelta
 
 from . import digitel_fetch
 from .browser import browser_page, dump_page
@@ -257,11 +258,20 @@ def fetch_broadcasts(page, slug: str) -> list[dict]:
 #  取り込み本体
 # ============================================================
 def _run_account(sb: Supabase, user: str | None, pw: str | None, label: str,
-                 start: str, end: str, headless: bool) -> dict:
+                 end: str, history_from: str, recent_days: int,
+                 headless: bool, deadline: float) -> dict:
+    """
+    1アカウントぶん取り込む。
+
+    期間は**店舗ごと**に決める。まだ1行も無い店は全期間、ある店は直近ぶんだけ。
+    こうしておくと、途中で時間切れになっても次の回が続きから取りに行ける
+    （全体で1回だけ判定すると、1店でも入った時点で以降ずっと直近だけになり、
+      残りの店の過去分が永久に入らない）。
+    """
     from .line_rows import broadcast_rows_from_table, daily_rows
 
     aliases = _aliases()
-    total = {"accounts": 0, "daily": 0, "broadcasts": 0}
+    total = {"accounts": 0, "daily": 0, "broadcasts": 0, "skipped": 0}
 
     with browser_page(headless=headless) as (page, context):
         digitel_fetch.login(page, user, pw)
@@ -270,25 +280,37 @@ def _run_account(sb: Supabase, user: str | None, pw: str | None, label: str,
         if not stores:
             return total
 
-        # アカウント台帳。account_id はデジテールのスラッグをそのまま使う
         acct_rows = [{"account_id": slug, "name": name} for name, slug in sorted(stores.items())]
         sb.upsert("line_accounts", acct_rows, on_conflict="account_id")
         total["accounts"] = len(acct_rows)
 
         for name, slug in sorted(stores.items()):
-            # --- 友だち数（CSV。確認済み）---
+            if time.monotonic() > deadline:
+                total["skipped"] += 1
+                continue
+
+            # この店にデータがあるか。無ければ全期間を取りに行く
             try:
-                url = _url_for("FRIENDS", slug, start, end)
-                text = _fetch_csv(context, url)
+                seen = sb.select("line_daily",
+                                 {"select": "date", "account_id": f"eq.{slug}", "limit": "1"})
+            except Exception:
+                seen = []
+            if seen:
+                start = (datetime.strptime(end, "%Y-%m-%d")
+                         - timedelta(days=recent_days)).strftime("%Y-%m-%d")
+            else:
+                start = history_from
+
+            try:
+                text = _fetch_csv(context, _url_for("FRIENDS", slug, start, end))
                 d = daily_rows(text, slug, aliases)
                 if d:
                     sb.upsert("line_daily", d, on_conflict="date,account_id")
                 total["daily"] += len(d)
-                print(f"    {name}: 友だち {len(d)}日ぶん")
+                print(f"    {name}: 友だち {len(d)}日ぶん（{start}〜{end}）")
             except Exception as e:                       # noqa: BLE001
                 print(f"    ⚠️ {name}: 友だちを取れません: {str(e)[:120]}")
 
-            # --- 配信履歴（画面の表）---
             try:
                 table = fetch_broadcasts(page, slug)
                 b = broadcast_rows_from_table(table, slug, start, end)
@@ -302,13 +324,23 @@ def _run_account(sb: Supabase, user: str | None, pw: str | None, label: str,
     return total
 
 
-def run(start: str, end: str, headless: bool = True) -> int:
+def run(start: str, end: str, headless: bool = True,
+        history_from: str = "", recent_days: int = 14,
+        budget_min: int = 25) -> int:
+    """
+    取り込みの入口。
+
+    start は「全期間の開始日」として使う（店舗ごとに、未取得なら全期間・
+    取得済みなら直近 recent_days ぶん、と自動で切り替わる）。
+    budget_min を過ぎたら新しい店に着手しない。日次ETLの制限時間を
+    食いつぶして、売上・来店のダッシュボード更新まで巻き込まないため。
+    """
     load_dotenv()
     sb = Supabase()
     run_id = new_run_id()
-    grand = {"accounts": 0, "daily": 0, "broadcasts": 0}
+    deadline = time.monotonic() + budget_min * 60
+    grand = {"accounts": 0, "daily": 0, "broadcasts": 0, "skipped": 0}
 
-    # NOTIME と SELFURUGI の2アカウント。来店数の取り込みと同じ持ち方。
     accounts = [(None, None, "NOTIME")]
     sf_id, sf_pw = _env("DIGITAIL_SF_ID"), _env("DIGITAIL_SF_PW")
     if sf_id and sf_pw:
@@ -318,15 +350,18 @@ def run(start: str, end: str, headless: bool = True) -> int:
 
     for user, pw, label in accounts:
         try:
-            t = _run_account(sb, user, pw, label, start, end, headless)
+            t = _run_account(sb, user, pw, label, end,
+                             history_from or start, recent_days, headless, deadline)
             for k in grand:
                 grand[k] += t.get(k, 0)
         except Exception as e:                           # noqa: BLE001
             print(f"  ⚠️ [{label}] 取り込みに失敗: {str(e)[:200]}")
 
-    print(f"\n✅ 取り込み完了 {start}〜{end}"
-          f"（アカウント {grand['accounts']} / 友だち {grand['daily']}行 / 配信 {grand['broadcasts']}件）"
-          f"  run_id={run_id}")
+    print(f"\n✅ LINE取り込み完了（アカウント {grand['accounts']} / "
+          f"友だち {grand['daily']}行 / 配信 {grand['broadcasts']}件）  run_id={run_id}")
+    if grand["skipped"]:
+        print(f"  ⏭️ 時間の都合で {grand['skipped']}店は次回にまわしました"
+              f"（未取得の店は次の回で全期間を取りにいきます）")
     return 0
 
 
