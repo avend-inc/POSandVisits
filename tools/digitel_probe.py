@@ -164,92 +164,89 @@ def main() -> int:
         #    持っている。来店CSVが /{slug}/kpi/visits/download にあるので、
         #    LINEも店舗配下のどこかにあるはず。その場所をここで突き止める。
         #    トップは店舗選択だけのSPAでリンクが出ないため、店舗ページへ入って調べる。
-        print("\n===== LINE配信データの在りか =====")
+        # 画面の保存は先に済ませる（この出力が長いので、調査結果を最後に出すため）
+        dump_page(page, f"digitel_dashboard_{label}")
+
+        print("\n\n" + "=" * 60)
+        print("===== LINE配信データの在りか（ここが結論）=====")
+        print("=" * 60)
         try:
             kept2, _ = digitel_fetch.scan_store_pairs(page.content().replace('\\"', '"'))
         except Exception:
             kept2 = {}
         slug = sorted(kept2.values())[0] if kept2 else None
         if not slug:
-            print("  店舗スラッグを取れなかったので調べられません")
-        else:
-            print(f"  調査対象の店舗: {slug}")
-            seen_req: list[str] = []
-            page.on("request", lambda r: seen_req.append(f"{r.method} {r.url}"))
+            print("  店舗スラッグを取れませんでした")
+            return 0
 
-            # ① 店舗ページでナビゲーションを開き、メニューの行き先を全部拾う。
-            #    メニューに「メッセージ配信」「LINE公式アカウント」があるのは確認済み。
-            #    どのURLに飛ぶのかをここで確定させる。
-            page.goto(f"{DIGITEL_BASE_URL}/{slug}", wait_until="networkidle", timeout=25_000)
-            page.wait_for_timeout(1200)
-            for sel in ("button:has-text('ナビゲーションを開く')",
-                        "[aria-label='ナビゲーションを開く']",
-                        "button[aria-haspopup='menu']", "nav button"):
-                try:
-                    page.locator(sel).first.click(timeout=3_000)
-                    page.wait_for_timeout(900)
-                    break
-                except Exception:
-                    continue
+        print(f"  店舗: {slug}\n")
+        page.goto(f"{DIGITEL_BASE_URL}/{slug}", wait_until="networkidle", timeout=25_000)
+        page.wait_for_timeout(1500)
+
+        # サイドバーの見出し（KPIデータ・メッセージ配信・LINE公式アカウント…）は
+        # 押すと中のリンクが開く折りたたみ。全部開いてからリンクを集める。
+        try:
+            n = page.locator("button.peer\\/menu-button").count()
+        except Exception:
+            n = 0
+        opened = 0
+        for i in range(n):
             try:
-                nav = page.evaluate(r"""() => Array.from(document.querySelectorAll("a[href]"))
-                    .map(a => ({t:(a.innerText||'').trim().replace(/\s+/g,' ').slice(0,24),
-                                h:a.getAttribute('href')}))
-                    .filter(x => x.h && !x.h.startsWith('#'))""")
+                page.locator("button.peer\\/menu-button").nth(i).click(timeout=2_500)
+                page.wait_for_timeout(350)
+                opened += 1
             except Exception:
-                nav = []
-            print(f"\n  ---- ナビゲーションの行き先 {len(nav)}件 ----")
-            for x in nav:
-                star = "★" if any(k in x["t"] for k in ("配信", "LINE", "会員", "メッセージ")) else " "
-                print(f"   {star} {x['t'] or '(文字なし)':<24} {x['h']}")
+                continue
+        print(f"  サイドバーの見出しを {opened}/{n} 個ひらきました\n")
 
-            # ② メニュー項目を順に押して、遷移先URLを記録する（リンクでなくボタンの場合）
-            for label_txt in ("メッセージ配信", "LINE公式アカウント", "KPIデータ"):
-                try:
-                    page.goto(f"{DIGITEL_BASE_URL}/{slug}", wait_until="networkidle", timeout=20_000)
-                    page.wait_for_timeout(800)
-                    for sel in ("button:has-text('ナビゲーションを開く')", "nav button"):
-                        try:
-                            page.locator(sel).first.click(timeout=2_500); page.wait_for_timeout(600); break
-                        except Exception:
-                            continue
-                    page.get_by_text(label_txt, exact=False).first.click(timeout=5_000)
-                    page.wait_for_load_state("networkidle", timeout=15_000)
-                    page.wait_for_timeout(1200)
-                    print(f"\n  ★「{label_txt}」→ {page.url}")
-                    sub = page.evaluate(r"""() => ({
-                      links: Array.from(document.querySelectorAll("a[href]"))
-                        .map(a=>({t:(a.innerText||'').trim().replace(/\s+/g,' ').slice(0,24),h:a.getAttribute('href')}))
-                        .filter(x=>x.h&&!x.h.startsWith('#')),
-                      btns: Array.from(document.querySelectorAll("button")).map(b=>(b.innerText||'').trim()).filter(Boolean),
-                      body: (document.body.innerText||'').replace(/\s+/g,' ').slice(0,400)})""")
-                    for x in sub["links"][:20]:
-                        print(f"        {x['t'] or '?':<24} {x['h']}")
-                    print(f"        ボタン: {', '.join(dict.fromkeys(sub['btns']))[:250]}")
-                    print(f"        画面: {sub['body'][:250]}")
-                except Exception as e:
-                    print(f"\n  「{label_txt}」を押せません: {str(e)[:90]}")
+        try:
+            links = page.evaluate(r"""() => {
+              const seen=new Set(), out=[];
+              document.querySelectorAll("a[href]").forEach(a=>{
+                const h=a.getAttribute("href")||"";
+                const t=(a.innerText||"").trim().replace(/\s+/g,' ').slice(0,26);
+                const k=t+"|"+h;
+                if(!h||h.startsWith("#")||seen.has(k))return;
+                seen.add(k); out.push({t,h});
+              });
+              return out;
+            }""")
+        except Exception as e:
+            links = []
+            print(f"  リンクを取れません: {e}")
+        print(f"  ---- 画面内のリンク {len(links)}件 ----")
+        for x in links:
+            star = "★" if any(k in x["t"] for k in
+                              ("配信", "LINE", "会員", "友だち", "友達", "メッセージ", "顧客")) else " "
+            print(f"   {star} {x['t'] or '(文字なし)':<26} {x['h']}")
 
-            # ③ 会員関連（友だち数）のCSVが取れるか、実際に叩いて確かめる
-            print("\n  ---- 会員関連データ(友だち数)のCSVを試す ----")
-            for path in (f"/{slug}/kpi/members/friends/download?interval=day&from=2026-08-01&to=2026-08-27",
-                         f"/{slug}/kpi/members/download?interval=day&from=2026-08-01&to=2026-08-27"):
-                url = DIGITEL_BASE_URL + path
-                try:
-                    r = context.request.get(url, timeout=60_000)
-                    body = r.body()[:400].decode("utf-8", errors="replace")
-                    print(f"   {url}\n     → HTTP {r.status} / 先頭: {body[:250]!r}")
-                except Exception as e:
-                    print(f"   {url} → 失敗 {str(e)[:70]}")
+        # 候補URLを実際に叩いて、CSVが返るか・列名が何かを確かめる。
+        print("\n  ---- CSVを実際に叩いてみる ----")
+        FROM, TO = "2026-08-01", "2026-08-27"
+        cands = [f"/{slug}/kpi/members/friends/download?interval=day&from={FROM}&to={TO}",
+                 f"/{slug}/kpi/members/download?interval=day&from={FROM}&to={TO}"]
+        # 画面から拾った download リンクも全部試す
+        for x in links:
+            h = x["h"]
+            if "download" in h.lower():
+                if h.startswith("http"):
+                    cands.append(h)
+                elif h.startswith("/"):
+                    cands.append(h)
+                else:
+                    cands.append(f"/{slug}/kpi/{h}")
+        for path in dict.fromkeys(cands):
+            url = path if path.startswith("http") else DIGITEL_BASE_URL + path
+            try:
+                r = context.request.get(url, timeout=60_000)
+                head = r.body()[:300].decode("utf-8", errors="replace").replace("\n", " / ")
+                ok = "★" if r.status == 200 else " "
+                print(f"   {ok} HTTP {r.status}  {url}")
+                if r.status == 200:
+                    print(f"        先頭: {head[:220]}")
+            except Exception as e:
+                print(f"     失敗 {url} → {str(e)[:60]}")
 
-            hits = [u for u in dict.fromkeys(seen_req)
-                    if any(k in u.lower() for k in ("line", "message", "broadcast", "friend", "member", "download"))]
-            if hits:
-                print("\n  ★ 関連する通信:")
-                for u in hits[:40]:
-                    print(f"       {u}")
-
-        dump_page(page, f"digitel_dashboard_{label}")
     print("\n===== 調査おわり =====")
     return 0
 
