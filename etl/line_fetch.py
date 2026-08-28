@@ -90,8 +90,9 @@ DEFAULT_ALIASES: dict[str, list[str]] = {
     # 友だち数（日次）
     "date":         ["日付", "date", "集計日"],
     "friends":      ["友だち数", "有効友だち数", "friends"],
-    "followers":    ["累計友だち数", "追加友だち数(累計)", "followers"],
-    "added":        ["新規友だち数", "友だち追加数", "追加", "added"],
+    "followers":    ["累積友だち登録数", "累計友だち数", "追加友だち数(累計)", "followers"],
+    # ↓ 実物のCSVで確認済み（/{slug}/kpi/members/friends/download）
+    "added":        ["新規友だち登録数", "新規友だち数", "友だち追加数", "追加", "added"],
     "net":          ["純増", "増減", "net"],
     "targeted":     ["ターゲットリーチ", "配信可能数", "targeted"],
     # 流入経路
@@ -99,10 +100,15 @@ DEFAULT_ALIASES: dict[str, list[str]] = {
 }
 
 # CSVのパス。実物が分かったら Variables で上書きする（コードは触らない）。
+# 実際にログインして確かめた置き場所（2026-08-28）。
+#   会員関連データ（友だち数）… /{slug}/kpi/members/friends  → /download で取れる。確認済み
+#     返る列: 日付, 新規友だち登録数, 累積友だち登録数
+#   配信履歴 … /{slug}/messages/history。CSVの出口は調査中
+# 変わったら Variables（DIGITEL_LINE_*_PATH）で差し替えられる。
 DEFAULT_PATHS = {
-    "BROADCAST": "/{slug}/line/broadcasts/download",
-    "FRIENDS":   "/{slug}/line/friends/download",
-    "SOURCES":   "/{slug}/line/sources/download",
+    "FRIENDS":   "/{slug}/kpi/members/friends/download?interval=day&from={from}&to={to}",
+    "BROADCAST": "/{slug}/messages/history/download?from={from}&to={to}",
+    "SOURCES":   "",   # 経路別は画面に無さそう。見つかったら設定する
 }
 
 
