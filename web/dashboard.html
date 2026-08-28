@@ -1547,7 +1547,9 @@ function renderLine(){
 
     <div class="panel">
       <h2 data-en="Broadcasts">配信の成果</h2>
-      <p class="note">配信ごとの通数・開封・クリック。開封率＝開封÷配信通数、クリック率＝クリック÷開封。</p>
+      <p class="note">配信ごとの通数・開封・クリック。開封率＝開封÷配信通数、クリック率＝クリック÷開封。
+        デジテールの配信履歴に出るのは<b>開封「率」まで</b>で、クリック数・クーポン使用数の列が無いため、
+        その2列は空欄のままです（開封件数は率から割り戻した概数）。</p>
       <div class="tblwrap"><table class="kmat" id="linebc"></table></div>
     </div>
 
@@ -1559,7 +1561,9 @@ function renderLine(){
 
     <div class="panel">
       <h2 data-en="Sources">友だち追加の経路</h2>
-      <p class="note">期間中に友だちが増えた経路の内訳。</p>
+      <p class="note">期間中に友だちが増えた経路（検索・QRコード・URL など）の内訳。
+        デジテールに経路別の画面が見当たらないため、いまは取り込めていません。
+        画面に出るようになれば、ためる先（<code>line_sources</code>）は用意してあります。</p>
       <div class="tblwrap"><table class="kmat" id="linesrc"></table></div>
     </div>
 
@@ -1681,7 +1685,7 @@ function drawLine(){
         list.map(([k,v])=>`<tr><td>${esc(k)}</td><td>${NUM(v)}人</td>`+
           `<td>${tot?F1(v/tot*100):"0.0"}%</td></tr>`).join("")+
         `<tr class="prow"><td>合計</td><td>${NUM(tot)}人</td><td>100.0%</td></tr></tbody>`
-      : `<tbody><tr><td class="sub" style="padding:8px">この期間の経路データがありません。</td></tr></tbody>`;
+      : `<tbody><tr><td class="sub" style="padding:8px">経路別のデータは取り込めていません（上の説明のとおり）。</td></tr></tbody>`;
   }
 
   // ---- 取り込みがまだのときの案内 ----
@@ -1690,7 +1694,8 @@ function drawLine(){
     foot.insertAdjacentHTML("afterbegin",
       `<b>まだLINEのデータが入っていません。</b> ためる側（<code>line_accounts</code>・`+
       `<code>line_broadcasts</code>・<code>line_daily</code>・<code>line_sources</code>）は用意してあります。`+
-      `<code>etl/line_fetch.py</code> にネブラスカのURLとID/PWを設定すると入り始めます。<br>`);
+      `毎日の日次ETL（デジテール＝来店数と同じログイン）で入ります。`+
+      `手で動かすときは Actions →「NOTIME 日次ETL」→ only に line。<br>`);
   }else if(foot&&lineNoMap()){
     foot.insertAdjacentHTML("afterbegin",
       `<b>店舗と紐付いていないLINEアカウントが ${lineNoMap()} 件あります。</b>`+
