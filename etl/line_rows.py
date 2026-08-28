@@ -1,15 +1,18 @@
 """
-ネブラスカのCSVを、sql/034_line.sql の表の形に整える。
+デジテールから取ったものを、sql/034_line.sql の表の形に整える。
 
 【なぜ切り分けてあるか】
   取りに行く側（line_fetch.py）と、整える側（ここ）を分けておくと、
-  CSVの実物が手に入ったときに、ブラウザを動かさずに整形だけ試せる。
+  ブラウザを動かさずに整形だけを試せる。
   POSのアダプタ層（adapters.py）と同じ考え方。
 
+【2つの入口】
+  daily_rows                … 友だち数のCSV（/kpi/members/friends/download）
+  broadcast_rows_from_table … 配信履歴の画面の表（CSVの出口が無いため）
+
 【列名の対応】
-  CSVの見出しは配信ツールによって違う（「配信通数」「送信数」「delivered」…）。
-  line_fetch.DEFAULT_ALIASES に呼び名を並べておき、CSVの見出しと突き合わせる。
-  実物が想定と違えば NEBRASKA_COLMAP（JSON）で足せる。コードは触らない。
+  見出しが変わっても壊れないよう、line_fetch.DEFAULT_ALIASES に呼び名を
+  並べて突き合わせる。想定と違えば DIGITEL_LINE_COLMAP（JSON）で足せる。
 """
 from __future__ import annotations
 
@@ -87,45 +90,6 @@ def _dt(v) -> datetime | None:
     return None
 
 
-def broadcast_rows(text: str, account_id: str, aliases: dict[str, list[str]]) -> list[dict]:
-    """配信ごとの成果 → line_broadcasts"""
-    df = _read(text)
-    if df.empty:
-        return []
-    c = {k: _col(df, k, aliases) for k in
-         ("broadcast_id", "sent_at", "title", "kind", "target",
-          "delivered", "opened", "clicked", "click_users", "blocked", "coupon_used")}
-    if not c["sent_at"]:
-        raise EtlError(
-            "配信CSVに日時の列が見つかりませんでした。\n"
-            f"  見出し: {list(df.columns)[:15]}\n"
-            "  → NEBRASKA_COLMAP で sent_at の呼び名を指定してください。"
-        )
-    out = []
-    for i, r in df.iterrows():
-        ts = _dt(r.get(c["sent_at"]))
-        # 配信IDが無いCSVでも一意になるよう、日時＋行番号で作る
-        bid = str(r.get(c["broadcast_id"])).strip() if c["broadcast_id"] else ""
-        if not bid or bid.lower() == "nan":
-            bid = f"{account_id}:{ts.isoformat() if ts else 'na'}:{i}"
-        out.append({
-            "broadcast_id": bid,
-            "account_id": account_id,
-            "sent_at": ts.isoformat() if ts else None,
-            "business_date": ts.date().isoformat() if ts else None,
-            "title": (str(r.get(c["title"])).strip() if c["title"] else None) or None,
-            "kind": (str(r.get(c["kind"])).strip() if c["kind"] else None) or None,
-            "target": (str(r.get(c["target"])).strip() if c["target"] else None) or None,
-            "delivered": _int(r.get(c["delivered"])) if c["delivered"] else None,
-            "opened": _int(r.get(c["opened"])) if c["opened"] else None,
-            "clicked": _int(r.get(c["clicked"])) if c["clicked"] else None,
-            "click_users": _int(r.get(c["click_users"])) if c["click_users"] else None,
-            "blocked": _int(r.get(c["blocked"])) if c["blocked"] else None,
-            "coupon_used": _int(r.get(c["coupon_used"])) if c["coupon_used"] else None,
-        })
-    return out
-
-
 def daily_rows(text: str, account_id: str, aliases: dict[str, list[str]]) -> list[dict]:
     """友だち数の日次 → line_daily"""
     df = _read(text)
@@ -137,7 +101,7 @@ def daily_rows(text: str, account_id: str, aliases: dict[str, list[str]]) -> lis
         raise EtlError(
             "友だちCSVに日付の列が見つかりませんでした。\n"
             f"  見出し: {list(df.columns)[:15]}\n"
-            "  → NEBRASKA_COLMAP で date の呼び名を指定してください。"
+            "  → DIGITEL_LINE_COLMAP で date の呼び名を指定してください。"
         )
     out = []
     for _, r in df.iterrows():
@@ -162,41 +126,46 @@ def daily_rows(text: str, account_id: str, aliases: dict[str, list[str]]) -> lis
     return out
 
 
-def source_rows(text: str, account_id: str, aliases: dict[str, list[str]]) -> list[dict]:
-    """友だち追加の経路別 → line_sources
-
-    経路が「行」で来る形（日付・経路・数）と、「列」で来る形（日付・検索・QR…）の
-    どちらでも読めるようにする。配信ツールによってどちらもあるため。
-    """
-    df = _read(text)
-    if df.empty:
-        return []
-    dcol = _col(df, "date", aliases)
-    scol = _col(df, "source", aliases)
-    acol = _col(df, "added", aliases)
-    if not dcol:
-        return []
-
+# ============================================================
+#  配信履歴（画面の表）→ line_broadcasts
+# ============================================================
+#   /{slug}/messages/history の表をそのまま受け取る。CSVの出口が無いため。
+#   列は 配信日時 / 配信人数 / メッセージタイプ / 開封率 / メッセージ。
+#   ・開封「率」しか無く件数が無いので、opened は率から割り戻して入れる
+#     （open_rate に率そのものも残すので、後から見分けられる）
+#   ・クリック数・クーポン使用数は画面に無いので null のまま
+def broadcast_rows_from_table(table: list[list[str]], account_id: str,
+                              start: str = "", end: str = "") -> list[dict]:
     out = []
-    if scol:                      # 行持ち（日付・経路・数）
-        for _, r in df.iterrows():
-            d = _dt(r.get(dcol))
-            src = str(r.get(scol)).strip()
-            if not d or not src or src.lower() == "nan":
-                continue
-            out.append({"date": d.date().isoformat(), "account_id": account_id,
-                        "source": src, "added": _int(r.get(acol)) if acol else None})
-    else:                         # 列持ち（日付以外の列名がそのまま経路）
-        for _, r in df.iterrows():
-            d = _dt(r.get(dcol))
-            if not d:
-                continue
-            for col in df.columns:
-                if col == dcol:
-                    continue
-                n = _int(r.get(col))
-                if n is None:
-                    continue
-                out.append({"date": d.date().isoformat(), "account_id": account_id,
-                            "source": str(col).strip(), "added": n})
+    for cells in table:
+        if len(cells) < 2:
+            continue
+        ts = _dt(cells[0])
+        if not ts:
+            continue
+        d = ts.date().isoformat()
+        if start and d < start:
+            continue
+        if end and d > end:
+            continue
+        delivered = _int(cells[1]) if len(cells) > 1 else None
+        kind = cells[2].strip() if len(cells) > 2 else None
+        rate = None
+        if len(cells) > 3:
+            m = re.search(r"(\d+(?:\.\d+)?)\s*%", cells[3] or "")
+            if m:
+                rate = float(m.group(1))
+        title = (cells[4].strip()[:200] if len(cells) > 4 else None) or None
+        out.append({
+            # 同じ店・同じ日時の配信は1件。取り直しても上書きになる
+            "broadcast_id": f"{account_id}:{ts.isoformat()}",
+            "account_id": account_id,
+            "sent_at": ts.isoformat(),
+            "business_date": d,
+            "title": title,
+            "kind": kind or None,
+            "delivered": delivered,
+            "opened": (round(delivered * rate / 100) if (delivered and rate is not None) else None),
+            "open_rate": rate,
+        })
     return out

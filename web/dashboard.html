@@ -1471,7 +1471,12 @@ const lineNoMap=()=>lineAccts().filter(a=>a.si==null).length;
 function lineTotals(rows){
   const t={n:rows.length,sd:0,op:0,ck:0,cu:0,bl:0,cp:0};
   for(const r of rows){t.sd+=r.sd||0;t.op+=r.op||0;t.ck+=r.ck||0;t.cu+=r.cu||0;t.bl+=r.bl||0;t.cp+=r.cp||0;}
-  t.opr=t.sd?t.op/t.sd*100:null;      // 開封率＝開封÷配信通数
+  // 開封率は配信ごとの率(or)を配信通数で重み付けして出す。
+  // デジテールは率しか出さないので、件数(op)は率からの割り戻し。
+  // 率が無い配信が混ざっても崩れないよう、率のある行だけで計算する。
+  const wr=rows.filter(r=>r.or!=null&&r.sd);
+  const wsd=wr.reduce((a,r)=>a+r.sd,0);
+  t.opr=wsd?wr.reduce((a,r)=>a+r.or*r.sd,0)/wsd:(t.sd?t.op/t.sd*100:null);
   t.ckr=t.op?t.ck/t.op*100:null;      // クリック率＝クリック÷開封（開封した人のうち何%が押したか）
   t.ctr=t.sd?t.ck/t.sd*100:null;      // 配信あたりのクリック率
   return t;
@@ -1610,7 +1615,7 @@ function drawLine(){
       tb.innerHTML=`<thead><tr><th>配信日</th>${showStore?"<th>店舗</th>":""}<th>配信名</th>`+
         `<th>通数</th><th>開封</th><th>開封率</th><th>クリック</th><th>クリック率</th><th>クーポン</th></tr></thead><tbody>`+
         rows.map(r=>{
-          const opr=r.sd?r.op/r.sd*100:null, ckr=r.op?r.ck/r.op*100:null;
+          const opr=(r.or!=null)?r.or:(r.sd?r.op/r.sd*100:null), ckr=r.op?r.ck/r.op*100:null;
           return `<tr><td>${esc(r.d)}</td>${showStore?`<td>${esc(nm(r.si))}</td>`:""}`+
             `<td>${esc(r.t||"（名称なし）")}</td>`+
             `<td>${r.sd?NUM(r.sd):"—"}</td><td>${r.op?NUM(r.op):"—"}</td>`+

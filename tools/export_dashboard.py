@@ -673,7 +673,7 @@ def build_data(sb: Supabase) -> dict:
         acct_sid = {a["id"]: a["si"] for a in line_accounts}
         for r in _select_all(sb, "line_broadcasts",
                              "broadcast_id,account_id,business_date,title,kind,"
-                             "delivered,opened,clicked,click_users,blocked,coupon_used",
+                             "delivered,opened,open_rate,clicked,click_users,blocked,coupon_used",
                              order="business_date"):
             if not r.get("business_date"):
                 continue
@@ -683,6 +683,8 @@ def build_data(sb: Supabase) -> dict:
                 "t": r.get("title"), "k": r.get("kind"),
                 "sd": int(r.get("delivered") or 0),
                 "op": int(r.get("opened") or 0),
+                # or=開封率(%)。デジテールは率しか出さないので、率をそのまま持つ
+                "or": float(r["open_rate"]) if r.get("open_rate") is not None else None,
                 "ck": int(r.get("clicked") or 0),
                 "cu": int(r.get("click_users") or 0),
                 "bl": int(r.get("blocked") or 0),
