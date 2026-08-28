@@ -158,6 +158,73 @@ def main() -> int:
             pairs = f"(失敗 {e})"
         print(f"  {json.dumps(pairs, ensure_ascii=False)}")
 
+
+        # 4) LINE配信のデータがどこにあるかを探す。
+        #    デジテールストア（＝ネブラスカ製）は来店・売上と同じ画面にLINE配信も
+        #    持っている。来店CSVが /{slug}/kpi/visits/download にあるので、
+        #    LINEも店舗配下のどこかにあるはず。その場所をここで突き止める。
+        #    トップは店舗選択だけのSPAでリンクが出ないため、店舗ページへ入って調べる。
+        print("\n===== LINE配信データの在りか =====")
+        try:
+            kept2, _ = digitel_fetch.scan_store_pairs(page.content().replace('\\"', '"'))
+        except Exception:
+            kept2 = {}
+        slug = sorted(kept2.values())[0] if kept2 else None
+        if not slug:
+            print("  店舗スラッグを取れなかったので調べられません")
+        else:
+            print(f"  調査対象の店舗: {slug}")
+            # 店舗ページ以降で飛ぶ通信を記録する（CSVのAPIはここに出る）
+            seen_req: list[str] = []
+            page.on("request", lambda r: seen_req.append(f"{r.method} {r.url}"))
+
+            for path in ("", "/kpi", "/kpi/visits", "/line", "/kpi/line",
+                         "/message", "/messages", "/broadcast", "/marketing"):
+                url = f"{DIGITEL_BASE_URL}/{slug}{path}"
+                try:
+                    resp = page.goto(url, wait_until="networkidle", timeout=25_000)
+                    code = resp.status if resp else "?"
+                except Exception as e:
+                    print(f"    {url} → 開けません（{str(e)[:70]}）")
+                    continue
+                page.wait_for_timeout(1500)
+                try:
+                    info = page.evaluate(r"""() => {
+                      const links = Array.from(document.querySelectorAll("a[href]"))
+                        .map(a => ({t:(a.innerText||'').trim().replace(/\s+/g,' ').slice(0,30),
+                                    h:a.getAttribute('href')}))
+                        .filter(x => x.h && !x.h.startsWith('#'));
+                      const btns = Array.from(document.querySelectorAll("button,[role=tab],[role=menuitem]"))
+                        .map(b => (b.innerText||'').trim().replace(/\s+/g,' ').slice(0,30))
+                        .filter(Boolean);
+                      return {title: document.title, links, btns,
+                              body: (document.body.innerText||'').replace(/\s+/g,' ').slice(0,600)};
+                    }""")
+                except Exception as e:
+                    print(f"    {url} → 読めません（{str(e)[:60]}）"); continue
+
+                lineish = [x for x in info["links"]
+                           if any(k in (x["t"]+x["h"]).lower()
+                                  for k in ("line", "配信", "友だち", "友達", "message", "broadcast"))]
+                mark = "★" if lineish else " "
+                print(f"\n  {mark} {url} → HTTP {code}  「{info['title']}」")
+                if info["links"]:
+                    print(f"      リンク({len(info['links'])}件): "
+                          + ", ".join(f"{x['t'] or '?'}→{x['h']}" for x in info["links"][:25]))
+                if info["btns"]:
+                    print(f"      ボタン/タブ: {', '.join(dict.fromkeys(info['btns']))[:400]}")
+                if code == 200 and not info["links"]:
+                    print(f"      画面の文字: {info['body'][:300]}")
+
+            # LINEに関係しそうな通信だけ抜き出す
+            hits = [u for u in dict.fromkeys(seen_req)
+                    if any(k in u.lower() for k in
+                           ("line", "message", "broadcast", "friend", "download", "csv", "export"))]
+            if hits:
+                print("\n  ★ データ取得らしき通信:")
+                for u in hits[:40]:
+                    print(f"       {u}")
+
         dump_page(page, f"digitel_dashboard_{label}")
     print("\n===== 調査おわり =====")
     return 0

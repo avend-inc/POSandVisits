@@ -1,41 +1,36 @@
 """
-LINE配信データの取り込み（配信元＝ネブラスカ）
+LINE配信データの取り込み（デジテールストア）
 
 【使い方】
-  python -m etl.line_fetch --probe                  どんな画面・CSVがあるか調べる（最初はこれ）
-  python -m etl.line_fetch --from 2024-01-01        指定日から今日までを取り込む
-  python -m etl.line_fetch                          前日ぶんだけ取り込む（毎日の自動実行）
-  python -m etl.line_fetch --all                    取れる限り過去まで遡って取り込む
+  python -m etl.line_fetch --probe                  どこにデータがあるか調べる
+  python -m etl.line_fetch --all                    過去分をすべて取り込む（初回）
+  python -m etl.line_fetch --from 2024-01-01        指定日から今日まで
+  python -m etl.line_fetch                          前日ぶんだけ（毎日の自動実行）
 
 【この作りにした理由】
-  来店数（デジテール）と同じ仕組みをそのまま使っている。
-    ブラウザでログイン → その状態のままCSVのURLを叩く → 表に整えて Supabase へ
-  デジテールと違うのは、画面の場所（URL）と、CSVの列名を
-  **コードに書かず環境変数で指定できる**ようにしたところ。
-  ネブラスカの画面構成をこちらで確認できていないので、
-  実物に合わせて Secrets / Variables を直せば、コードを触らずに合わせられる。
+  来店数と同じ仕組みをそのまま使う。デジテールストア（開発元＝ネブラスカ）は
+  来店・売上・LINE配信を同じ管理画面で持っているので、
+    ブラウザでログイン → その状態のままCSVのURLを叩く → 整えて Supabase へ
+  という流れを etl/digitel_fetch.py と共有できる。
+  **認証情報も同じ**（DIGITAIL_ID / DIGITAIL_PW）。新しく登録するものは無い。
 
-【設定（GitHub の Secrets / Variables）】
-  必須:
-    NEBRASKA_LOGIN_URL   ログイン画面のURL
-    NEBRASKA_ID          ログインID
-    NEBRASKA_PW          パスワード
-  任意（実物を見てから埋める。空なら既定値で試す）:
-    NEBRASKA_BASE_URL          サイトの入口URL（省略時はログインURLのドメイン）
-    NEBRASKA_ID_SELECTOR       ID入力欄の目印
-    NEBRASKA_PW_SELECTOR       パスワード入力欄の目印
-    NEBRASKA_SUBMIT_SELECTOR   ログインボタンの目印
-    NEBRASKA_BROADCAST_URL     配信実績CSVのURL（{from} {to} {account} を差し込める）
-    NEBRASKA_FRIENDS_URL       友だち数CSVのURL（同上）
-    NEBRASKA_SOURCES_URL       流入経路CSVのURL（同上）
-    NEBRASKA_ACCOUNTS_URL      アカウント一覧のURL
-    NEBRASKA_COLMAP            列名の対応表（JSON）。CSVの見出しが想定と違うときに使う
-                               例: {"delivered":"送信数","opened":"開封"}
+【店舗の見つけ方】
+  来店数と同じ digitel_fetch.discover_stores() で「店舗名 → スラッグ」を拾う。
+  LINEのCSVは店舗ごとのURL（/{スラッグ}/... ）にある想定で、
+  実際のパスは環境変数で指定できるようにしてある（下記）。
+
+【設定（GitHub の Variables。Secrets は既存の DIGITAIL_* をそのまま使う）】
+  DIGITEL_LINE_BROADCAST_PATH  配信実績CSVのパス。既定 "/{slug}/line/broadcasts/download"
+  DIGITEL_LINE_FRIENDS_PATH    友だち数CSVのパス。既定 "/{slug}/line/friends/download"
+  DIGITEL_LINE_SOURCES_PATH    流入経路CSVのパス。既定 "/{slug}/line/sources/download"
+  DIGITEL_LINE_COLMAP          CSVの見出しが想定と違うときの対応表(JSON)
+  DIGITEL_LINE_HISTORY_FROM    --all の開始日。既定 "2019-01-01"
+  ※ パスには {slug} {from} {to} を差し込める。
 
 【まだ確認できていないこと】
-  ネブラスカの実際のURL・画面構成・CSVの列名は未確認。
-  --probe を1回流すと、ログイン後の画面にあるリンク・ボタン・入力欄を
-  debug/ に書き出すので、それを見て上の変数を埋める。
+  デジテールのLINE画面の実際のURLとCSVの列名は未確認。
+  `--probe`（または Actions の「デジテール店舗一覧の調査」）を1回流すと、
+  画面内のリンクと店舗ページ配下のパスを書き出すので、それを見て上を埋める。
 """
 from __future__ import annotations
 
@@ -45,8 +40,10 @@ import os
 import sys
 from datetime import date, datetime, timedelta
 
-from .browser import browser_page, dump_controls, dump_page
+from . import digitel_fetch
+from .browser import browser_page, dump_page
 from .settings import (
+    DIGITEL_BASE_URL,
     JST,
     EtlError,
     load_dotenv,
@@ -75,18 +72,9 @@ def _require(name: str) -> str:
     return v
 
 
-def _base_url() -> str:
-    base = _env("NEBRASKA_BASE_URL")
-    if base:
-        return base.rstrip("/")
-    login = _require("NEBRASKA_LOGIN_URL")
-    # ログインURLからドメインだけ取り出す
-    parts = login.split("/")
-    return "/".join(parts[:3]) if len(parts) >= 3 else login
-
-
-# CSVの見出し → こちらの列名。実物に合わせて NEBRASKA_COLMAP で上書きできる。
-# 1つの列に複数の呼び名を並べてあるのは、配信ツールによって言い回しが違うため。
+# CSVの見出し → こちらの列名。実物に合わせて DIGITEL_LINE_COLMAP で上書きできる。
+# 1つの列に複数の呼び名を並べてあるのは、画面の言い回しが分からないうちに
+# 決め打ちすると外れるため。
 DEFAULT_ALIASES: dict[str, list[str]] = {
     "broadcast_id": ["配信ID", "メッセージID", "ID", "broadcast_id"],
     "sent_at":      ["配信日時", "送信日時", "配信日", "日時", "sent_at"],
@@ -110,73 +98,44 @@ DEFAULT_ALIASES: dict[str, list[str]] = {
     "source":       ["経路", "流入経路", "追加経路", "source"],
 }
 
+# CSVのパス。実物が分かったら Variables で上書きする（コードは触らない）。
+DEFAULT_PATHS = {
+    "BROADCAST": "/{slug}/line/broadcasts/download",
+    "FRIENDS":   "/{slug}/line/friends/download",
+    "SOURCES":   "/{slug}/line/sources/download",
+}
+
 
 def _aliases() -> dict[str, list[str]]:
-    """既定の対応表に、NEBRASKA_COLMAP で指定された呼び名を足す。"""
+    """既定の対応表に、DIGITEL_LINE_COLMAP で指定された呼び名を足す。"""
     out = {k: list(v) for k, v in DEFAULT_ALIASES.items()}
-    raw = _env("NEBRASKA_COLMAP")
+    raw = _env("DIGITEL_LINE_COLMAP")
     if not raw:
         return out
     try:
         extra = json.loads(raw)
     except json.JSONDecodeError as e:
-        raise EtlError(f"NEBRASKA_COLMAP がJSONとして読めません: {e}") from e
+        raise EtlError(f"DIGITEL_LINE_COLMAP がJSONとして読めません: {e}") from e
     for key, names in extra.items():
         vals = names if isinstance(names, list) else [names]
         out.setdefault(key, [])
-        # 指定されたものを先頭に置く（既定より優先する）
         out[key] = [str(v) for v in vals] + [v for v in out[key] if v not in vals]
     return out
 
 
-# ============================================================
-#  ログイン
-# ============================================================
-def login(page) -> None:
-    """ネブラスカにログインする。目印は環境変数で差し替えられる。"""
-    url = _require("NEBRASKA_LOGIN_URL")
-    user = _require("NEBRASKA_ID")
-    pw = _require("NEBRASKA_PW")
-
-    page.goto(url, wait_until="domcontentloaded")
-
-    # 目印の指定が無ければ、よくある形をこの順で試す
-    id_sel = _env("NEBRASKA_ID_SELECTOR")
-    pw_sel = _env("NEBRASKA_PW_SELECTOR") or 'input[type="password"]'
-    go_sel = _env("NEBRASKA_SUBMIT_SELECTOR") or 'button[type="submit"]'
-    id_candidates = [id_sel] if id_sel else [
-        'input[type="email"]', 'input[name="email"]', 'input[name="login_id"]',
-        'input[name="username"]', 'input[name="id"]', 'input[type="text"]',
-    ]
-
-    filled = False
-    for sel in id_candidates:
-        try:
-            page.fill(sel, user, timeout=4000)
-            filled = True
-            break
-        except Exception:
-            continue
-    if not filled:
-        dump_controls(page, "nebraska_login_notfound")
-        raise EtlError(
-            "ネブラスカのログイン画面で、ID入力欄が見つかりませんでした。\n"
-            "  → debug/ に画面の入力欄・ボタンの一覧を書き出しました。\n"
-            "  → それを見て NEBRASKA_ID_SELECTOR を指定してください。"
-        )
-
-    page.fill(pw_sel, pw)
-    page.click(go_sel)
-    page.wait_for_load_state("domcontentloaded")
-
-    # ログインできたか。まだログイン画面にいるなら失敗とみなす
-    if "login" in (page.url or "").lower() and "dashboard" not in (page.url or "").lower():
-        dump_page(page, "nebraska_login_failed")
-        raise EtlError(
-            "ネブラスカにログインできませんでした（ID/PW誤り・2段階認証・画面変更の可能性）。\n"
-            f"  → まずご自分のブラウザで {url} に入れるか確かめてください。\n"
-            "  → debug/ に画面を保存しました。"
-        )
+def _url_for(kind: str, slug: str, start: str, end: str) -> str:
+    """CSVのURLを組み立てる。パスは Variables で差し替えられる。"""
+    tmpl = _env(f"DIGITEL_LINE_{kind}_PATH") or DEFAULT_PATHS[kind]
+    path = (tmpl.replace("{slug}", slug)
+                .replace("{from}", start).replace("{to}", end)
+                .replace("{start}", start).replace("{end}", end))
+    if not path.startswith("http"):
+        path = DIGITEL_BASE_URL + ("" if path.startswith("/") else "/") + path
+    # 期間の指定がパスに無ければクエリで付ける（来店CSVと同じ形）
+    if "{" not in tmpl and "start" not in path and "from" not in path:
+        sep = "&" if "?" in path else "?"
+        path = f"{path}{sep}start={start}&end={end}"
+    return path
 
 
 # ============================================================
@@ -184,71 +143,50 @@ def login(page) -> None:
 # ============================================================
 def probe(headless: bool = True) -> int:
     """
-    ログインしたあと、画面にあるリンク・ボタン・入力欄を debug/ に書き出す。
-    ネブラスカの画面構成が分からないので、まずこれを1回流して中身を見る。
+    デジテールにログインして、LINE配信データの置き場所を探す。
+    来店・売上と同じログイン（DIGITAIL_ID / DIGITAIL_PW）を使う。
     """
     with browser_page(headless=headless) as (page, context):
-        login(page)
+        digitel_fetch.login(page)
         print(f"  ログイン後のURL: {page.url}")
-        dump_controls(page, "nebraska_top")
-        dump_page(page, "nebraska_top")
 
-        # 画面内のリンクを一覧にする。CSVの出口や「分析」ページを見つける手がかりにする。
-        links = page.eval_on_selector_all(
-            "a[href]",
-            "els => els.map(e => ({t: (e.innerText||'').trim().slice(0,40), h: e.getAttribute('href')}))",
-        )
-        seen, rows = set(), []
-        for l in links:
-            h = l.get("h") or ""
-            if not h or h.startswith("#") or h in seen:
+        stores = digitel_fetch.discover_stores(page)
+        print(f"  見つかった店舗: {len(stores)}件")
+        for nm, sl in list(sorted(stores.items()))[:10]:
+            print(f"     {nm} → {sl}")
+        if not stores:
+            dump_page(page, "digitel_line_probe_nostores")
+            raise EtlError("店舗を1件も見つけられませんでした。debug/ を確認してください。")
+
+        slug = sorted(stores.values())[0]
+        print(f"\n  この店舗で調べます: {slug}")
+
+        # 画面内のリンクからLINEらしきものを拾う
+        for path in ("", "/line", "/kpi", "/kpi/line", "/message", "/broadcast"):
+            url = f"{DIGITEL_BASE_URL}/{slug}{path}"
+            try:
+                resp = page.goto(url, wait_until="domcontentloaded", timeout=20_000)
+                code = resp.status if resp else "?"
+            except Exception as e:
+                print(f"    {url} → 開けません（{str(e)[:60]}）")
                 continue
-            seen.add(h)
-            rows.append(f"  {l.get('t') or '(文字なし)':<42} {h}")
-        print(f"\n  ---- 画面内のリンク {len(rows)}件 ----")
-        for r in rows[:120]:
-            print(r)
+            page.wait_for_timeout(1200)
+            try:
+                hrefs = page.eval_on_selector_all(
+                    "a[href]", "els => els.map(e => e.getAttribute('href')).filter(Boolean)")
+            except Exception:
+                hrefs = []
+            line_links = [h for h in hrefs if any(
+                k in h.lower() for k in ("line", "message", "broadcast", "friend"))]
+            mark = "★" if line_links else " "
+            print(f"  {mark} {url} → HTTP {code} / リンク{len(hrefs)}件")
+            for h in line_links[:10]:
+                print(f"       → {h}")
 
-        hints = [r for r in rows if any(
-            k in r.lower() for k in
-            ("csv", "download", "export", "分析", "配信", "友だち", "友達", "レポート", "統計")
-        )]
-        if hints:
-            print("\n  ---- CSV・分析まわりに見えるもの ----")
-            for r in hints:
-                print(r)
-        print("\n  この一覧をもとに NEBRASKA_BROADCAST_URL などを決めてください。")
+        dump_page(page, "digitel_line_probe")
+        print("\n  ★ が付いたURLと、その下のリンクを見て")
+        print("     DIGITEL_LINE_BROADCAST_PATH などを Variables に設定してください。")
     return 0
-
-
-# ============================================================
-#  CSVの取得
-# ============================================================
-def _fetch_csv(context, url: str) -> str:
-    """ログイン済みの状態でCSVのURLを取りに行く（デジテールと同じやり方）。"""
-    resp = context.request.get(url, timeout=120_000)
-    if resp.status != 200:
-        raise EtlError(f"CSVの取得に失敗しました（HTTP {resp.status}） URL: {url}")
-    body = resp.body()
-    for enc in ("utf-8-sig", "cp932", "utf-8"):
-        try:
-            return body.decode(enc)
-        except UnicodeDecodeError:
-            continue
-    return body.decode("utf-8", errors="replace")
-
-
-def _url_for(kind: str, start: str, end: str, account: str = "") -> str:
-    """URLの雛形に期間とアカウントを差し込む。"""
-    tmpl = _env(f"NEBRASKA_{kind}_URL")
-    if not tmpl:
-        raise EtlError(
-            f"NEBRASKA_{kind}_URL が未設定です。\n"
-            "  → 先に `python -m etl.line_fetch --probe` を流して、\n"
-            "     ネブラスカのどのURLでCSVが取れるかを確かめてください。"
-        )
-    return (tmpl.replace("{from}", start).replace("{to}", end)
-                .replace("{account}", account).replace("{start}", start).replace("{end}", end))
 
 
 # ============================================================
