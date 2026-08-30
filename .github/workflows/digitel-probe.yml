@@ -51,7 +51,7 @@ jobs:
           python -m tools.digitel_probe $ARGS
       - name: 調査用ファイルを保存
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: digitel-probe-${{ github.run_id }}
           path: debug/
