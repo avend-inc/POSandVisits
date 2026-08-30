@@ -42,6 +42,14 @@ on:
         required: false
         default: false
         type: boolean
+      consolidate_keep:
+        description: "（storefix）統合先に残す store id（例: 56）"
+        required: false
+        default: ""
+      consolidate_drop:
+        description: "（storefix）統合して消す store id（例: 55）"
+        required: false
+        default: ""
 
 jobs:
   audit:
@@ -69,4 +77,6 @@ jobs:
           SET_OWNERSHIP: ${{ inputs.set_ownership }}
           SET_NAME: ${{ inputs.set_name }}
           DO_UPDATE: ${{ inputs.do_update && '1' || '' }}
+          CONSOLIDATE_KEEP: ${{ inputs.consolidate_keep }}
+          CONSOLIDATE_DROP: ${{ inputs.consolidate_drop }}
         run: python -m tools.store_meta_fix

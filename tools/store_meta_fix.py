@@ -23,16 +23,63 @@ SET_NAME = (os.environ.get("SET_NAME") or "").strip()
 DO_UPDATE = (os.environ.get("DO_UPDATE") or "").strip() == "1"
 DAYS_FROM = (os.environ.get("DAYS_FROM") or "2026-08-25").strip()
 DAYS_TO = (os.environ.get("DAYS_TO") or "2026-08-31").strip()
+# 統合（2つに割れた店を1つに寄せる）用
+CONSOLIDATE_KEEP = (os.environ.get("CONSOLIDATE_KEEP") or "").strip()
+CONSOLIDATE_DROP = (os.environ.get("CONSOLIDATE_DROP") or "").strip()
 
 
-def run(sql):
+def run(sql, raise_on_error=True):
     r = requests.post(
         f"https://api.supabase.com/v1/projects/{REF}/database/query",
         headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"},
         json={"query": sql}, timeout=120)
     if r.status_code >= 400:
-        raise SystemExit(f"HTTP {r.status_code}: {r.text[:800]}")
+        if raise_on_error:
+            raise SystemExit(f"HTTP {r.status_code}: {r.text[:800]}")
+        return {"__error__": r.text[:400], "__status__": r.status_code}
     return r.json()
+
+
+def consolidate(keep: int, drop: int):
+    """割れた店を1つ(keep)に寄せる。drop の売上・来店・ログを keep へ移し、
+    区分/表示名を整えてから drop を削除する。削除がFKで無理なら drop を
+    衝突しない死に名へ改名して無効化する。"""
+    print(f"=== 統合: keep=id{keep} ← drop=id{drop} ===")
+    # 事前の件数
+    print("[前]", json.dumps(run(
+        f"select id,name,ownership,"
+        f"(select count(*) from public.sales x where x.store_id=st.id) sales,"
+        f"(select count(*) from public.visits x where x.store_id=st.id) visits "
+        f"from public.stores st where id in ({keep},{drop}) order by id"),
+        ensure_ascii=False, default=str))
+    # 1) 売上・来店を keep へ（drop側に無ければ no-op）。重複ユニーク衝突は
+    #    keep が空側なので起きない前提。ingest_log は store_id を null にして退避。
+    steps = [
+        f"update public.sales   set store_id={keep} where store_id={drop}",
+        f"update public.visits  set store_id={keep} where store_id={drop}",
+        f"update public.ingest_log set store_id=null where store_id={drop}",
+    ]
+    if SET_OWNERSHIP or SET_NAME:
+        sets = []
+        if SET_OWNERSHIP:
+            sets.append(f"ownership='{q(SET_OWNERSHIP)}'")
+        if SET_NAME:
+            sets.append(f"name='{q(SET_NAME)}'")
+        steps.append(f"update public.stores set {', '.join(sets)} where id={keep}")
+    for s in steps:
+        print("  ->", s)
+        run(s)
+    # 2) drop を削除（FKで残っていれば死に名へ改名して衝突キーを外す）
+    d = run(f"delete from public.stores where id={drop}", raise_on_error=False)
+    if isinstance(d, dict) and d.get("__error__"):
+        print(f"  ⚠️ drop削除は不可（{d['__status__']}）。死に名へ改名して無効化します: {d['__error__']}")
+        run(f"update public.stores set name='旧重複_未使用_id{drop}', ownership='直営' where id={drop}")
+    else:
+        print(f"  drop=id{drop} を削除しました")
+    print("[後]", json.dumps(run(
+        f"select id,name,ownership from public.stores where id in ({keep},{drop}) order by id"),
+        ensure_ascii=False, default=str))
+    return 0
 
 
 def q(s: str) -> str:
@@ -103,6 +150,11 @@ def main():
     if not DO_UPDATE:
         print("（確認のみ。更新するには DO_UPDATE=1 を指定）")
         return 0
+
+    # 統合モード（keep/drop 指定時）
+    if CONSOLIDATE_KEEP and CONSOLIDATE_DROP:
+        return consolidate(int(CONSOLIDATE_KEEP), int(CONSOLIDATE_DROP))
+
     if len(rows) != 1:
         print(f"⚠️ 対象が1店に絞れないため更新しません（{len(rows)}件）。STORE_LIKE を厳しくしてください。")
         return 0
