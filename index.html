@@ -421,6 +421,33 @@
   .adwarn{margin:0 0 8px;padding:8px 10px;border:1px dashed #b8860b;border-radius:10px;
     background:rgba(184,134,11,.08);font-size:11.5px;line-height:1.7}
   .adwarn code{background:rgba(0,0,0,.06);border-radius:4px;padding:1px 4px;font-size:11px}
+  /* Instagramタブ。アプリ全体の紺に、IGの紫→ピンクを「アカウントの帯」
+     だけで使う。装飾ではなく、広告データとオーガニックを視覚的に区別する印。 */
+  .igbadge{display:inline-flex;align-items:center;padding:2px 7px;border-radius:999px;color:#fff;
+    background:linear-gradient(110deg,#5946d2,#c13584 55%,#e86b36);font-size:9px;font-family:inherit;
+    font-weight:800;letter-spacing:.04em;vertical-align:middle}
+  .igaccount-strip{display:flex;gap:7px;overflow-x:auto;padding:2px 0 9px;scrollbar-width:none}
+  .igaccount-strip::-webkit-scrollbar{display:none}
+  .igacct{flex:none;display:flex;align-items:center;gap:7px;max-width:220px;padding:7px 10px;border:1px solid var(--border);
+    border-radius:999px;background:var(--surface);color:var(--ink2);font:inherit;font-size:11.5px;cursor:pointer}
+  .igacct.on{color:#fff;border-color:transparent;background:linear-gradient(110deg,#5946d2,#c13584)}
+  .igacct .ava{width:21px;height:21px;border-radius:50%;display:grid;place-items:center;background:var(--surface2);
+    color:var(--accent);font-size:9px;font-weight:900;flex:none}
+  .igacct.on .ava{background:rgba(255,255,255,.2);color:#fff}
+  .igacct .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .igtrendgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .igspark{border:1px solid var(--border);border-radius:12px;padding:9px 10px;background:var(--surface);min-width:0}
+  .igspark .hd{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:5px}
+  .igspark .hd b{font-size:11.5px}.igspark .hd span{font-size:10px;color:var(--muted)}
+  .igspark svg{display:block;width:100%;height:112px;overflow:visible}
+  .igbar{display:grid;grid-template-columns:minmax(72px,120px) 1fr 52px;align-items:center;gap:8px;margin:7px 0}
+  .igbar .lbl{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .igbar .track{height:8px;background:var(--surface2);border-radius:9px;overflow:hidden}
+  .igbar .fill{height:100%;border-radius:9px;background:linear-gradient(90deg,#5946d2,#c13584)}
+  .igbar .num{text-align:right;font-size:10.5px;font-weight:800;font-variant-numeric:tabular-nums}
+  .igempty{padding:16px;border:1px dashed #b8860b;border-radius:12px;background:rgba(184,134,11,.08);
+    font-size:12px;line-height:1.8;color:var(--ink2)}
+  @media(max-width:620px){.igtrendgrid{grid-template-columns:1fr}.igaccount-strip{margin-right:-12px;padding-right:12px}}
   /* 期間のボタンは折り返さず1行。入りきらないときは横にスクロールさせる */
   .adperiod{display:flex;flex-wrap:nowrap;gap:6px;margin:0 0 8px;overflow-x:auto;
     -webkit-overflow-scrolling:touch;scrollbar-width:none;padding-bottom:2px}
@@ -1244,6 +1271,99 @@ function loadSel(){
 function render(){ if(VIEW==="ads")renderAds(); else if(VIEW==="ig")renderIg(); else if(VIEW==="line")renderLine(); else if(state.detail)renderDetail(); else renderMain(); }
 
 // ============================================================
+//  Instagramタブ（オーガニック）
+//  広告経由ではないアカウント本体のフォロワー・リーチ・反応を見る。
+//  followers_countは過去に遡れないので、実際に蓄積された日だけで増減を出す。
+// ============================================================
+let IG_ACCOUNT=(function(){try{return localStorage.getItem("notime-ig-account")||"";}catch(e){return "";}})();
+let IG_DAYS=(function(){try{const n=+(localStorage.getItem("notime-ig-days")||30);return [7,14,30,90].includes(n)?n:30;}catch(e){return 30;}})();
+const IG_FIELDS=[
+  {k:"rc",n:"リーチ",unit:"人",color:"#5946d2"},
+  {k:"pv",n:"プロフ表示",unit:"回",color:"#c13584"},
+  {k:"ae",n:"反応アカウント",unit:"人",color:"#e86b36"},
+  {k:"ti",n:"インタラクション",unit:"回",color:"#0ca678"},
+];
+function igAccounts(){return (DATA.igAccounts||[]).filter(a=>a.on!==false);}
+function igLabel(a){return a?(a.u?"@"+a.u:(a.n||a.i)):"全アカウント";}
+function igLastDate(){return (DATA.igDaily||[]).reduce((m,r)=>r.d>m?r.d:m,"");}
+function igRange(){const to=igLastDate()||todayStr();return [addDays(to,-IG_DAYS+1),to];}
+function igRows(account,allDates){const [f,t]=igRange();return (DATA.igDaily||[]).filter(r=>(!account||r.i===account)&&(allDates||(r.d>=f&&r.d<=t)));}
+function igSum(rows){const p={rc:0,pv:0,ae:0,wc:0,ti:0};for(const r of rows)for(const k of Object.keys(p))p[k]+=r[k]||0;return p;}
+function igLatestFollower(id){
+  const rows=(DATA.igDaily||[]).filter(r=>(!id||r.i===id)&&r.fc!=null).sort((a,b)=>a.d<b.d?1:-1);
+  if(id)return rows[0]||null;
+  let total=0,seen=0,at="";for(const a of igAccounts()){const r=igLatestFollower(a.i);if(r){total+=r.fc;seen++;if(r.d>at)at=r.d;}}
+  return seen?{fc:total,d:at,coverage:seen}:null;
+}
+function igFollowerDelta(id){
+  const [f,t]=igRange(),ids=id?[id]:igAccounts().map(a=>a.i);let delta=0,covered=0;
+  for(const aid of ids){const rs=(DATA.igDaily||[]).filter(r=>r.i===aid&&r.fc!=null&&r.d>=f&&r.d<=t).sort((a,b)=>a.d<b.d?-1:1);
+    if(rs.length>=2){delta+=rs[rs.length-1].fc-rs[0].fc;covered++;}}
+  return {delta,covered,total:ids.length};
+}
+function igSeries(rows,key){
+  const [f,t]=igRange(),map=new Map();for(const r of rows)map.set(r.d,(map.get(r.d)||0)+(r[key]||0));
+  const out=[];for(let d=f;d<=t;d=addDays(d,1))out.push({d,v:map.get(d)||0});return out;
+}
+function igSpark(field,rows){
+  const vals=igSeries(rows,field.k),W=520,H=112,L=5,R=5,T=8,B=18,max=Math.max(1,...vals.map(x=>x.v));
+  const x=i=>L+(W-L-R)*(vals.length<=1?.5:i/(vals.length-1)),y=v=>T+(H-T-B)*(1-v/max);
+  const line=vals.map((r,i)=>(i?"L":"M")+x(i).toFixed(1)+" "+y(r.v).toFixed(1)).join(" ");
+  const area=line+` L ${x(vals.length-1).toFixed(1)} ${H-B} L ${x(0).toFixed(1)} ${H-B} Z`;
+  const total=vals.reduce((s,r)=>s+r.v,0),grad="igg-"+field.k;
+  return `<div class="igspark"><div class="hd"><b>${field.n}</b><span>期間合計 ${NUM(total)}${field.unit}</span></div>`+
+    `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${field.n}の日別推移">`+
+    `<defs><linearGradient id="${grad}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${field.color}" stop-opacity=".25"/><stop offset="1" stop-color="${field.color}" stop-opacity="0"/></linearGradient></defs>`+
+    `<line x1="${L}" y1="${H-B}" x2="${W-R}" y2="${H-B}" stroke="var(--border)"/>`+
+    `<path d="${area}" fill="url(#${grad})"/><path d="${line}" fill="none" stroke="${field.color}" stroke-width="2.2" vector-effect="non-scaling-stroke"/>`+
+    `<text x="${L}" y="${H-3}" font-size="9" fill="var(--muted)">${mdShort(vals[0].d)}</text>`+
+    `<text x="${W-R}" y="${H-3}" text-anchor="end" font-size="9" fill="var(--muted)">${mdShort(vals[vals.length-1].d)}</text></svg></div>`;
+}
+function igDemoBars(account,breakdown,limit){
+  const ids=new Set(account?[account]:igAccounts().map(a=>a.i)),map=new Map();
+  for(const r of (DATA.igDemo||[]))if(ids.has(r.i)&&r.b===breakdown)map.set(r.k,(map.get(r.k)||0)+(r.v||0));
+  const rows=[...map].map(([k,v])=>({k,v})).sort((a,b)=>b.v-a.v).slice(0,limit),max=Math.max(1,...rows.map(r=>r.v));
+  if(!rows.length)return `<p class="note">属性データはまだありません（100フォロワー未満のアカウントはMetaの仕様で取得できません）。</p>`;
+  return rows.map(r=>`<div class="igbar"><span class="lbl" title="${esc(r.k)}">${esc(r.k)}</span><span class="track"><i class="fill" style="width:${r.v/max*100}%"></i></span><span class="num">${NUM(r.v)}</span></div>`).join("");
+}
+function igAccountRows(){
+  const [f,t]=igRange();return igAccounts().map(a=>{
+    const rows=igRows(a.i),p=igSum(rows),fl=igLatestFollower(a.i),gd=igFollowerDelta(a.i);
+    return {a,p,fl,gd};
+  }).sort((x,y)=>(y.fl?.fc||0)-(x.fl?.fc||0)).map(x=>`<tr class="igpickrow" data-id="${esc(x.a.i)}" style="cursor:pointer">`+
+    `<td style="text-align:left"><b>${esc(igLabel(x.a))}</b>${x.a.st?`<br><span class="sub">${esc(x.a.st)}</span>`:""}</td>`+
+    `<td>${x.fl?NUM(x.fl.fc):"—"}</td><td>${x.gd.covered?((x.gd.delta>=0?"+":"")+NUM(x.gd.delta)):"蓄積中"}</td>`+
+    `<td>${NUM(x.p.rc)}</td><td>${NUM(x.p.pv)}</td><td>${NUM(x.p.ae)}</td><td>${NUM(x.p.ti)}</td></tr>`).join("");
+}
+function renderIg(){
+  const accounts=igAccounts();if(IG_ACCOUNT&&!accounts.some(a=>a.i===IG_ACCOUNT))IG_ACCOUNT="";
+  const [from,to]=igRange(),rows=igRows(IG_ACCOUNT),sum=igSum(rows),fl=igLatestFollower(IG_ACCOUNT),gd=igFollowerDelta(IG_ACCOUNT);
+  const sync=DATA.igSync||{},selected=accounts.find(a=>a.i===IG_ACCOUNT),hasData=accounts.length>0;
+  document.getElementById("app").classList.add("adsview");
+  {const tb=document.querySelector(".tabbar"); if(tb)tb.style.display="none";}
+  document.getElementById("app").innerHTML=mktHead("ig")+`
+    <div class="sub" style="margin:2px 0 8px">対象 <b style="color:var(--ink)">${mdShort(from)}〜${mdShort(to)}</b>｜最新 ${igLastDate()?mdShort(igLastDate()):"—"}｜同期 ${esc(String(sync.status||"未取込"))}${sync.ok!=null?`（${NUM(sync.ok)}アカウント）`:""}</div>
+    ${hasData?`<div class="igaccount-strip"><button class="igacct${IG_ACCOUNT?"":" on"}" data-id=""><span class="ava">Σ</span><span class="nm">全アカウント</span></button>${accounts.map(a=>`<button class="igacct${IG_ACCOUNT===a.i?" on":""}" data-id="${esc(a.i)}"><span class="ava">${esc((a.u||a.n||"IG").slice(0,2).toUpperCase())}</span><span class="nm">${esc(igLabel(a))}</span></button>`).join("")}</div>`:""}
+    <div class="panel"><div class="sub" style="font-weight:700;margin:2px 0 5px">表示期間</div><div class="adperiod">${[7,14,30,90].map(n=>`<button class="chip igdays${IG_DAYS===n?" on":""}" data-days="${n}">直近${n}日</button>`).join("")}</div>
+      ${hasData?`<div class="dtop four" id="igcards">
+        <div class="card"><div class="k">現在のフォロワー</div><div class="val">${fl?NUM(fl.fc):"—"}<small>人</small></div><div class="knote">${fl?mdShort(fl.d)+"時点":"スナップショット未取得"}</div></div>
+        <div class="card"><div class="k">フォロワー増減</div><div class="val">${gd.covered?(gd.delta>=0?"+":"")+NUM(gd.delta):"—"}<small>人</small></div><div class="knote">${gd.covered?gd.covered+"/"+gd.total+"アカウント":"2回目の日次蓄積後に表示"}</div></div>
+        <div class="card"><div class="k">リーチ</div><div class="val">${NUM(sum.rc)}<small>人</small></div><div class="knote">期間合計</div></div>
+        <div class="card"><div class="k">プロフ表示</div><div class="val">${NUM(sum.pv)}<small>回</small></div><div class="knote">${sum.rc?"リーチの"+F1(sum.pv/sum.rc*100)+"%":"期間合計"}</div></div>
+        <div class="card"><div class="k">反応アカウント</div><div class="val">${NUM(sum.ae)}<small>人</small></div><div class="knote">期間合計</div></div>
+        <div class="card"><div class="k">インタラクション</div><div class="val">${NUM(sum.ti)}<small>回</small></div><div class="knote">${sum.rc?"リーチの"+F1(sum.ti/sum.rc*100)+"%":"期間合計"}</div></div>
+      </div>`:`<div class="igempty"><b>Instagramのデータはまだ入っていません。</b><br>Metaトークンに <code>instagram_basic</code> / <code>instagram_manage_insights</code> / <code>pages_show_list</code> / <code>pages_read_engagement</code> を付与し、対象のFacebookページとInstagramプロアカウントを割り当てると、次の同期からここに表示されます。${sync.message?`<br><span class="sub">直近の同期: ${esc(sync.message)}</span>`:""}</div>`}
+    </div>
+    ${hasData?`<div class="panel"><h2>日別の推移 <span class="sub" style="font-weight:500">（${esc(igLabel(selected))}）</span></h2><div class="igtrendgrid">${IG_FIELDS.map(f=>igSpark(f,rows)).join("")}</div></div>
+    <div class="panel"><h2>アカウント別</h2><div class="tblwrap"><table class="kmat" id="igtbl"><thead><tr><th>アカウント</th><th>フォロワー</th><th>増減</th><th>リーチ</th><th>プロフ表示</th><th>反応アカウント</th><th>インタラクション</th></tr></thead><tbody>${igAccountRows()}</tbody></table></div><p class="note">フォロワー数は過去に遡れないため、実際に日次同期した日どうしで増減を計算します。リーチなどは各アカウントの値の合計です。</p></div>
+    <div class="panel"><h2>フォロワー属性 <span class="sub" style="font-weight:500">（最新スナップショット）</span></h2><div class="igtrendgrid"><div><div class="sub" style="font-weight:800">年齢</div>${igDemoBars(IG_ACCOUNT,"age",8)}</div><div><div class="sub" style="font-weight:800">性別</div>${igDemoBars(IG_ACCOUNT,"gender",8)}</div><div><div class="sub" style="font-weight:800">都市 TOP 10</div>${igDemoBars(IG_ACCOUNT,"city",10)}</div><div><div class="sub" style="font-weight:800">国 TOP 10</div>${igDemoBars(IG_ACCOUNT,"country",10)}</div></div></div>`:""}`;
+  wireCommon();
+  document.querySelectorAll(".igacct").forEach(b=>b.onclick=()=>{IG_ACCOUNT=b.dataset.id||"";try{localStorage.setItem("notime-ig-account",IG_ACCOUNT);}catch(e){}renderIg();});
+  document.querySelectorAll(".igdays").forEach(b=>b.onclick=()=>{IG_DAYS=+b.dataset.days;try{localStorage.setItem("notime-ig-days",IG_DAYS);}catch(e){}renderIg();});
+  document.querySelectorAll(".igpickrow").forEach(r=>r.onclick=()=>{IG_ACCOUNT=r.dataset.id;try{localStorage.setItem("notime-ig-account",IG_ACCOUNT);}catch(e){}renderIg();window.scrollTo({top:0,behavior:"smooth"});});
+}
+
+// ============================================================
 //  広告タブ（Meta広告）
 //  data.json の meta（日×キャンペーン）を集計して出す。
 //  実額だけを持ち、CTR/CPC/CPM/フリークエンシーは毎回 実額÷実額 で出す
@@ -1528,37 +1648,6 @@ function mktHead(active){
       <a href="index.html?view=ig"${active==="ig"?' class="on"':""}>Instagram</a>
       <a href="index.html?view=line"${active==="line"?' class="on"':""}>LINE</a>
     </div>`;
-}
-// Instagram。取り込みの土台（sql/023）はあるが、まだ画面に出していない。
-// 何を並べるかは後から決めるので、いまは型だけ置いておく。
-function renderIg(){
-  document.getElementById("app").classList.add("adsview");
-  {const tb=document.querySelector(".tabbar"); if(tb)tb.style.display="none";}
-  document.getElementById("app").innerHTML=mktHead("ig")+`
-    <div class="panel">
-      <h2 data-en="Followers">フォロワー</h2>
-      <p class="note">日々のフォロワー数と、その増減。</p>
-      <div class="igskel"></div>
-    </div>
-    <div class="panel">
-      <h2 data-en="Reach">リーチ・プロフィール表示</h2>
-      <p class="note">投稿がどれだけ届いて、どれだけプロフィールを見られたか。</p>
-      <div class="igskel"></div>
-    </div>
-    <div class="panel">
-      <h2 data-en="Audience">フォロワーの属性</h2>
-      <p class="note">年齢・性別・地域。</p>
-      <div class="igskel"></div>
-    </div>
-    <p class="note" style="margin-top:18px">
-      <b>この画面はまだ枠だけです。</b>
-      ためる側（<code>ig_accounts</code>・フォロワーの日次・インサイト・属性）は
-      用意してありますが、画面に出す中身はこれから決めます。
-      ${adMore("", `フォロワー数は Instagram の API で過去に遡れないため、毎日1回ずつ貯めています。`+
-        `店舗との紐付けは広告と同じ持ち方（destination_id）なので、`+
-        `広告費とフォロワーの増減を店舗単位で並べられます。`)}
-    </p>`;
-  wireCommon();
 }
 // ============================================================
 //  LINE 分析ダッシュボード
@@ -5012,6 +5101,7 @@ function catNeed(f,t){
 }
 async function draw(){ if(VIEW==="line"){ drawPeriod(); drawLine(); return; }
   if(VIEW==="ads"){ drawPeriod(); drawAds(); return; }
+  if(VIEW==="ig"){ renderIg(); return; }
   drawSlicer(); drawPeriod();
   // 描く前に、その期間のカテゴリ別がそろっているか確かめる
   await ensureCatRange(state.from,state.to);
