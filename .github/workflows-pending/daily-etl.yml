@@ -1,0 +1,194 @@
+# ============================================================
+#  NOTIME 日次ETL — 毎朝、前日ぶんの売上と来店数を Supabase に入れる
+#
+#  ・自動実行 : 毎日 朝6時（日本時間）
+#               GitHub は世界標準時(UTC)で動くので "21:00 UTC" = 翌朝6時(JST)
+#               ※ 自動実行はデフォルトブランチのこのファイルとコードで動きます。
+#  ・手動実行 : GitHubの Actions タブ →「NOTIME 日次ETL」→ Run workflow
+#
+#  はじめの準備（最初の1回）:
+#    1. Supabase の SQL Editor で sql/setup_all.sql を貼って Run（表を作る）
+#    2. 下記6つを Settings → Secrets and variables → Actions に登録
+#
+#  cashier の期間欄・CSVボタンの目印が未確定でも、この Actions を1回動かせば、
+#  失敗時に debug/ へ「入力欄・ボタンの一覧」が自動保存され、実行ログにも出ます。
+#  → それを見て目印（セレクタ）を確定できます（手元PCでのログイン調査は不要）。
+#
+#  ID・パスワード類は、このファイルには書きません。
+#  リポジトリの Settings → Secrets and variables → Actions に登録した値を使います。
+# ============================================================
+name: NOTIME 日次ETL
+
+on:
+  schedule:
+    # 前日ぶんを取り込む（日本時間）。0:00 JSTをメインに、GitHubの遅延・スキップ
+    # 対策として6時間おきの予備を用意（取り込み済みなら自動スキップ＝何度動いても安全）。
+    - cron: "0 15 * * *"    # 00:00 JST（メイン・前日ぶん）
+    - cron: "0 21 * * *"    # 06:00 JST（予備）
+    - cron: "0 3 * * *"     # 12:00 JST（予備）
+    - cron: "0 9 * * *"     # 18:00 JST（予備）
+
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "取り込む営業日 (YYYY-MM-DD)。空なら前日。backfill時は開始日(from)"
+        required: false
+        default: ""
+      only:
+        description: "片方だけ動かす場合に選ぶ"
+        required: false
+        default: "both"
+        type: choice
+        options: [both, cashier, digitel, smaregi, airregi, sipos]
+      force:
+        description: "取り込み済みの日でも、もう一度取り込む"
+        required: false
+        default: false
+        type: boolean
+      backfill:
+        description: "過去分の一括取り込み（dateを開始日、toを終了日にする）"
+        required: false
+        default: false
+        type: boolean
+      to:
+        description: "backfillの終了日 (YYYY-MM-DD)。空なら今日"
+        required: false
+        default: ""
+      dashboard:
+        description: "取り込みはせず、ダッシュボードの集計・配信だけ行う"
+        required: false
+        default: false
+        type: boolean
+      pos_limit:
+        description: "SIPOS動作確認用：先頭N接続だけ処理（空なら全接続）"
+        required: false
+        default: ""
+      pos_only_store:
+        description: "SIPOS動作確認用：url/pos_name/接続IDが一致する接続だけ処理"
+        required: false
+        default: ""
+
+# 同時に2つ走らないようにする（二重取り込みの予防）
+concurrency:
+  group: notime-daily-etl
+  cancel-in-progress: false
+
+jobs:
+  etl:
+    name: 前日ぶんを取り込む
+    runs-on: ubuntu-latest
+    # SIPOS(EZレジ)接続を1店ずつ巡回するため、店舗数が増えると時間がかかる。
+    timeout-minutes: 60
+
+    env:
+      TZ: Asia/Tokyo
+      POS_LIMIT: ${{ inputs.pos_limit }}
+      POS_ONLY_STORE: ${{ inputs.pos_only_store }}
+      CASHIER_ID: ${{ secrets.CASHIER_ID }}
+      CASHIER_PW: ${{ secrets.CASHIER_PW }}
+      DIGITAIL_ID: ${{ secrets.DIGITAIL_ID }}
+      DIGITAIL_PW: ${{ secrets.DIGITAIL_PW }}
+      DIGITAIL_SF_ID: ${{ secrets.DIGITAIL_SF_ID }}
+      DIGITAIL_SF_PW: ${{ secrets.DIGITAIL_SF_PW }}
+      SMAREGI_ID: ${{ secrets.SMAREGI_ID }}
+      SMAREGI_PW: ${{ secrets.SMAREGI_PW }}
+      AIRREGI_ID: ${{ secrets.AIRREGI_ID }}
+      AIRREGI_PW: ${{ secrets.AIRREGI_PW }}
+      # 調査モード。1 にすると Airレジのログイン後の画面構造をログに出す（目印確定用）。
+      AIRREGI_DEBUG: ${{ vars.AIRREGI_DEBUG }}
+      # 会計明細URL/セレクタを実DOM確定後に上書きするための任意の変数。
+      AIRREGI_SALES_URL: ${{ vars.AIRREGI_SALES_URL }}
+      AIRREGI_CSV_SELECTOR: ${{ vars.AIRREGI_CSV_SELECTOR }}
+      AIRREGI_DATE_FROM_SEL: ${{ vars.AIRREGI_DATE_FROM_SEL }}
+      AIRREGI_DATE_TO_SEL: ${{ vars.AIRREGI_DATE_TO_SEL }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      # 任意：これを登録するとダッシュボードが「Googleログイン制(社内のみ)」になる。
+      #       未登録なら従来どおり公開URL（知っていれば誰でも閲覧可）。
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      # 任意：Slack の Incoming Webhook URL。登録すると、best-effort で握りつぶしている
+      #       取り込みの失敗・売上0・レジ単位の欠測をSlackに流す（未登録なら何もしない）。
+      SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@v4
+
+      - name: Python を用意
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: ライブラリをインストール
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: ブラウザ(Chromium)を用意
+        if: ${{ ! inputs.dashboard }}
+        run: python -m playwright install --with-deps chromium
+
+      - name: 設定がそろっているか確認
+        run: |
+          missing=""
+          for name in CASHIER_ID CASHIER_PW DIGITAIL_ID DIGITAIL_PW SUPABASE_URL SUPABASE_SERVICE_KEY; do
+            if [ -z "${!name}" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Secrets が登録されていません:$missing"
+            echo "リポジトリの Settings → Secrets and variables → Actions で登録してください。"
+            exit 1
+          fi
+          echo "Secrets OK"
+
+      - name: ETL を実行
+        if: ${{ ! inputs.dashboard }}
+        run: |
+          if [ "${{ inputs.backfill }}" = "true" ]; then
+            ARGS=""
+            if [ -n "${{ inputs.date }}" ]; then ARGS="$ARGS --from ${{ inputs.date }}"; fi
+            if [ -n "${{ inputs.to }}" ];   then ARGS="$ARGS --to ${{ inputs.to }}"; fi
+            if [ "${{ inputs.only }}" = "cashier" ]; then ARGS="$ARGS --only cashier"; fi
+            if [ "${{ inputs.only }}" = "digitel" ]; then ARGS="$ARGS --only digitel"; fi
+            if [ "${{ inputs.only }}" = "smaregi" ]; then ARGS="$ARGS --only smaregi"; fi
+            if [ "${{ inputs.only }}" = "airregi" ]; then ARGS="$ARGS --only airregi"; fi
+            if [ "${{ inputs.only }}" = "sipos" ]; then ARGS="$ARGS --only sipos"; fi
+            echo "実行(backfill): python -m etl.backfill $ARGS"
+            python -m etl.backfill $ARGS
+          else
+            ARGS=""
+            if [ -n "${{ inputs.date }}" ]; then ARGS="$ARGS --date ${{ inputs.date }}"; fi
+            if [ "${{ inputs.only }}" = "cashier" ]; then ARGS="$ARGS --only cashier"; fi
+            if [ "${{ inputs.only }}" = "digitel" ]; then ARGS="$ARGS --only digitel"; fi
+            if [ "${{ inputs.only }}" = "smaregi" ]; then ARGS="$ARGS --only smaregi"; fi
+            if [ "${{ inputs.only }}" = "airregi" ]; then ARGS="$ARGS --only airregi"; fi
+            if [ "${{ inputs.force }}" = "true" ]; then ARGS="$ARGS --force"; fi
+            echo "実行: python -m etl.run_daily $ARGS"
+            python -m etl.run_daily $ARGS
+          fi
+
+      # 集計してダッシュボード(HTML+data.json)をSupabase Storageへ配信。
+      # ETLの一部（レジ1台の不調など）が失敗しても、取り込めた分はここで必ず配信する。
+      # ・以前は if: success() だったため、best-effort扱いの接続が1つでも失敗すると
+      #   このステップ自体が skipped になり、他の店舗の分まで含めてダッシュボードが
+      #   丸ごと更新されずに止まっていた（「23日の情報が出ない」の原因）。
+      #   ETL側のログは「他の取り込み・ダッシュボードには影響しません」と言っているのに
+      #   ワークフロー側の条件がそれを反故にしていたのが実体。
+      - name: ダッシュボードを更新
+        if: ${{ inputs.dashboard || !cancelled() }}
+        run: python -m tools.export_dashboard
+
+      # 失敗したときだけ、原因調査用のファイルを残す。
+      # raw/ は取得した生CSV＝全店の売上明細そのもの。画面調査には要らないのに
+      # リポジトリのread権限がある人なら誰でも落とせる状態だったので外した
+      # （生CSVが要るときは Actions のログか、手元で --headed で再現する）。
+      # debug/ もPOS管理画面のスクリーンショットが入るため、保管は1日だけにする。
+      - name: 失敗時の調査用ファイルを保存
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-${{ github.run_id }}
+          path: debug/
+          if-no-files-found: ignore
+          retention-days: 1

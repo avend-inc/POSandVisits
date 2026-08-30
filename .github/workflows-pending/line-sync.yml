@@ -1,0 +1,135 @@
+# ============================================================
+#  LINE配信データの取り込み（デジテールストア）
+#
+#  ・自動実行 : 毎日 朝6時（日本時間）＝前日ぶん。夕方に予備をもう1回。
+#               取り直しても同じ日は上書きになるので、二重に動いても安全。
+#  ・過去分の一括取り込み : Actions → このワークフロー → Run workflow →
+#                          「all」にチェック（初回に1回だけ）
+#
+#  【準備】不要です。
+#    来店数の取り込みと同じ DIGITAIL_ID / DIGITAIL_PW をそのまま使います
+#    （デジテールストアは来店・売上・LINEを同じ管理画面で持っているため）。
+#    新しく登録するSecretsはありません。
+#
+#  【取ってくるもの】※2026-08-28 に実機で確認
+#    友だち数 … /{店舗}/kpi/members/friends/download（CSV）
+#    配信履歴 … /{店舗}/messages/history（CSVが無いので画面の表を読む）
+#
+#  詳しくは etl/line_fetch.py の先頭に書いてあります。
+# ============================================================
+name: LINE配信データの取り込み
+
+on:
+  schedule:
+    - cron: "0 21 * * *"    # 06:00 JST（メイン・前日ぶん）
+    - cron: "0 9 * * *"     # 18:00 JST（予備）
+  workflow_dispatch:
+    inputs:
+      from:
+        description: "開始日 (YYYY-MM-DD)。空なら前日"
+        required: false
+        default: ""
+      to:
+        description: "終了日 (YYYY-MM-DD)。空なら今日"
+        required: false
+        default: ""
+      all:
+        description: "過去分をすべて取り込む（初回の一括取り込み）"
+        required: false
+        default: false
+        type: boolean
+      probe:
+        description: "調査モード：置き場所を調べ直すだけ（取り込みはしない）"
+        required: false
+        default: false
+        type: boolean
+
+# デジテールへのログインが日次ETLとぶつからないよう、同じ列に並ばせる
+concurrency:
+  group: notime-daily-etl
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: LINE配信データを取り込む
+    runs-on: ubuntu-latest
+    # 14店舗ぶん、配信履歴をページ送りしながら集めるので長めに取る
+    timeout-minutes: 60
+
+    env:
+      TZ: Asia/Tokyo
+      # 来店数の取り込みと同じ認証情報。新規登録は不要
+      DIGITAIL_ID: ${{ secrets.DIGITAIL_ID }}
+      DIGITAIL_PW: ${{ secrets.DIGITAIL_PW }}
+      DIGITAIL_SF_ID: ${{ secrets.DIGITAIL_SF_ID }}
+      DIGITAIL_SF_PW: ${{ secrets.DIGITAIL_SF_PW }}
+      # 画面が変わったときだけ使う（ふだんは空でよい）
+      DIGITEL_LINE_FRIENDS_PATH: ${{ vars.DIGITEL_LINE_FRIENDS_PATH }}
+      DIGITEL_LINE_COLMAP: ${{ vars.DIGITEL_LINE_COLMAP }}
+      DIGITEL_LINE_HISTORY_FROM: ${{ vars.DIGITEL_LINE_HISTORY_FROM }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: ライブラリをインストール
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: ブラウザ(Chromium)を用意
+        run: python -m playwright install --with-deps chromium
+
+      - name: 設定がそろっているか確認
+        run: |
+          missing=""
+          for name in DIGITAIL_ID DIGITAIL_PW SUPABASE_URL SUPABASE_SERVICE_KEY; do
+            if [ -z "${!name}" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Secrets が登録されていません:$missing"
+            echo "来店数の取り込み（日次ETL）と同じものです。"
+            exit 1
+          fi
+          echo "設定 OK"
+
+      - name: 調査モード
+        if: ${{ inputs.probe }}
+        run: python -m etl.line_fetch --probe
+
+      - name: 取り込み
+        if: ${{ ! inputs.probe }}
+        run: |
+          ARGS=""
+          if [ "${{ inputs.all }}" = "true" ]; then
+            ARGS="--all"
+          else
+            if [ -n "${{ inputs.from }}" ]; then ARGS="$ARGS --from ${{ inputs.from }}"; fi
+            if [ -n "${{ inputs.to }}" ];   then ARGS="$ARGS --to ${{ inputs.to }}"; fi
+          fi
+          echo "実行: python -m etl.line_fetch $ARGS"
+          python -m etl.line_fetch $ARGS
+
+      # 取り込んだ内容を画面（data.json）に反映する。
+      # 一部の店で失敗しても、取れた分は画面に出したいので always()。
+      - name: ダッシュボードを更新
+        if: ${{ !inputs.probe && always() }}
+        run: python -m tools.export_dashboard
+
+      # 失敗したときだけ調査用のファイルを残す。
+      # 配信本文が写るので保管は1日だけ（daily-etl と同じ方針）。
+      - name: 失敗時の調査用ファイルを保存
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: line-debug-${{ github.run_id }}
+          path: debug/
+          if-no-files-found: ignore
+          retention-days: 1
