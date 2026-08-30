@@ -118,7 +118,9 @@ def _clean_name(name: str) -> str:
       ・ブランド名のカタカナ表記→英字表記（セルフルギ→SELFURUGI 等）
     """
     n = unicodedata.normalize("NFKC", name or "")
-    n = re.sub(r"\s+", "", n)
+    # 空白に加えてアンダースコア等の区切りも落とす。
+    #  例）自動作成で「NOTIME_所沢店」が生まれると「NOTIME所沢店」と別キーになり店が分裂する。
+    n = re.sub(r"[\s_＿]+", "", n)
     for kana, latin in _BRAND_KANA.items():
         n = n.replace(kana, latin)
     return n.strip()
