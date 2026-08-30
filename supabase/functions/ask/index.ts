@@ -66,9 +66,15 @@ Deno.serve(async (req) => {
     const email = (udata?.user?.email || "").toLowerCase();
     if (uerr || !email) return json({ error: "認証に失敗しました。ログインし直してください。" }, 401, req);
 
-    // 2) 許可リスト（app_users）に登録された人だけ
-    const { data: u } = await sb.from("app_users").select("role").eq("email", email).maybeSingle();
-    if (!u || !u.role) return json({ error: "アクセス権がありません（管理者に登録を依頼してください）" }, 403, req);
+    // 2) 本部（社内）だけ。
+    //    以前は「app_users に行があれば誰でも」で、加盟店オーナーも viewer として
+    //    行を持つため通っていた。データ自体は呼び出し側が送った digest なので
+    //    他店の数字が漏れることは無いが、こちらのAnthropic課金だけが積まれる。
+    //    is_hq() は「admin/editor、または店舗の割り当てが無い登録者」＝本部。
+    const { data: hq, error: hqErr } = await sb.rpc("is_hq");
+    if (hqErr || hq !== true) {
+      return json({ error: "この機能は本部メンバー専用です。" }, 403, req);
+    }
 
     // 3) 使いすぎを止める（1人1日 DAILY_LIMIT 回まで）
     //    service_role で数える。ユーザーのトークンだと自分の記録を消せてしまう。
