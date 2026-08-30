@@ -1,0 +1,49 @@
+# 依存ライブラリの既知の脆弱性を定期的に見る。
+#
+# これまでチェックの仕組みが1本も無く、脆弱性が入っても誰も気づけなかった。
+# Dependabot は「新しい版が出たら」PRを出すが、こちらは「いま入っている版に
+# 既知の脆弱性があるか」を見る。週1と、依存を触るPRで動かす。
+name: 脆弱性チェック
+
+on:
+  pull_request:
+    paths:
+      - "requirements.txt"
+      - "notime-property-scout/requirements.txt"
+      - ".github/workflows/security-audit.yml"
+  schedule:
+    - cron: "0 22 * * 0"      # 毎週月曜 07:00 JST
+  workflow_dispatch:
+
+jobs:
+  audit:
+    name: pip-audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: pip-audit を用意
+        run: python -m pip install --upgrade pip pip-audit
+
+      - name: ETL の依存を検査
+        run: pip-audit --requirement requirements.txt --strict
+
+      - name: 物件収集の依存を検査
+        run: pip-audit --requirement notime-property-scout/requirements.txt --strict
+
+  syntax:
+    name: Python の構文チェック
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # 取り込みが本番で落ちてから気づくのを避ける（ETLはcronでしか動かないため）
+      - run: python -m compileall -q etl tools notime-property-scout/src
