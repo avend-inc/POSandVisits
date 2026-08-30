@@ -91,6 +91,10 @@ STORE_NAME_ALIAS = {
     # 天王台は別オーナーのcashier接続。店舗名で振り分けると「NOTIME天王台」→「天王台」に
     # 略されるため、既存の天王台店(id=47)へ寄せる（新規店の誤作成を防ぐ）。
     "天王台": "NOTIME天王台店",
+    # 所沢も別オーナーのcashier接続（2026-08オープン）。POSの店舗名は「所沢店」で、
+    # ブランド名が付かない。略称「所沢」を NOTIME所沢店 へ寄せ、店名を正式名に統一しても
+    # 取り込みが同じ店idに載り続けるようにする（無いと改名時に幽霊店が二重作成される）。
+    "所沢":   "NOTIME所沢店",
     # AirレジのジャーナルCSVの店舗名は「古着屋NOTIME 下北沢店」＝頭に「古着屋」が付く。
     # 既存の下北沢店(id=4)へ寄せる（名前振り分け時に新規店を作らないため）。
     "古着屋NOTIME下北沢店": "NOTIME下北沢店",
@@ -114,7 +118,9 @@ def _clean_name(name: str) -> str:
       ・ブランド名のカタカナ表記→英字表記（セルフルギ→SELFURUGI 等）
     """
     n = unicodedata.normalize("NFKC", name or "")
-    n = re.sub(r"\s+", "", n)
+    # 空白に加えてアンダースコア等の区切りも落とす。
+    #  例）自動作成で「NOTIME_所沢店」が生まれると「NOTIME所沢店」と別キーになり店が分裂する。
+    n = re.sub(r"[\s_＿]+", "", n)
     for kana, latin in _BRAND_KANA.items():
         n = n.replace(kana, latin)
     return n.strip()
