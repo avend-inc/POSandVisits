@@ -22,7 +22,14 @@ OAuth アプリに `workflow` スコープが無く、`.github/workflows/` へ�
 **そこへのリネームはGitHubの画面で弾かれる**（A の手順は使えない）。
 既存ファイルを開いて、下記のとおり直すのが早い。
 
-### `.github/workflows/daily-etl.yml`（急ぐのはこれ）
+### `.github/workflows/daily-etl.yml`
+
+> **生CSVの流出そのものは、ETLのコード側で塞ぎ済み**（`etl/settings.py`）。
+> GitHub Actions では `raw/` を作業フォルダの外（`/tmp`）へ書くようにしたので、
+> `path:` に `raw/` が残っていても**もう何も拾わない**。
+> ここの編集は「設定を実態に合わせる」ためのもので、急がない。
+> `retention-days` を 7→1 に縮めるぶんだけは、まだこの編集でしか効かない
+> （`debug/` にPOS管理画面のスクリーンショットが入るため）。
 
 いちばん下、182〜192行目あたりを丸ごと差し替える。
 
@@ -94,7 +101,7 @@ git commit -m "ワークフローを所定の場所へ移す" && git push
 
 | ファイル | 種類 | 中身 |
 |---|---|---|
-| `daily-etl.yml` | **差し替え** | 失敗時アーティファクトから `raw/`（全店の売上明細CSV）を外す。リポジトリのread権限があれば誰でも落とせる状態だった。`debug/`（POS管理画面のスクショ）の保管も 7日→1日 |
+| `daily-etl.yml` | 差し替え | 失敗時アーティファクトの `path:` から `raw/` を外し、`debug/`（POS管理画面のスクショ）の保管を 7日→1日 にする。**生CSVの流出自体は `etl/settings.py` 側で塞ぎ済み**なので、実質 retention の変更だけ |
 | `security-audit.yml` | 新規 | pip-audit（週1＋依存を触るPR）と compileall。脆弱性チェックの仕組みが1本も無かった |
 | `line-sync.yml` | 新規 | LINE配信データの日次取り込み。既存の `DIGITAIL_ID` / `DIGITAIL_PW` を流用するので新しいSecretsは不要 |
 | `deploy-pages.yml` | 差し替え | コメントのみ。gh-pages は private リポジトリでも公開配信される旨の注意書き |

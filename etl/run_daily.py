@@ -51,7 +51,10 @@ def save_raw(text: str, source: str, label: str, business_date: str) -> None:
     加工前のCSVを残す。
 
     取り込みが壊れて数日気づかなくても、これがあれば後から復元できる。
-    （raw/ は .gitignore 済み。GitHub Actions では成果物として保存する）
+    置き場所は settings.RAW_DIR。自分のPCならリポジトリ直下の raw/（.gitignore済み）、
+    GitHub Actions ならランナーの一時領域（作業フォルダの外）。
+    Actions で作業フォルダの中に置くと、失敗時のアーティファクトに全店の売上明細が
+    そのまま入り、リポジトリのread権限がある人なら誰でも落とせてしまうため。
     """
     folder = RAW_DIR / source
     folder.mkdir(parents=True, exist_ok=True)

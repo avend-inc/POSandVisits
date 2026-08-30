@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import re
+import tempfile
 import unicodedata
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -29,7 +30,24 @@ ROOT = Path(__file__).resolve().parent.parent
 # （これをやらないと「前日」が1日ズレます）
 JST = timezone(timedelta(hours=9))
 
-RAW_DIR = ROOT / "raw"          # 加工前のCSVを置く場所（.gitignore済み）
+# 加工前のCSV（＝全店の売上明細そのもの）の置き場所。
+#
+# GitHub Actions では、リポジトリの作業フォルダの外（ランナーの一時領域）へ置く。
+# 中に置くと、ワークフローが失敗したときのアーティファクトに raw/ が丸ごと入り、
+# リポジトリのread権限がある人なら誰でも落とせてしまうため
+# （2026-08 まで実際にその状態で、7日間保管されていた）。
+# ランナーは実行が終わると破棄されるので、外に置けば残らない。
+#
+# 自分のPCで動かすときは今までどおりリポジトリ直下の raw/（.gitignore済み）。
+# ETL_RAW_DIR を入れれば、どちらの場合も置き場所を指定できる。
+_raw_env = os.environ.get("ETL_RAW_DIR", "").strip()
+if _raw_env:
+    RAW_DIR = Path(_raw_env)
+elif os.environ.get("GITHUB_ACTIONS") == "true":
+    RAW_DIR = Path(tempfile.gettempdir()) / "notime-etl-raw"
+else:
+    RAW_DIR = ROOT / "raw"
+
 DEBUG_DIR = ROOT / "debug"      # 失敗時のスクリーンショット等（.gitignore済み）
 
 # ------------------------------------------------------------
