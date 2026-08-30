@@ -50,6 +50,26 @@ def main():
         order by id""")
     print("[該当店舗]", json.dumps(rows, ensure_ascii=False))
 
+    # 各店舗ごとの売上件数と参照（統合の安全確認用）
+    ids = [str(r["id"]) for r in rows]
+    if ids:
+        idlist = ",".join(ids)
+        per = run(f"""
+          select st.id, st.name, st.ownership,
+                 (select count(*) from public.sales x where x.store_id=st.id) as sales_rows,
+                 (select count(distinct (x.pos_name,x.tx_id)) from public.sales x where x.store_id=st.id) as tx,
+                 (select coalesce(round(sum(x.sales_ex_tax)),0) from public.sales x where x.store_id=st.id) as ex_sum
+          from public.stores st where st.id in ({idlist}) order by st.id""")
+        print("[店舗ごとの売上]", json.dumps(per, ensure_ascii=False, default=str))
+        for tbl, col in [("plan_data","store_id"), ("app_user_stores","store_id"),
+                         ("ingest_log","store_id"), ("visits","store_id")]:
+            try:
+                ref = run(f"select {col} as sid, count(*) c from public.{tbl} "
+                          f"where {col} in ({idlist}) group by {col} order by {col}")
+                print(f"[参照 {tbl}]", json.dumps(ref, ensure_ascii=False))
+            except SystemExit as e:
+                print(f"[参照 {tbl}] (skip: {e})")
+
     # 日別の 税抜/税込（伝票単位で重複排除してから集計）
     daily = run(f"""
       with tx as (
