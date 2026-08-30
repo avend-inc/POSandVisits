@@ -50,6 +50,8 @@ PAGE = 1000
 # クリエイティブ別（広告単位）を何日ぶん載せるか。全期間だと data.json が太るわりに、
 # 入れ替わりの早いクリエイティブを古いぶんまで比べても打ち手にならない。
 META_AD_DAYS = int(os.environ.get("META_AD_DAYS") or 180)
+# Instagramの日次は画面の既定30日と比較期間に必要な余白を持たせる。
+IG_DAYS = int(os.environ.get("IG_DAYS") or 90)
 
 
 _COLUMNS_CACHE: dict = {}
@@ -494,8 +496,10 @@ def build_data(sb: Supabase) -> dict:
     #     「比率の平均」という誤りが起きるため、画面側で 実額÷実額 で毎回出す。
     meta_rows: list[dict] = []
     meta_sync: dict | None = None
+    dest_name: dict = {}
+    dest_own: dict = {}
+    dest_sid: dict = {}
     try:
-        dest_name: dict = {}
         try:
             for d in _select_all(sb, "destinations", "id,name", order="id"):
                 dest_name[str(d["id"])] = d.get("name")
@@ -505,8 +509,6 @@ def build_data(sb: Supabase) -> dict:
         # pos_store_links（納品先 ↔ POS店舗の対応表）を通して stores.ownership を引く。
         # 同じ対応表から「納品先 → POS店舗ID」も作る。広告費と売上・来店を突き合わせる
         # ときは、店名ではなくこのIDで結ぶ（店名は表記ゆれがあり、当てにできない）。
-        dest_own: dict = {}
-        dest_sid: dict = {}
         try:
             for lk in _select_all(sb, "pos_store_links", "pos_store_id,destination_id", order="pos_store_id"):
                 did, sid = lk.get("destination_id"), lk.get("pos_store_id")
@@ -740,6 +742,74 @@ def build_data(sb: Supabase) -> dict:
     except Exception:
         pass
 
+    # --- Instagram（オーガニック）--------------------------------------
+    # 広告と混ぜず、アカウント本体のフォロワー・リーチ・反応を渡す。
+    # 加盟店向けstore-<id>.jsonには入らず、社内の data.json だけに載る。
+    ig_accounts: list[dict] = []
+    ig_daily: list[dict] = []
+    ig_demo: list[dict] = []
+    ig_sync: dict | None = None
+    try:
+        for a in _select_all(sb, "ig_accounts",
+                             "ig_user_id,username,name,destination_id,active,updated_at",
+                             order="username"):
+            did = a.get("destination_id")
+            ig_accounts.append({
+                "i": str(a["ig_user_id"]),
+                "u": a.get("username"),
+                "n": a.get("name"),
+                "st": dest_name.get(str(did)) if did else None,
+                "si": dest_sid.get(str(did)) if did else None,
+                "ow": dest_own.get(str(did)) if did else None,
+                "on": bool(a.get("active", True)),
+            })
+
+        ig_since = (datetime.now(JST).date() - timedelta(days=IG_DAYS - 1)).isoformat()
+        src = _select_all(
+            sb, "ig_daily",
+            "date,ig_user_id,followers_count,follows_count,media_count,reach,"
+            "profile_views,accounts_engaged,website_clicks,total_interactions",
+            order="date", extra={"date": f"gte.{ig_since}"})
+        for r in src:
+            row = {"d": str(r["date"]), "i": str(r["ig_user_id"])}
+            for source, short in [
+                    ("followers_count", "fc"), ("follows_count", "fg"),
+                    ("media_count", "mc"), ("reach", "rc"),
+                    ("profile_views", "pv"), ("accounts_engaged", "ae"),
+                    ("website_clicks", "wc"), ("total_interactions", "ti")]:
+                if r.get(source) is not None:
+                    row[short] = int(r[source])
+            ig_daily.append(row)
+
+        # 属性は毎週スナップショット。同じアカウント×区分の最新日だけを
+        # 渡し、古い世代が画面で二重に足されないようにする。
+        demo_src = _select_all(sb, "ig_demographics",
+                               "date,ig_user_id,breakdown,key,value", order="date")
+        latest: dict[tuple[str, str], str] = {}
+        for r in demo_src:
+            key = (str(r["ig_user_id"]), str(r["breakdown"]))
+            latest[key] = max(latest.get(key, ""), str(r["date"]))
+        for r in demo_src:
+            key = (str(r["ig_user_id"]), str(r["breakdown"]))
+            if str(r["date"]) != latest.get(key):
+                continue
+            ig_demo.append({"d": str(r["date"]), "i": key[0], "b": key[1],
+                            "k": str(r["key"]), "v": int(r.get("value") or 0)})
+
+        runs = sb.select("ig_sync_runs", {
+            "select": "started_at,target_date,status,accounts_ok,accounts_failed,rows_upserted,message",
+            "order": "started_at.desc", "limit": "1"})
+        if runs:
+            r0 = runs[0]
+            ig_sync = {"at": r0.get("started_at"), "date": r0.get("target_date"),
+                       "status": r0.get("status"), "ok": r0.get("accounts_ok"),
+                       "failed": r0.get("accounts_failed"), "rows": r0.get("rows_upserted"),
+                       "message": r0.get("message")}
+        print(f"  Instagram: {len(ig_accounts)}アカウント / {len(ig_daily)}日次行 / "
+              f"属性{len(ig_demo)}行（{ig_since} 以降）")
+    except Exception as _e:
+        print(f"  （Instagramの取得に失敗しました。IGタブは空になります: {_e}）")
+
     return {
         "generated_at": datetime.now(JST).isoformat(timespec="seconds"),
         "meta": meta_rows,
@@ -750,6 +820,10 @@ def build_data(sb: Supabase) -> dict:
         "lineBc": line_bc,
         "lineDaily": line_daily,
         "lineSrc": line_src,
+        "igAccounts": ig_accounts,
+        "igDaily": ig_daily,
+        "igDemo": ig_demo,
+        "igSync": ig_sync,
         "stores": [{"id": s["id"], "name": name_by_id.get(s["id"], str(s["id"])),
                     "own": own_by_id.get(s["id"]),      # null＝区分が未設定
                     "kv": kv_by_id.get(s["id"], True),

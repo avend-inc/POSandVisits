@@ -37,7 +37,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from datetime import datetime
+from datetime import date as date_type, datetime, timedelta
 
 import requests
 
@@ -62,7 +62,8 @@ DEMO_BREAKDOWNS = ["age", "gender", "city", "country"]
 
 
 def _token() -> str:
-    return (os.environ.get("IG_ACCESS_TOKEN") or "").strip()
+    return (os.environ.get("IG_ACCESS_TOKEN") or
+            os.environ.get("META_ACCESS_TOKEN") or "").strip()
 
 
 def _get(path: str, params: dict) -> dict:
@@ -130,16 +131,19 @@ def fetch_node(ig_user_id: str) -> dict:
     }
 
 
-def fetch_day_insights(ig_user_id: str, date: str) -> tuple[dict, list[str]]:
-    """日次インサイトを指標ごとに取る。使えない指標は飛ばして理由を返す。
+def fetch_range_insights(ig_user_id: str, since_date: str,
+                         until_date: str) -> tuple[dict[str, dict], list[str]]:
+    """日次インサイトを期間一括で取る。
 
-    period=day は「その日の終わりまで」の値。since/until はUNIX秒で、
-    until を対象日の翌日0時(JST)にすると対象日ぶんが返る。
+    1指標が廃止されても他を道連れにしないよう、指標ごとに
+    リクエストする。Instagramのユーザー指標は最大90日保持だが、
+    ここでは画面の標準期間に合わせて最大30日ずつ取る。
     """
-    out: dict = {}
+    out: dict[str, dict] = {}
     skipped: list[str] = []
-    since = int(datetime.fromisoformat(f"{date}T00:00:00+09:00").timestamp())
-    until = since + 86400
+    since = int(datetime.fromisoformat(f"{since_date}T00:00:00+09:00").timestamp())
+    until = int((datetime.fromisoformat(f"{until_date}T00:00:00+09:00") +
+                 timedelta(days=1)).timestamp())
     for metric in DAY_METRICS:
         if metric not in DAY_COLUMNS:
             skipped.append(f"{metric}(列が無いので保存しません)")
@@ -152,9 +156,11 @@ def fetch_day_insights(ig_user_id: str, date: str) -> tuple[dict, list[str]]:
             skipped.append(f"{metric}({str(e)[:80]})")
             continue
         for row in (body.get("data") or []):
-            vals = row.get("values") or []
-            if vals and vals[0].get("value") is not None:
-                out[metric] = vals[0]["value"]
+            for val in (row.get("values") or []):
+                end_time = val.get("end_time") or ""
+                day = end_time[:10]
+                if day and since_date <= day <= until_date and val.get("value") is not None:
+                    out.setdefault(day, {})[metric] = val["value"]
     return out, skipped
 
 
@@ -185,6 +191,10 @@ def fetch_demographics(ig_user_id: str) -> tuple[list[dict], list[str]]:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Instagramのフォロワー数・インサイトを取り込む")
     ap.add_argument("--date", help="対象日 YYYY-MM-DD（省略時は前日）")
+    ap.add_argument("--since", help="開始日 YYYY-MM-DD")
+    ap.add_argument("--until", help="終了日 YYYY-MM-DD（省略時は前日）")
+    ap.add_argument("--days", type=int, default=1,
+                    help="--since未指定時に直近何日を取り直すか（既定1）")
     ap.add_argument("--demographics", action="store_true", help="フォロワー属性も取る")
     ap.add_argument("--dry-run", action="store_true", help="取得だけしてDBに書かない")
     args = ap.parse_args()
@@ -194,10 +204,19 @@ def main() -> int:
         print("ℹ️ IG_ACCESS_TOKEN が未設定のため、何もしません（設定前でも安全に終了します）。")
         return 0
 
-    date = validate_date(args.date) if args.date else yesterday_jst()
+    if args.date and (args.since or args.until):
+        ap.error("--date と --since/--until は同時に指定できません")
+    if args.days < 1 or args.days > 30:
+        ap.error("--days は1〜30で指定してください")
+    until_date = validate_date(args.date or args.until) if (args.date or args.until) else yesterday_jst()
+    since_date = (until_date if args.date else
+                  (validate_date(args.since) if args.since else
+                   (date_type.fromisoformat(until_date) - timedelta(days=args.days - 1)).isoformat()))
+    if since_date > until_date:
+        ap.error("--since は --until 以前の日付にしてください")
     started = datetime.now(JST)
     print("=" * 60)
-    print(f"Instagram 取り込み  対象日: {date} / API {API_VERSION}")
+    print(f"Instagram 取り込み  対象: {since_date} 〜 {until_date} / API {API_VERSION}")
     print("=" * 60)
 
     sb = None if args.dry_run else Supabase()
@@ -209,12 +228,20 @@ def main() -> int:
         if sb:
             sb.insert("ig_sync_runs", [{
                 "started_at": started.isoformat(), "finished_at": datetime.now(JST).isoformat(),
-                "target_date": date, "status": "failed", "message": str(e)[:2000]}])
+                "target_date": until_date, "status": "failed", "message": str(e)[:2000]}])
         return 1
 
     print(f"  見つかったアカウント: {len(accounts)}件")
     if not accounts:
-        print("  （トークンから見えるIGビジネスアカウントがありません。権限をご確認ください）")
+        msg = ("トークンから見えるInstagramプロアカウントが0件です。"
+               "instagram_basic / instagram_manage_insights / pages_show_list / "
+               "pages_read_engagement と、対象Facebookページの割り当てを確認してください。")
+        print(f"  ❌ {msg}")
+        if sb:
+            sb.insert("ig_sync_runs", [{
+                "started_at": started.isoformat(), "finished_at": datetime.now(JST).isoformat(),
+                "target_date": until_date, "status": "failed", "message": msg}])
+        return 1
 
     if sb and accounts:
         sb.upsert("ig_accounts", [{**a, "updated_at": datetime.now(JST).isoformat()}
@@ -234,9 +261,13 @@ def main() -> int:
             print(f"  ❌ {label}: {e}")
             notes.append(f"{label}: {str(e)[:120]}")
             continue
-        ins, skipped = fetch_day_insights(uid, date)
-        daily_rows.append({"date": date, "ig_user_id": uid, **node, **ins,
-                           "synced_at": datetime.now(JST).isoformat()})
+        by_day, skipped = fetch_range_insights(uid, since_date, until_date)
+        now = datetime.now(JST).isoformat()
+        # 最終日のインサイト行に現在値をマージし、同じ一意キーを
+        # 1回のupsertに2行入れない（PostgresのON CONFLICTが二重更新で落ちる）。
+        by_day.setdefault(until_date, {}).update(node)
+        for day, ins in sorted(by_day.items()):
+            daily_rows.append({"date": day, "ig_user_id": uid, **ins, "synced_at": now})
         ok += 1
         extra = f" / 取れなかった指標: {', '.join(skipped)}" if skipped else ""
         print(f"  ✅ {label}: フォロワー{node.get('followers_count')}{extra}")
@@ -245,7 +276,7 @@ def main() -> int:
 
         if args.demographics:
             drows, dskip = fetch_demographics(uid)
-            demo_rows.extend({"date": date, "ig_user_id": uid,
+            demo_rows.extend({"date": until_date, "ig_user_id": uid,
                               "synced_at": datetime.now(JST).isoformat(), **r} for r in drows)
             if dskip:
                 notes.extend(f"{label}/属性: {s}" for s in dskip)
@@ -261,7 +292,7 @@ def main() -> int:
         sb.insert("ig_sync_runs", [{
             "started_at": started.isoformat(),
             "finished_at": datetime.now(JST).isoformat(),
-            "target_date": date, "accounts_ok": ok, "accounts_failed": failed,
+            "target_date": until_date, "accounts_ok": ok, "accounts_failed": failed,
             "rows_upserted": upserted, "status": status,
             "message": (" / ".join(notes))[:2000] or None}])
 
@@ -271,7 +302,7 @@ def main() -> int:
         print("  （--dry-run のためDBには書いていません）")
     print("\n✅ 取り込みが終わりました。" if failed == 0 else
           f"\n⚠️ {failed}件のアカウントで失敗しました（他は取り込み済み）。")
-    return 0 if ok or not accounts else 1
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

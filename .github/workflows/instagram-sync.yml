@@ -38,6 +38,10 @@ on:
         required: false
         default: false
         type: boolean
+      days:
+        description: "直近何日を取り直すか（既定30）"
+        required: false
+        default: "30"
 
 concurrency:
   group: instagram-sync
@@ -55,6 +59,7 @@ jobs:
       IG_DAY_METRICS: ${{ vars.IG_DAY_METRICS }}
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -64,8 +69,11 @@ jobs:
       - run: pip install -r requirements.txt
       - name: 取り込みを実行
         run: |
-          ARGS=""
-          if [ -n "${{ inputs.date }}" ]; then ARGS="$ARGS --date ${{ inputs.date }}"; fi
+          if [ -n "${{ inputs.date }}" ]; then
+            ARGS="--date ${{ inputs.date }}"
+          else
+            ARGS="--days ${{ inputs.days || '30' }}"
+          fi
           # 属性は毎日は要らないので、手動指定か月曜だけ取る
           if [ "${{ inputs.demographics }}" = "true" ] || [ "$(date +%u)" = "1" ]; then
             ARGS="$ARGS --demographics"
@@ -73,3 +81,6 @@ jobs:
           if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
           echo "実行: python -m etl.instagram_fetch $ARGS"
           python -m etl.instagram_fetch $ARGS
+      - name: IGタブのデータを更新
+        if: success() && inputs.dry_run != true
+        run: python -m tools.export_dashboard

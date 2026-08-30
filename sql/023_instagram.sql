@@ -58,6 +58,7 @@ create table if not exists public.ig_daily (
   primary key (date, ig_user_id)
 );
 create index if not exists ig_daily_date_idx on public.ig_daily (date);
+create index if not exists ig_daily_account_date_idx on public.ig_daily (ig_user_id, date desc);
 
 -- --- ③ フォロワー属性 -------------------------------------------------
 --   1行 = アカウント × 日 × 区分（age/gender/city/country）× 値。
@@ -85,11 +86,24 @@ create table if not exists public.ig_sync_runs (
   message      text
 );
 
+create index if not exists ig_demographics_account_date_idx
+  on public.ig_demographics (ig_user_id, date desc);
+create index if not exists ig_accounts_destination_idx
+  on public.ig_accounts (destination_id);
+
 -- --- 権限：読み取りはAVENDメンバーのみ。書き込みは service_role だけ ---
 alter table public.ig_accounts     enable row level security;
 alter table public.ig_daily        enable row level security;
 alter table public.ig_demographics enable row level security;
 alter table public.ig_sync_runs    enable row level security;
+
+-- 2026-05以降のSupabaseは新規テーブルをData APIに自動公開しない。
+-- 画面は社内ログイン後の読み取りのみ、ETLはservice_roleのみ書き込める。
+grant select on public.ig_accounts, public.ig_daily,
+  public.ig_demographics, public.ig_sync_runs to authenticated;
+grant select, insert, update, delete on public.ig_accounts, public.ig_daily,
+  public.ig_demographics, public.ig_sync_runs to service_role;
+grant usage, select on sequence public.ig_sync_runs_id_seq to service_role;
 
 do $$
 declare t text;
