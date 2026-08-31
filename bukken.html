@@ -146,7 +146,7 @@
 <!-- 自分で見つけた物件を手動登録する。id は manual- で始め、収集の同期で消えないようにする -->
 <div class="overlay" id="addov"><div class="modal">
   <div class="mhead">物件を追加（自分で見つけた物件）</div>
-  <div class="msub">分かる項目だけでOK。物件名は必須です。登録後は一覧に並び、OK/NG/保留や商圏調査にも使えます。</div>
+  <div class="msub">分かる項目だけでOK。物件名は必須です。登録すると「OK」タブに入ります（後でNG/保留に変更も可）。</div>
   <div class="setgrid">
     <label style="grid-column:1/-1">物件名 <span style="color:var(--ng)">*</span><input type="text" id="a_name" placeholder="例）○○ビル1階 / 国道○号沿い店舗"></label>
     <label>市区町村<input type="text" id="a_city" placeholder="例）福島市"></label>
@@ -537,12 +537,17 @@ async function saveAdd(){
     station_name:_str("a_station"), usage:null, source:"手動登録",
     detail_url:_str("a_url")||"", map_url:_str("a_map"), success_flag:false,
     note:_str("a_note"),
+    // 自分で見つけた物件は最初から「OK」に入れる（＝OKタブに表示）。
+    // 未判定にすると、面積・家賃が範囲外/未入力の物件は絞り込みで隠れてしまい
+    // 「どこにも出ない」ため。OKなら範囲外でも必ず見える。
+    verdict:"OK", reason:"自分で見つけた物件（手動追加）",
+    reviewed_by:ME.email, reviewed_at:new Date().toISOString(),
   };
   msg.style.color="var(--ink2)"; msg.textContent="登録中…";
   const {error}=await SB.from("bukken").insert(rec);
   if(error){ msg.style.color="var(--ng)"; msg.textContent="登録に失敗："+error.message; return; }
-  msg.style.color="var(--ok)"; msg.textContent="✓ 登録しました。一覧に追加されます。";
-  FILTER = fits(rec) ? "todo" : "info";   // 追加した物件が見えるタブに切り替える
+  msg.style.color="var(--ok)"; msg.textContent="✓ OKに登録しました。";
+  FILTER="OK";                            // OKタブに切り替えて追加した物件を見せる
   document.querySelectorAll(".chip").forEach(c=>c.classList.toggle("on",c.dataset.f===FILTER));
   await load();                           // DBから読み直して正しい並びで表示（新規行を含む）
   setTimeout(closeAdd,900);
