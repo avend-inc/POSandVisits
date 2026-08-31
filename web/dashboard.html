@@ -672,9 +672,6 @@
   <a href="index.html?g=own" id="tab-own">直営</a>
   <a href="index.html?g=fc" id="tab-fc">FC</a>
   <a href="pl.html">予実</a>
-  <a href="trends.html">推移</a>
-  <a href="promo.html">販促</a>
-  <a href="ask.html">分析AI</a>
   <a href="keiei.html" id="tab-keiei" style="display:none">経営</a>
   <a href="admin.html" id="tab-admin" style="display:none">管理</a>
 </div></nav>
@@ -3721,28 +3718,6 @@ function renderDetail(){
       <p class="note" style="margin:7px 0 0"><b>青字＝土日祝</b>／気温は最高・最低<span id="dk-adnote"></span></p>
     </div>
     <div class="panel">
-      <h2>KPIの推移 <span class="sub" id="trend-range" style="font-weight:700;color:var(--accent)"></span></h2>
-      <div style="display:flex;align-items:center;gap:6px;margin:6px 0 8px">
-        <button class="gchip" data-grain="day">日</button>
-        <button class="gchip" data-grain="week">週</button>
-        <button class="gchip" data-grain="month">月</button>
-        <button class="gchip" data-grain="all">全期間</button>
-        <button class="chip" id="tr-prev" style="margin-left:auto">◀</button>
-        <button class="chip" id="tr-next">▶</button>
-      </div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px">
-        <button class="gchip tmet" data-tmet="ex">売上</button>
-        <button class="gchip tmet" data-tmet="v">来店数</button>
-        <button class="gchip tmet" data-tmet="pr">購入率</button>
-        <button class="gchip tmet" data-tmet="buy">仕入数</button>
-        <button class="gchip tmet" data-tmet="aov">客単価</button>
-        ${adShown(state.detail)?`<button class="gchip tmet" data-tmet="ad">広告費</button>`:""}
-      </div>
-      <div class="chart" id="trendchart"></div>
-      <p class="note" id="trend-note" style="margin:6px 0 0"></p>
-      <p class="note" style="margin:2px 0 0">最大3つまで表示（目盛り＝左:1つめ／右:2つめ）</p>
-    </div>
-    <div class="panel">
       <h2>KPIまとめ <span class="sub" id="kpi-range" style="font-weight:700;color:var(--accent)"></span></h2>
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin:7px 0 8px">
         <button class="chip pchip" data-preset="thismonth">今月</button>
@@ -3829,6 +3804,28 @@ function renderDetail(){
       </div>
       <p class="note" id="frmem-msg" style="margin-top:6px"></p>
     </div>`:''}
+    <div class="panel">
+      <h2>KPIの推移 <span class="sub" id="trend-range" style="font-weight:700;color:var(--accent)"></span></h2>
+      <div style="display:flex;align-items:center;gap:6px;margin:6px 0 8px">
+        <button class="gchip" data-grain="day">日</button>
+        <button class="gchip" data-grain="week">週</button>
+        <button class="gchip" data-grain="month">月</button>
+        <button class="gchip" data-grain="all">全期間</button>
+        <button class="chip" id="tr-prev" style="margin-left:auto">◀</button>
+        <button class="chip" id="tr-next">▶</button>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px">
+        <button class="gchip tmet" data-tmet="ex">売上</button>
+        <button class="gchip tmet" data-tmet="v">来店数</button>
+        <button class="gchip tmet" data-tmet="pr">購入率</button>
+        <button class="gchip tmet" data-tmet="buy">仕入数</button>
+        <button class="gchip tmet" data-tmet="aov">客単価</button>
+        ${adShown(state.detail)?`<button class="gchip tmet" data-tmet="ad">広告費</button>`:""}
+      </div>
+      <div class="chart" id="trendchart"></div>
+      <p class="note" id="trend-note" style="margin:6px 0 0"></p>
+      <p class="note" style="margin:2px 0 0">最大3つまで表示（目盛り＝左:1つめ／右:2つめ）</p>
+    </div>
     <div id="mdl-root"></div>
     <div class="foot">差分の色＝上位3店平均との差（上:緑／下:赤）。来店客数・購入率はデジテール導入店のみ。${posMixed(state.detail)?'この店は<b>無人営業（SIPOS）＋有人営業（Airレジ）</b>の2レジ運用です。上段カードの売上内訳はレジ別、来店数は<b>無人（自動計測）＋有人（手入力）</b>の合算で、全店・直営合計の集計には含めていません。':''}${FRAN?'比較は各店の生データではなく集計値のみを表示します。':''}</div>`;
   wireCommon();
