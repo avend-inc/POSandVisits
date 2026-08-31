@@ -100,6 +100,7 @@
   <h1>物件レビュー</h1>
   <a class="hbtn" href="shoken.html" title="商圏調査（教師データ照合）">商圏調査</a>
   <a class="hbtn" href="cities.html" title="自動収集の対象市区町村を登録">対象エリア</a>
+  <button class="hbtn" id="addbtn" style="display:none" title="自分で見つけた物件を登録">＋追加</button>
   <button class="hbtn" id="setbtn" style="display:none" title="検索条件の設定">条件</button>
   <button class="hbtn" id="logoutbtn" style="display:none">ログアウト</button>
 
@@ -140,6 +141,27 @@
   </div>
   <div class="saved" id="setmsg" style="text-align:center"></div>
   <div class="mfoot"><button id="setcancel">キャンセル</button><button id="setsave">保存</button></div>
+</div></div>
+
+<!-- 自分で見つけた物件を手動登録する。id は manual- で始め、収集の同期で消えないようにする -->
+<div class="overlay" id="addov"><div class="modal">
+  <div class="mhead">物件を追加（自分で見つけた物件）</div>
+  <div class="msub">分かる項目だけでOK。物件名は必須です。登録後は一覧に並び、OK/NG/保留や商圏調査にも使えます。</div>
+  <div class="setgrid">
+    <label style="grid-column:1/-1">物件名 <span style="color:var(--ng)">*</span><input type="text" id="a_name" placeholder="例）○○ビル1階 / 国道○号沿い店舗"></label>
+    <label>市区町村<input type="text" id="a_city" placeholder="例）福島市"></label>
+    <label>住所<input type="text" id="a_address" placeholder="例）福島県福島市…"></label>
+    <label>面積（坪）<input type="number" id="a_area" inputmode="decimal" step="0.1"></label>
+    <label>家賃（月額・円）<input type="number" id="a_rent" inputmode="numeric" step="1000"></label>
+    <label>駐車場（台）<input type="number" id="a_parking" inputmode="numeric" step="1"></label>
+    <label>所在階<input type="number" id="a_floor" inputmode="numeric" step="1"></label>
+    <label>最寄り駅<input type="text" id="a_station" placeholder="例）福島駅 徒歩8分"></label>
+    <label style="grid-column:1/-1">物件ページURL<input type="url" id="a_url" inputmode="url" placeholder="https://…（募集ページ等）"></label>
+    <label style="grid-column:1/-1">Google Map URL<input type="url" id="a_map" inputmode="url" placeholder="https://maps.google.com/…（任意）"></label>
+    <label style="grid-column:1/-1">メモ<input type="text" id="a_note" placeholder="気づいたこと（幹線沿い・角地 など）"></label>
+  </div>
+  <div class="saved" id="addmsg" style="text-align:center"></div>
+  <div class="mfoot"><button id="addcancel">キャンセル</button><button id="addsave">登録する</button></div>
 </div></div>
 
 <script>
@@ -218,6 +240,8 @@ async function boot(){
     document.getElementById("logoutbtn").onclick=async()=>{try{await SB.auth.signOut();}catch(e){}location.reload();};
     document.getElementById("setbtn").style.display="";
     document.getElementById("setbtn").onclick=openSettings;
+    document.getElementById("addbtn").style.display="";
+    document.getElementById("addbtn").onclick=openAdd;
     await load();
   }catch(e){ screen('<div class="msg">読み込みに失敗しました：'+esc(e.message||e)+'</div>'); }
 }
@@ -488,6 +512,44 @@ async function saveSettings(){
 document.getElementById("setcancel").onclick=closeSettings;
 document.getElementById("setsave").onclick=saveSettings;
 SETOV.addEventListener("click",e=>{ if(e.target===SETOV)closeSettings(); });
+
+// ===== 物件を手動で追加（自分で見つけた物件）=====
+const ADDOV=document.getElementById("addov");
+const A_IDS=["name","city","address","area","rent","parking","floor","station","url","map","note"];
+function openAdd(){
+  for(const k of A_IDS){ document.getElementById("a_"+k).value=""; }
+  document.getElementById("addmsg").textContent="";
+  ADDOV.classList.add("on");
+}
+function closeAdd(){ ADDOV.classList.remove("on"); }
+const _num=id=>{ const s=document.getElementById(id).value.replace(/[, ]/g,"").trim(); return s===""?null:Number(s); };
+const _str=id=>{ const s=document.getElementById(id).value.trim(); return s===""?null:s; };
+async function saveAdd(){
+  const msg=document.getElementById("addmsg");
+  const name=_str("a_name");
+  if(!name){ msg.style.color="var(--ng)"; msg.textContent="物件名を入力してください。"; return; }
+  const area=_num("a_area");
+  const rec={
+    id:"manual-"+Date.now().toString(36)+Math.random().toString(36).slice(2,7),
+    city:_str("a_city"), name:name, address:_str("a_address"),
+    area_tsubo: area, area_sqm: (area!=null?Math.round(area*3.305785*100)/100:null),
+    rent_yen:_num("a_rent"), parking:_num("a_parking"), floor:_num("a_floor"),
+    station_name:_str("a_station"), usage:null, source:"手動登録",
+    detail_url:_str("a_url")||"", map_url:_str("a_map"), success_flag:false,
+    note:_str("a_note"),
+  };
+  msg.style.color="var(--ink2)"; msg.textContent="登録中…";
+  const {error}=await SB.from("bukken").insert(rec);
+  if(error){ msg.style.color="var(--ng)"; msg.textContent="登録に失敗："+error.message; return; }
+  msg.style.color="var(--ok)"; msg.textContent="✓ 登録しました。一覧に追加されます。";
+  FILTER = fits(rec) ? "todo" : "info";   // 追加した物件が見えるタブに切り替える
+  document.querySelectorAll(".chip").forEach(c=>c.classList.toggle("on",c.dataset.f===FILTER));
+  await load();                           // DBから読み直して正しい並びで表示（新規行を含む）
+  setTimeout(closeAdd,900);
+}
+document.getElementById("addcancel").onclick=closeAdd;
+document.getElementById("addsave").onclick=saveAdd;
+ADDOV.addEventListener("click",e=>{ if(e.target===ADDOV)closeAdd(); });
 
 // 画面を「グイーン」と強く引っ張った時だけ更新（pull-to-refresh）
 (function(){
