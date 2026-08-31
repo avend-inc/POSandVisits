@@ -33,6 +33,7 @@ on:
       - "web/municipalities.json"
       - "web/pl.html"
       - "web/keiei.html"
+      - "web/unei.html"
       - "web/trends.html"
       - "web/landing.js"
   workflow_dispatch:
@@ -74,10 +75,11 @@ jobs:
           cp src/web/municipalities.json pages/municipalities.json
           cp src/web/pl.html        pages/pl.html
           cp src/web/keiei.html     pages/keiei.html
+          cp src/web/unei.html      pages/unei.html
           cp src/web/trends.html    pages/trends.html
           cp src/web/landing.js     pages/landing.js
           cd pages
-          FILES="index.html bukken.html shoken.html mise.html cities.html municipalities.json pl.html keiei.html trends.html landing.js"
+          FILES="index.html bukken.html shoken.html mise.html cities.html municipalities.json pl.html keiei.html unei.html trends.html landing.js"
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           # 先に stage してから差分判定する。git diff（stage前）は「新規ファイル」を
@@ -88,6 +90,6 @@ jobs:
             echo "変更はありません（配信済みと同じ内容）。"
             exit 0
           fi
-          git commit -m "デプロイ: dashboard/bukken/shoken/mise/pl/keiei/trends/landing.js を配信 (${GITHUB_SHA::7})"
+          git commit -m "デプロイ: dashboard/bukken/shoken/mise/pl/keiei/unei/trends/landing.js を配信 (${GITHUB_SHA::7})"
           git push
           echo "✅ 配信しました。GitHub Pages の反映まで1分ほどかかります。"
