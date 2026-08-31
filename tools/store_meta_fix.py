@@ -26,6 +26,9 @@ DAYS_TO = (os.environ.get("DAYS_TO") or "2026-08-31").strip()
 # 統合（2つに割れた店を1つに寄せる）用
 CONSOLIDATE_KEEP = (os.environ.get("CONSOLIDATE_KEEP") or "").strip()
 CONSOLIDATE_DROP = (os.environ.get("CONSOLIDATE_DROP") or "").strip()
+# 二重計上の掃除（pos_name 食い違い）用
+DEDUP_STORE_ID = (os.environ.get("DEDUP_STORE_ID") or "").strip()
+KEEP_POS_NAME = (os.environ.get("KEEP_POS_NAME") or "cashier").strip()
 
 
 def run(sql, raise_on_error=True):
@@ -146,6 +149,103 @@ def main():
       where st.name ilike '%{like}%'
         and s.business_date between '{DAYS_FROM}' and '{DAYS_TO}'""")
     print("[税抜の点検(明細行ベース)]", json.dumps(chk, ensure_ascii=False))
+
+    # 診断: 指定営業日(締日)の売上が、実際は複数日の処理を束ねていないかを見る
+    diag_date = (os.environ.get("DIAG_DATE") or "").strip()
+    if diag_date:
+        print(f"\n=== 診断: {STORE_LIKE} business_date(締日)={diag_date} の内訳 ===")
+        print("[レジ別・伝票/税抜]", json.dumps(run(f"""
+          with tx as (
+            select distinct on (s.store_id,s.pos_name,s.tx_id)
+                   s.pos_name, s.tx_id, s.sales_ex_tax, s.ts
+            from public.sales s join public.stores st on st.id=s.store_id
+            where st.name ilike '%{like}%' and s.business_date='{diag_date}'
+            order by s.store_id,s.pos_name,s.tx_id,s.line_no)
+          select pos_name, count(*) tx, round(sum(sales_ex_tax))::bigint ex
+          from tx group by pos_name order by ex desc"""), ensure_ascii=False, default=str))
+        print("[処理日(ts)別の伝票数・税抜]", json.dumps(run(f"""
+          with tx as (
+            select distinct on (s.store_id,s.pos_name,s.tx_id)
+                   (s.ts at time zone 'Asia/Tokyo')::date as tsd, s.sales_ex_tax
+            from public.sales s join public.stores st on st.id=s.store_id
+            where st.name ilike '%{like}%' and s.business_date='{diag_date}'
+            order by s.store_id,s.pos_name,s.tx_id,s.line_no)
+          select tsd::text d, count(*) tx, round(sum(sales_ex_tax))::bigint ex
+          from tx group by tsd order by tsd"""), ensure_ascii=False, default=str))
+        print("[高額伝票 上位8]", json.dumps(run(f"""
+          with tx as (
+            select distinct on (s.store_id,s.pos_name,s.tx_id)
+                   s.tx_id, s.sales_ex_tax, s.sales_in_tax, s.ts::text ts
+            from public.sales s join public.stores st on st.id=s.store_id
+            where st.name ilike '%{like}%' and s.business_date='{diag_date}'
+            order by s.store_id,s.pos_name,s.tx_id,s.line_no)
+          select tx_id, round(sales_ex_tax)::bigint ex, round(sales_in_tax)::bigint zeikomi, ts
+          from tx order by sales_ex_tax desc limit 8"""), ensure_ascii=False, default=str))
+        return 0
+
+    # 診断: pos_name の食い違いによる二重計上を全店で洗い出す
+    if (os.environ.get("DIAG_DUP") or "").strip() == "1":
+        print("\n=== 診断: cashier接続の pos_name と 二重計上スキャン ===")
+        print("[store_pos(cashier)]", json.dumps(run(
+            "select id, store_id, coalesce(pos_name,'') pos_name, active "
+            "from public.store_pos where pos_type='cashier' order by id"),
+            ensure_ascii=False, default=str))
+        print(f"[{STORE_LIKE}: レジ名×締日 伝票数]", json.dumps(run(f"""
+          with tx as (select distinct on (s.store_id,s.pos_name,s.tx_id)
+                 s.pos_name, s.business_date, s.sales_ex_tax
+               from public.sales s join public.stores st on st.id=s.store_id
+               where st.name ilike '%{like}%' and s.business_date>='2026-08-01'
+               order by s.store_id,s.pos_name,s.tx_id,s.line_no)
+          select business_date::text d, pos_name, count(*) tx,
+                 round(sum(sales_ex_tax))::bigint ex
+          from tx group by business_date,pos_name order by d,pos_name"""),
+            ensure_ascii=False, default=str))
+        print("[全店 二重計上スキャン(8月・同一レシートが複数pos_name)]", json.dumps(run("""
+          select st.name, count(*) dup_receipts,
+                 string_agg(distinct d.np::text, ',') pos_name_counts
+          from (
+            select s.store_id, split_part(s.tx_id,':',2) rcpt,
+                   count(distinct s.pos_name) np
+            from public.sales s
+            where s.business_date >= '2026-08-01'
+            group by s.store_id, split_part(s.tx_id,':',2)
+            having count(distinct s.pos_name) > 1
+          ) d join public.stores st on st.id=d.store_id
+          group by st.name order by dup_receipts desc"""),
+            ensure_ascii=False, default=str))
+        return 0
+
+    # 二重計上の掃除: 同一レシートが keep_pos_name と他レジ名で二重に入っている店で、
+    # 「他レジ名かつ keep 側にも同じレシートがある行」だけを消す（keep単独の行は残す）。
+    if DEDUP_STORE_ID:
+        sid = int(DEDUP_STORE_ID); keep = q(KEEP_POS_NAME)
+        print(f"\n=== 二重計上の掃除: store_id={sid} / 残す pos_name='{KEEP_POS_NAME}' ===")
+        print("[前: レジ名別の行数]", json.dumps(run(
+            f"select pos_name, count(*) rows from public.sales where store_id={sid} "
+            f"group by pos_name order by pos_name"), ensure_ascii=False, default=str))
+        cond = (f"store_id={sid} and pos_name<>'{keep}' and split_part(tx_id,':',2) in "
+                f"(select split_part(tx_id,':',2) from public.sales where store_id={sid} and pos_name='{keep}')")
+        cnt = run(f"select count(*) c from public.sales where {cond}")
+        print("[削除対象の重複行数]", json.dumps(cnt, ensure_ascii=False, default=str))
+        if not DO_UPDATE:
+            print("（確認のみ。実削除するには DO_UPDATE=1 を指定）")
+            return 0
+        run(f"delete from public.sales where {cond}")
+        print("[後: レジ名別の行数]", json.dumps(run(
+            f"select pos_name, count(*) rows from public.sales where store_id={sid} "
+            f"group by pos_name order by pos_name"), ensure_ascii=False, default=str))
+        # 再発防止: cashier接続の表示名(pos_name)が cashier/空 以外だと、dailyがその名前で
+        # 書き込み backfill('cashier')と食い違って二重化する。custom名を空にして 'cashier' に寄せる。
+        fixconn = run("update public.store_pos set pos_name='' "
+                      "where pos_type='cashier' and coalesce(pos_name,'') not in ('','cashier') "
+                      "returning id, store_id, pos_name")
+        print("[接続の表示名クリア]", json.dumps(fixconn, ensure_ascii=False, default=str))
+        # 統合で消えた店を指す接続の store_id を掃除（宙ぶらりん参照）。
+        fixref = run("update public.store_pos set store_id=null "
+                     "where store_id is not null and store_id not in (select id from public.stores) "
+                     "returning id, store_id")
+        print("[宙ぶらりん store_id をnull化]", json.dumps(fixref, ensure_ascii=False, default=str))
+        return 0
 
     if not DO_UPDATE:
         print("（確認のみ。更新するには DO_UPDATE=1 を指定）")

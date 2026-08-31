@@ -223,7 +223,13 @@ def run_live_pos(sb, business_date: str, run_id: str,
                        store_id=c.get("store_id"), status="no_data", message=msg, started_at=started)
                 results.append(Result(label, "no_data", msg))
                 continue
-            common = _to_common(csv_text, c["pos_type"], c["pos_name"] or c["pos_type"])
+            # cashier は「レジ名(pos_name)」を必ず "cashier" に固定する。
+            #  重複排除は (store_id, pos_name, tx_id) で行うため、backfill(parse_cashier_csv
+            #  ＝"cashier")や直営Secret経路と pos_name を揃えないと、同じ伝票が接続の表示名で
+            #  別レジ扱いになり二重計上される（所沢の二重計上の原因）。cashierは店をCSVの
+            #  店舗名で振り分けるので、接続の表示名は保存キーに使わない。
+            _pos_name = "cashier" if c["pos_type"] == "cashier" else (c["pos_name"] or c["pos_type"])
+            common = _to_common(csv_text, c["pos_type"], _pos_name)
             common = common[common["date"].notna()].copy()
             if len(common) == 0:
                 msg = f"{business_date} の {label} は明細0件（休業日等ならこれで正常）。"

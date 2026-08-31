@@ -50,6 +50,23 @@ on:
         description: "（storefix）統合して消す store id（例: 55）"
         required: false
         default: ""
+      diag_date:
+        description: "（storefix）締日を指定してその日の内訳を診断（例: 2026-08-29）"
+        required: false
+        default: ""
+      diag_dup:
+        description: "（storefix）pos_name食い違いによる二重計上を全店スキャン"
+        required: false
+        default: false
+        type: boolean
+      dedup_store_id:
+        description: "（storefix）この店の重複を掃除（残すpos_nameを keep_pos_name に）"
+        required: false
+        default: ""
+      keep_pos_name:
+        description: "（storefix）dedup時に残すpos_name（既定 cashier）"
+        required: false
+        default: "cashier"
 
 jobs:
   audit:
@@ -79,4 +96,8 @@ jobs:
           DO_UPDATE: ${{ inputs.do_update && '1' || '' }}
           CONSOLIDATE_KEEP: ${{ inputs.consolidate_keep }}
           CONSOLIDATE_DROP: ${{ inputs.consolidate_drop }}
+          DIAG_DATE: ${{ inputs.diag_date }}
+          DIAG_DUP: ${{ inputs.diag_dup && '1' || '' }}
+          DEDUP_STORE_ID: ${{ inputs.dedup_store_id }}
+          KEEP_POS_NAME: ${{ inputs.keep_pos_name }}
         run: python -m tools.store_meta_fix
