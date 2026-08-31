@@ -117,10 +117,12 @@ def prune_placeholders(url: str, key: str, crit: dict | None = None) -> int:
     if crit.get("parking_min"):
         # 駐車場が判明して下限未満の未判定行。
         conds.append(f"verdict=is.null&parking=lt.{crit['parking_min']}")
+    # 手動登録(id が manual- で始まる)はどの掃除条件からも除外する。
+    guard = "&id=not.ilike." + quote("manual-*")
     deleted = 0
     for q in conds:
         try:
-            req = urllib.request.Request(base + q, method="DELETE", headers={
+            req = urllib.request.Request(base + q + guard, method="DELETE", headers={
                 "apikey": key, "Authorization": f"Bearer {key}",
                 "Prefer": "return=representation",
             })
@@ -148,7 +150,8 @@ def prune_not_in_feed(url: str, key: str, feed_ids: set[str]) -> int:
     except Exception as e:
         print(f"  prune_not_in_feed警告(取得): {e}")
         return 0
-    stale = [i for i in db_ids if i not in feed_ids]
+    # 手動登録(id が manual- で始まる)はフィードに存在しないので、ここで消さない。
+    stale = [i for i in db_ids if i not in feed_ids and not str(i).startswith("manual-")]
     deleted = 0
     for i in range(0, len(stale), 80):        # URL長対策でチャンク削除
         chunk = stale[i:i + 80]
