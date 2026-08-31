@@ -66,6 +66,15 @@
   .item .val{text-align:right;font-size:16px;font-weight:800;white-space:nowrap;}
   .item .val.none{color:var(--muted);font-size:14px;font-weight:600;}
   .item .val .u{font-size:11.5px;font-weight:700;color:var(--muted);margin-left:2px;}
+  /* 項目の下に足す明細（場所別の内訳・控除の内訳・担当者など） */
+  .item .extra{margin-top:7px;}
+  .item .extra .kv{display:flex;gap:8px;align-items:baseline;font-size:12px;color:var(--ink2);
+    padding:3px 0;line-height:1.7;}
+  .item .extra .kv>span:first-child{flex:1;min-width:0;}
+  .item .extra .kv b{white-space:nowrap;}
+  .ta{width:100%;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--ink);
+    padding:8px 10px;font-size:13px;font-family:inherit;line-height:1.7;resize:vertical;}
+  .ta:focus{outline:none;border-color:var(--accent);}
   .grouphd{font-size:12px;font-weight:800;color:var(--muted);margin:16px 0 2px;letter-spacing:.04em;}
   .grouphd:first-child{margin-top:4px;}
   .tag{display:inline-block;font-size:10.5px;font-weight:800;border-radius:5px;padding:1px 6px;color:#fff;}
@@ -298,12 +307,20 @@ function renderStore(){
   document.getElementById("backstore").onclick=clearStore;
   document.querySelectorAll(".subtabs button").forEach(b=>{b.onclick=()=>setTab(b.dataset.tab);});
   bindStocktake();
+  if(TAB==="stocktake")loadDetail(currentSession());
 }
-// 棚卸しの選択（同じ店の過去ぶんを見る）。中身だけ差し替えるので、毎回つなぎ直す。
+// 棚卸しタブの中の操作。中身だけ差し替える描き方なので、描くたびにつなぎ直す。
 function bindStocktake(){
   const sel=document.getElementById("sesspick");
-  if(sel)sel.onchange=()=>{SESSION_ID=sel.value||null;
-    const b=document.getElementById("body"); if(b)b.innerHTML=stocktakeHtml(); bindStocktake();};
+  // 描き直しは loadDetail に任せる（ここで先に描くと、前の棚卸しの⑤〜⑯が一瞬だけ残る）
+  if(sel)sel.onchange=()=>{SESSION_ID=sel.value||null;loadDetail(currentSession());};
+  const btn=document.getElementById("savenote");
+  if(btn)btn.onclick=saveGapNote;
+}
+// いま見ている棚卸し（未選択なら、その店のいちばん新しいもの）
+function currentSession(){
+  const list=sessionsOf(STORE);
+  return (SESSION_ID?list.find(r=>r.session_id===SESSION_ID):list[0])||null;
 }
 
 // ---- データ ----------------------------------------------------------------
@@ -338,36 +355,172 @@ function sessionsOf(posId){ const d=SCAN.destOfPos[posId]; if(!d)return [];
 function latestOf(posId){ return sessionsOf(posId)[0]||null; }
 
 // ---- 棚卸しタブ ------------------------------------------------------------
-// 項目（枠）をここに1本で持つ。値の取得元は項目ごとにこれから決める。
-//   src   … 画面に出す取得元の説明
-//   live  … すでに繋いである項目（true）／まだ決めていない項目（false）
-//   get   … live のときだけ使う。棚卸し1件（t）から値を作る
-const STOCKTAKE_ITEMS=[
-  {g:"実地で数えた数"},
-  {n:"① 棚卸日",            src:"棚卸スキャン",             live:true,  get:t=>t?t.taken_on:null},
-  {n:"② 状態",              src:"棚卸スキャン",             live:true,  get:t=>t?(t.status==="final"
-      ?'<span class="tag t-final">確定</span>':'<span class="tag t-open">作業中</span>'):null, raw:true},
-  {n:"③ 実地在庫（服）",     src:"棚卸スキャン",             live:true,  get:t=>t?NUM(t.garment_qty)+'<span class="u">着</span>':null, raw:true},
-  {n:"④ 実地在庫（小物）",   src:"棚卸スキャン",             live:true,  get:t=>t?NUM(t.accessory_qty)+'<span class="u">点</span>':null, raw:true},
-  {n:"⑤ 場所別の内訳（店内／BY／その他倉庫）", src:"取得元：未定", live:false},
-  {n:"⑥ 数えた人・確認した人", src:"取得元：未定",            live:false},
+// 項目①〜⑯を1枚に並べる。値の出どころは項目ごとに違うので、画面にも必ず書く。
+//
+// 【理論在庫（⑦〜⑫）は在庫アプリと同じ定義にそろえてある】
+//   在庫アプリ lib/monthlyBridge.ts の fetchTheoreticalParts / theoreticalQty と
+//   同じ表・同じ月の切り方で出している。ここで独自に計算すると、月次棚卸の画面と
+//   数字が食い違って「どちらが正しいのか」が分からなくなるため。
+//     理論在庫 = 前月棚 + 当月入荷 − 販売数 − 控除
+//   月は締め日基準（stocktakeMonthOf）。棚卸日そのままではない（8/28 に数えた分は7月分）。
+//
+// 【小物（点）は理論在庫に入れない】
+//   月次棚卸に小物の欄が無く、⑦⑧⑩⑪がどれも着数だけの数字だから。
+//   実地の小物（④）は数えた事実として出すが、⑫以降の計算には混ぜない。
+const NOTE_TAG="棚卸スキャン";                       // 月次棚卸のメモで、棚卸スキャンが管理する行の目印
+const LOCS=["店内在庫","バックヤード在庫","その他倉庫"];
 
-  {g:"理論在庫の材料"},
-  {n:"⑦ 前月末の在庫（服）", src:"取得元：未定",              live:false},
-  {n:"⑧ 当月の入荷（服）",   src:"取得元：未定",              live:false},
-  {n:"⑨ 小計（⑦＋⑧）",      src:"計算（⑦と⑧が決まったら）", live:false},
-  {n:"⑩ 当月の販売数（服）", src:"取得元：未定",              live:false},
-  {n:"⑪ 控除（イレギュラー・返送など）", src:"取得元：未定",   live:false},
-  {n:"⑫ 理論在庫（⑨−⑩−⑪）", src:"計算（⑨〜⑪が決まったら）", live:false},
+let DETAIL={key:null,loading:false,warn:[],data:null};
+let NOTE_MSG="";
 
-  {g:"差分"},
-  {n:"⑬ 差分（③−⑫）",       src:"計算（③と⑫が決まったら）", live:false},
-  {n:"⑭ 差分率",             src:"計算（⑬÷⑫）",             live:false},
-  {n:"⑮ 差分の理由",         src:"取得元：未定",              live:false},
+// 「その日に数えた棚卸しは何月分か」。在庫アプリ lib/date.ts の stocktakeMonthOf と同じ規則。
+function stocktakeMonthOf(d){
+  const day=+d.slice(8,10); if(day>=30)return d.slice(0,7);
+  const [y,m]=d.slice(0,7).split("-").map(Number);
+  return m===1?`${y-1}-12`:`${y}-${String(m-1).padStart(2,"0")}`;
+}
+function prevMonth(m){const [y,mm]=m.split("-").map(Number);
+  return mm===1?`${y-1}-12`:`${y}-${String(mm-1).padStart(2,"0")}`;}
+// 月の範囲。月末は31日固定でよい（上限として使うだけ。在庫アプリの monthRange と同じ）
+function monthRange(m){return [`${m}-01`,`${m}-31`];}
 
-  {g:"あと処理"},
-  {n:"⑯ 月次棚卸へ送ったか", src:"取得元：未定",              live:false},
-];
+// その棚卸し1件について、①〜⑯に要るものを集める。
+// 失敗した読み取りは握りつぶさず、何が読めなかったかを画面に出す（warn）。
+async function loadDetail(t){
+  const key=t?t.session_id:null;
+  if(DETAIL.key===key&&!DETAIL.loading)return;
+  DETAIL={key,loading:true,warn:[],data:null}; NOTE_MSG="";
+  paintBody();
+  if(!t){DETAIL.loading=false;paintBody();return;}
+  const warn=[], d={};
+  const dest=t.destination_id;
+  const month=stocktakeMonthOf(t.taken_on), prevM=prevMonth(month), unit="store:"+dest;
+  const [from,to]=monthRange(month);
+  d.month=month;
+
+  // --- ⑤⑥ 棚卸スキャンの中身（場所別の内訳・数えた人） ---
+  try{
+    const [sess,units,tags]=await Promise.all([
+      SB.from("scan_sessions").select("id,created_by,finalized_by,finalized_at").eq("id",t.session_id).maybeSingle(),
+      SB.from("scan_units").select("id,location,rack,kind,status,first_by,checked_by").eq("session_id",t.session_id),
+      SB.from("scan_tag_codes").select("jan,is_accessory"),
+    ]);
+    if(units.error)throw new Error(units.error.message);
+    d.sess=sess.data||null;
+    const us=(units.data||[]);
+    const acc={}; for(const r of (tags.data||[]))acc[r.jan]=!!r.is_accessory;
+    // 読み取りは1000行を超える。ページングを外さないこと（在庫アプリの fetchCounts と同じ理由）
+    const ids=us.filter(u=>u.status==="checked").map(u=>u.id);
+    const counts=[];
+    for(let i=0;i<ids.length;i+=60){
+      const chunk=ids.slice(i,i+60);
+      let off=0;
+      for(;;){
+        const {data,error}=await SB.from("scan_counts").select("unit_id,qty,jan,tag_category")
+          .in("unit_id",chunk).range(off,off+999);
+        if(error)throw new Error(error.message);
+        counts.push(...(data||[]));
+        if(!data||data.length<1000)break;
+        off+=1000;
+      }
+    }
+    const locOf={}; for(const u of us)locOf[u.id]=u.location;
+    const by={}; for(const L of LOCS)by[L]={g:0,a:0,units:0};
+    for(const c of counts){
+      const L=locOf[c.unit_id]; if(!by[L])continue;
+      // 小物かどうかの判定は scan_session_totals ビューと同じ（値札コード → 無ければ分類名）
+      const isAcc=(c.jan!=null&&acc[c.jan]!=null)?acc[c.jan]
+        :/小物|雑貨/.test(String(c.tag_category||""));
+      by[L][isAcc?"a":"g"]+=(c.qty||0);
+    }
+    for(const u of us)if(u.status==="checked"&&by[u.location])by[u.location].units++;
+    d.byLoc=by;
+    d.counted=[...new Set(us.map(u=>u.first_by).filter(Boolean))];
+    d.checkers=[...new Set(us.filter(u=>u.status==="checked").map(u=>u.checked_by).filter(Boolean))];
+  }catch(e){ warn.push("場所別の内訳・担当者（"+String(e&&e.message||e)+"）"); }
+
+  // --- ⑦⑧⑪ 理論在庫の材料（在庫アプリ lib/monthlyBridge.ts と同じ表・同じ順序） ---
+  try{
+    const [closings,vals,snaps,deds,rep,mcu]=await Promise.all([
+      SB.from("monthly_closings").select("month,status").in("month",[month,prevM]),
+      SB.from("monthly_closing_values").select("key,num").eq("month",month).eq("unit",unit),
+      SB.from("monthly_closing_values").select("key,num").eq("month",prevM).eq("unit",unit).like("key","snap_%"),
+      SB.from("store_stocktake_deductions").select("label,qty").eq("month",month).eq("destination_id",dest).order("created_at"),
+      SB.from("store_stocktake_reports").select("qty,sold_qty,reported_by_name,updated_at").eq("month",month).eq("destination_id",dest).maybeSingle(),
+      SB.from("monthly_closing_units").select("status,note,confirmed_by_name,confirmed_at").eq("month",month).eq("unit",unit).maybeSingle(),
+    ]);
+    for(const r of [closings,vals,snaps,deds]) if(r.error)throw new Error(r.error.message);
+    const numOf=(rows,k)=>{const r=(rows||[]).find(v=>v.key===k);return r&&r.num!=null?r.num:null;};
+    // 前月が確定済みならスナップショット、まだなら当月に手入力した初期値
+    d.prevFinal=((closings.data||[]).some(c=>c.month===prevM&&c.status==="finalized"));
+    d.prevQty=d.prevFinal?(numOf(snaps.data,"snap_qty")||0):(numOf(vals.data,"prev_qty")||0);
+    d.ovrSent=numOf(vals.data,"ovr_sent_qty");
+    d.deds=(deds.data||[]);
+    d.dedQty=d.deds.reduce((a,x)=>a+(x.qty||0),0);
+    d.report=rep.data||null;
+    d.mcu=mcu.data||null;
+    d.savedSold=d.report&&d.report.sold_qty!=null?d.report.sold_qty:null;
+  }catch(e){ warn.push("月次棚卸の値（"+String(e&&e.message||e)+"）"); }
+
+  // --- ⑧ 当月の入荷（発送記録から。小物と0円在庫は数えない＝月次棚卸と同じ） ---
+  try{
+    const [ships,cats]=await Promise.all([
+      SB.from("shipments").select("id").eq("destination_id",dest).gte("shipment_date",from).lte("shipment_date",to),
+      SB.from("categories").select("id,type"),
+    ]);
+    if(ships.error)throw new Error(ships.error.message);
+    const zero=new Set((cats.data||[]).filter(c=>c.type==="special_no_rank").map(c=>c.id));
+    const ids=(ships.data||[]).map(x=>x.id);
+    let q=0;
+    for(let i=0;i<ids.length;i+=100){
+      const {data,error}=await SB.from("shipment_items").select("category_id,rank_id,quantity").in("shipment_id",ids.slice(i,i+100));
+      if(error)throw new Error(error.message);
+      for(const it of (data||[])){
+        if(it.rank_id===null)continue;          // 小物（点）は着数に混ぜない
+        if(zero.has(it.category_id))continue;   // 0円在庫は別勘定
+        q+=it.quantity||0;
+      }
+    }
+    d.sentAuto=q;
+  }catch(e){ warn.push("当月の入荷（"+String(e&&e.message||e)+"）"); }
+
+  // --- ⑩ 販売数の参考値（POS）。月次棚卸に入っていないときだけ使う ---
+  // dash_daily の販売数は「実際に売れた商品の点数」で、レジ袋・クーポン・小物・
+  // セット割の器を除いてある＝服の着数に近い。あくまで参考値として出す。
+  try{
+    const {data,error}=await SB.from("dash_daily").select("items").eq("store_id",STORE).gte("date",from).lte("date",to);
+    if(error)throw new Error(error.message);
+    d.posSold=(data||[]).reduce((a,r)=>a+(r.items||0),0);
+  }catch(e){ warn.push("POSの販売数（"+String(e&&e.message||e)+"）"); }
+
+  DETAIL={key,loading:false,warn,data:d};
+  paintBody();
+}
+function paintBody(){ if(TAB!=="stocktake")return;
+  const b=document.getElementById("body"); if(!b)return;
+  b.innerHTML=stocktakeHtml(); bindStocktake(); }
+
+// 月次棚卸のメモから、棚卸スキャンが書いた行を外して「店舗が書いた理由」だけにする
+// （在庫アプリの mergeNote と同じ分け方）
+function splitNote(note){
+  const lines=String(note||"").split("\n");
+  return {
+    kept:lines.filter(l=>!l.trimStart().startsWith(NOTE_TAG)).join("\n").trim(),
+    tagged:lines.filter(l=>l.trimStart().startsWith(NOTE_TAG)),
+  };
+}
+const canEdit=()=>ME.role==="admin"||ME.role==="editor";
+
+// 項目の1行。extra があれば行の下に全幅で足す（内訳・控除の明細など）
+function itemRow(n,src,val,unitLabel,extra,tone){
+  const v=(val==null||val==="")?'<span class="val none">—</span>'
+    :`<span class="val">${val}${unitLabel?`<span class="u">${unitLabel}</span>`:""}</span>`;
+  return `<div class="item">
+      <span class="lbl"><span class="nm">${esc(n)}</span>
+        <span class="src ${tone||"src-live"}">${src}</span>
+        ${extra?`<div class="extra">${extra}</div>`:""}</span>
+      ${v}</div>`;
+}
 
 function stocktakeHtml(){
   const list=sessionsOf(STORE);
@@ -375,6 +528,9 @@ function stocktakeHtml(){
   const s=storeOf(STORE);
   const linked=!!SCAN.destOfPos[STORE];
   const scanHref=linked?`${SCAN_URL}?pos=${encodeURIComponent(STORE)}`:SCAN_URL;
+  const d=DETAIL.data||{};
+  const loading=DETAIL.loading;
+  const dash='<span class="sub">—</span>';
 
   const picker=list.length>1?`<div style="margin:0 0 10px">
       <span class="sub">見る棚卸し：</span>
@@ -383,16 +539,88 @@ function stocktakeHtml(){
         `${esc(r.taken_on)}${r.status==="final"?"（確定）":"（作業中）"}</option>`).join("")}</select>
     </div>`:"";
 
-  const rows=STOCKTAKE_ITEMS.map(it=>{
-    if(it.g)return `<div class="grouphd">${esc(it.g)}</div>`;
-    let v=null; if(it.live&&it.get)v=it.get(cur);
-    const val=(v==null||v==="")?'<span class="val none">—</span>'
-      :`<span class="val">${it.raw?v:esc(v)}</span>`;
-    return `<div class="item">
-      <span class="lbl"><span class="nm">${esc(it.n)}</span>
-        <span class="src ${it.live?"src-live":"src-todo"}">${esc(it.src)}</span></span>
-      ${val}</div>`;
-  }).join("");
+  // ---- 実地で数えた数 ----
+  const rows=[];
+  rows.push('<div class="grouphd">実地で数えた数</div>');
+  rows.push(itemRow("① 棚卸日","棚卸スキャン",cur?esc(cur.taken_on):null));
+  rows.push(itemRow("② 状態","棚卸スキャン",cur?(cur.status==="final"
+    ?'<span class="tag t-final">確定</span>':'<span class="tag t-open">作業中</span>'):null));
+  rows.push(itemRow("③ 実地在庫（服）","棚卸スキャン",cur?NUM(cur.garment_qty):null,"着"));
+  rows.push(itemRow("④ 実地在庫（小物）","棚卸スキャン",cur?NUM(cur.accessory_qty):null,"点"));
+
+  const by=d.byLoc;
+  const locRows=by?LOCS.filter(L=>by[L].units||by[L].g||by[L].a).map(L=>
+    `<div class="kv"><span>${esc(L)}</span><b>${NUM(by[L].g)}着</b>`+
+    (by[L].a?`<span class="sub">・${NUM(by[L].a)}点</span>`:"")+`</div>`).join(""):"";
+  // 値は「数え終わったグループ（棚・袋）の数」。内訳は大分類ごとの合計を下に出す
+  const doneUnits=by?LOCS.reduce((a,L)=>a+by[L].units,0):null;
+  rows.push(itemRow("⑤ 場所別の内訳（店内／BY／その他倉庫）","棚卸スキャン（読み取り行を場所ごとに合計）",
+    (by&&doneUnits)?NUM(doneUnits):null,(by&&doneUnits)?"グループ":"",locRows));
+
+  const people=[];
+  if((d.counted||[]).length)people.push(`<div class="kv"><span>数えた人</span><b>${esc(d.counted.join("、"))}</b></div>`);
+  if((d.checkers||[]).length)people.push(`<div class="kv"><span>確認した人</span><b>${esc(d.checkers.join("、"))}</b></div>`);
+  if(d.sess&&d.sess.finalized_by)people.push(`<div class="kv"><span>現場確認の完了</span><b>${esc(d.sess.finalized_by)}</b></div>`);
+  rows.push(itemRow("⑥ 数えた人・確認した人","棚卸スキャン（読み取り・ダブルチェックの記録）",
+    people.length?NUM(new Set([...(d.counted||[]),...(d.checkers||[])]).size):null,
+    people.length?"人":"",people.join("")));
+
+  // ---- 理論在庫の材料（月次棚卸と同じ定義） ----
+  const has=k=>d[k]!=null;
+  const sub=(has("prevQty")&&has("sentAuto"))?d.prevQty+(d.ovrSent!=null?d.ovrSent:d.sentAuto):null;
+  const sent=d.ovrSent!=null?d.ovrSent:(has("sentAuto")?d.sentAuto:null);
+  const sold=d.savedSold!=null?d.savedSold:(has("posSold")?d.posSold:null);
+  const soldIsPos=d.savedSold==null&&has("posSold");
+  const theo=(sub!=null&&sold!=null&&has("dedQty"))?sub-sold-d.dedQty:null;
+
+  rows.push(`<div class="grouphd">理論在庫の材料${d.month?`（${esc(d.month)}分・締め日基準）`:""}</div>`);
+  rows.push(itemRow("⑦ 前月末の在庫（服）",
+    d.prevFinal?"月次棚卸（前月の確定スナップショット）":"月次棚卸（当月に入れた前月末の初期値）",
+    has("prevQty")?NUM(d.prevQty):null,"着"));
+  rows.push(itemRow("⑧ 当月の入荷（服）",
+    d.ovrSent!=null?"月次棚卸（発送記録を手で上書きした値）":"在庫アプリの発送記録（小物・0円在庫は除く）",
+    sent!=null?NUM(sent):null,"着"));
+  rows.push(itemRow("⑨ 小計（⑦＋⑧）","計算",sub!=null?NUM(sub):null,"着"));
+  rows.push(itemRow("⑩ 当月の販売数（服）",
+    soldIsPos?"POSの販売数（月次棚卸に未入力のため参考値）":"月次棚卸（店舗が報告した販売数）",
+    sold!=null?NUM(sold):null,"着",
+    soldIsPos?'<div class="kv"><span class="sub">レジ袋・クーポン・小物・セット割の器を除いた点数です。月次棚卸に数が入ればそちらに切り替わります。</span></div>':"",
+    soldIsPos?"src-todo":"src-live"));
+  rows.push(itemRow("⑪ 控除（イレギュラー）","月次棚卸（店舗棚卸の控除）",
+    has("dedQty")?NUM(d.dedQty):null,"着",
+    (d.deds||[]).map(x=>`<div class="kv"><span>${esc(x.label||"（名称なし）")}</span><b>${NUM(x.qty||0)}着</b></div>`).join("")));
+  rows.push(itemRow("⑫ 理論在庫（⑨−⑩−⑪）","計算（月次棚卸と同じ式）",theo!=null?NUM(theo):null,"着"));
+
+  // ---- 差分 ----
+  const gap=(cur&&theo!=null)?cur.garment_qty-theo:null;
+  rows.push('<div class="grouphd">差分</div>');
+  rows.push(itemRow("⑬ 差分（③−⑫）","計算",
+    gap!=null?`<span style="color:${gap===0?"var(--good)":"var(--bad)"}">${gap>0?"+":""}${NUM(gap)}</span>`:null,"着"));
+  rows.push(itemRow("⑭ 差分率（⑬÷⑫）","計算",
+    (gap!=null&&theo)?((gap/theo*100).toFixed(1)):null,(gap!=null&&theo)?"%":""));
+
+  const sp=splitNote(d.mcu?d.mcu.note:null);
+  const noteBox=canEdit()
+    ? `<textarea id="gapnote" class="ta" rows="3" placeholder="差分の理由（月次棚卸のメモに残ります）">${esc(sp.kept)}</textarea>
+       <div class="btnrow"><button class="ghost" id="savenote">保存</button>
+         <span class="sub" id="notemsg">${esc(NOTE_MSG)}</span></div>`
+    : (sp.kept?`<div class="kv"><span>${esc(sp.kept).replace(/\n/g,"<br>")}</span></div>`
+             :'<div class="kv"><span class="sub">まだ書かれていません（編集は編集・管理の権限が要ります）</span></div>');
+  // 値の欄は空にしておく（中身は下のメモそのものなので、右端に「あり」と出しても情報が増えない）
+  rows.push(itemRow("⑮ 差分の理由","月次棚卸のメモ（手入力）",null,"",noteBox,
+    sp.kept?"src-live":"src-todo"));
+
+  // ---- あと処理 ----
+  const sent2=d.report!=null;
+  const conf=d.mcu&&d.mcu.status==="confirmed";
+  rows.push('<div class="grouphd">あと処理</div>');
+  rows.push(itemRow("⑯ 月次棚卸へ送ったか","月次棚卸（店舗棚卸の報告・確定の状態）",
+    d.report===undefined?null:(sent2
+      ? (conf?'<span class="tag t-final">確定済み</span>':'<span class="tag t-open">報告済み</span>')
+      : '<span class="tag t-none">未送信</span>'),"",
+    sent2?`<div class="kv"><span>報告の着数</span><b>${NUM(d.report.qty||0)}着</b></div>`+
+      (d.report.reported_by_name?`<div class="kv"><span>報告者</span><b>${esc(d.report.reported_by_name)}</b></div>`:""):
+      '<div class="kv"><span class="sub">送るのは在庫アプリの棚卸スキャン › レポートタブから（設定権限が要ります）。</span></div>'));
 
   return `
     <div class="panel">
@@ -402,9 +630,12 @@ function stocktakeHtml(){
       ${(!SCAN.error&&SCAN.loaded&&!linked)?`<div class="warnbox">この店舗は発送先（在庫アプリの店舗）と対応付いていないため、棚卸しの記録を引けません。<br>在庫アプリの「店舗の対応付け」（/store-links）で結んでください。</div>`:""}
       ${(!SCAN.error&&SCAN.loaded&&linked&&!list.length)?'<div class="warnbox">この店舗の棚卸しはまだ記録がありません。</div>':""}
       ${picker}
-      ${rows}
-      <p class="note">数はダブルチェックまで済んだぶんだけです（読み取ったままの場所は入りません）。<br>
-        服は「着」、小物は「点」で数え方が違うので合算していません。</p>
+      ${loading?'<p class="lead">中身を読み込み中…</p>':""}
+      ${(DETAIL.warn||[]).length?`<div class="warnbox">読み込めなかったものがあります：${esc(DETAIL.warn.join(" / "))}<br>その項目は「—」のままにしてあります（推定した数字は出しません）。</div>`:""}
+      ${rows.join("")}
+      <p class="note">実地の数（③④⑤）はダブルチェックまで済んだぶんだけです（読み取ったままの場所は入りません）。<br>
+        服は「着」、小物は「点」で数え方が違うので合算していません。<b>理論在庫（⑦〜⑭）は服の着数だけ</b>です（月次棚卸に小物の欄が無いため）。<br>
+        ⑦〜⑫は在庫アプリの月次棚卸と同じ表・同じ式から出しているので、あちらの突き合わせ表と数字が一致します。</p>
     </div>
     <div class="panel">
       <h2>数える</h2>
@@ -415,13 +646,33 @@ function stocktakeHtml(){
         <a class="ghost" href="${A4_URL}" target="_blank" rel="noopener">🖨 店舗貼り出し用（A4・1枚）</a>
       </div>
       <p class="note">数える人（アルバイト・就労支援施設の方など）は、Googleでログインして棚卸スキャンを開くと自動で登録されます。事前のユーザー追加は不要です。</p>
-    </div>
-    <div class="panel">
-      <h2>取得元について</h2>
-      <div class="soon"><b>いまは項目（枠）を決めている段階です。</b>
-        <span class="src-live">緑</span>の項目はすでに棚卸スキャンから引いています。
-        <span class="src-todo">「取得元：未定」</span>の項目は、どこから引くか（または手入力にするか）を決めてから繋ぎます。</div>
     </div>`;
+}
+
+// ⑮ 差分の理由を月次棚卸のメモに保存する。
+// 棚卸スキャンが書いた行（「棚卸スキャン(日付): 実地 …着」）は消さずに残す。
+async function saveGapNote(){
+  const ta=document.getElementById("gapnote"); if(!ta)return;
+  const msg=document.getElementById("notemsg");
+  const d=DETAIL.data||{}; const list=sessionsOf(STORE);
+  const cur=SESSION_ID?list.find(r=>r.session_id===SESSION_ID):list[0];
+  if(!cur||!d.month){NOTE_MSG="保存先が分かりません";if(msg)msg.textContent=NOTE_MSG;return;}
+  const sp=splitNote(d.mcu?d.mcu.note:null);
+  const kept=ta.value.trim();
+  const note=[kept,...sp.tagged].filter(Boolean).join("\n")||null;
+  if(msg)msg.textContent="保存中…";
+  try{
+    // 書き込みは必ず .select() で返り行を受ける。RLSで弾かれた更新は
+    // エラーではなく「0件の成功」で返るため、これが無いと黙って保存されない。
+    const {data,error}=await SB.from("monthly_closing_units")
+      .upsert({month:d.month,unit:"store:"+cur.destination_id,note},{onConflict:"month,unit"})
+      .select("note,status");
+    if(error)throw new Error(error.message);
+    if(!data||!data.length)throw new Error("保存できませんでした（権限）");
+    DETAIL.data.mcu=Object.assign({},DETAIL.data.mcu||{},{note:data[0].note,status:data[0].status});
+    NOTE_MSG="✓ 保存済み";
+  }catch(e){ NOTE_MSG="保存できませんでした："+String(e&&e.message||e); }
+  if(msg)msg.textContent=NOTE_MSG;
 }
 
 // ---- ラック効率（枠だけ）---------------------------------------------------
