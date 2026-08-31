@@ -22,7 +22,7 @@
   h1{font-size:20px;margin:0;font-weight:700;letter-spacing:.02em;}
   .sub{color:var(--muted);font-size:12px;}
   .themebtn{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:9px;padding:7px 11px;font-size:12px;cursor:pointer;}
-  .navlink{color:var(--accent);text-decoration:none;font-weight:700;font-size:14px;}
+  .navlink{color:var(--accent);text-decoration:none;font-weight:700;font-size:14px;background:none;border:none;padding:0;font-family:inherit;cursor:pointer;}
   .homebtn{display:inline-flex;align-items:center;gap:4px;white-space:nowrap;
     border:1px solid var(--border);background:var(--surface);color:var(--accent);
     border-radius:9px;padding:7px 11px;font-size:12px;font-weight:700;text-decoration:none;cursor:pointer;}
@@ -38,6 +38,16 @@
   .panel h2{font-size:15px;margin:2px 0 8px;font-weight:800;}
   .note{font-size:11.5px;color:var(--muted);margin:8px 0 0;line-height:1.7;}
   .lead{font-size:13px;color:var(--ink2);line-height:1.8;margin:0 0 10px;}
+  /* 店舗選択のカード。スマホは1列、広い画面は2〜3列 */
+  .storelist{display:grid;grid-template-columns:1fr;gap:10px;margin-top:12px;}
+  @media(min-width:620px){.storelist{grid-template-columns:1fr 1fr;}}
+  .storecard{display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+    background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);
+    padding:14px 14px;cursor:pointer;font-family:inherit;color:var(--ink);}
+  .storecard:hover{border-color:var(--accent);}
+  .storecard .nm{font-size:16px;font-weight:800;}
+  .storecard .meta{font-size:11.5px;color:var(--muted);margin-top:3px;line-height:1.6;}
+  .storecard .go{margin-left:auto;color:var(--accent);font-size:20px;font-weight:800;}
   .bigbtn{display:inline-flex;align-items:center;justify-content:center;gap:8px;
     background:var(--accent);color:#fff;border:none;border-radius:12px;
     padding:14px 22px;font-size:15px;font-weight:800;text-decoration:none;cursor:pointer;box-shadow:var(--shadow);}
@@ -45,21 +55,29 @@
   .ghost{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);background:var(--surface);
     color:var(--ink2);border-radius:10px;padding:11px 15px;font-size:13px;font-weight:700;text-decoration:none;white-space:nowrap;}
   .ghost:hover{border-color:var(--accent);color:var(--accent);}
-  .tblwrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
-  table{width:100%;border-collapse:collapse;font-size:13px;min-width:560px;}
-  th,td{padding:7px 8px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--border);}
-  th:first-child,td:first-child{text-align:left;}
-  th.lft,td.lft{text-align:left;}
-  th{color:var(--muted);font-weight:700;font-size:12px;}
-  tr.grouphd td{font-weight:800;background:var(--surface2);color:var(--ink);}
+  select.pick{border:1px solid var(--border);background:var(--surface);color:var(--ink);border-radius:9px;
+    padding:8px 10px;font-size:13px;font-family:inherit;max-width:100%;}
+  /* 棚卸しの項目一覧。表にすると横スクロールになるので、1行1項目の縦並びにする */
+  .item{display:flex;align-items:flex-start;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);}
+  .item:last-child{border-bottom:none;}
+  .item .lbl{flex:1;min-width:0;}
+  .item .lbl .nm{font-size:13.5px;font-weight:700;line-height:1.5;}
+  .item .lbl .src{font-size:11px;color:var(--muted);margin-top:3px;line-height:1.6;}
+  .item .val{text-align:right;font-size:16px;font-weight:800;white-space:nowrap;}
+  .item .val.none{color:var(--muted);font-size:14px;font-weight:600;}
+  .item .val .u{font-size:11.5px;font-weight:700;color:var(--muted);margin-left:2px;}
+  .grouphd{font-size:12px;font-weight:800;color:var(--muted);margin:16px 0 2px;letter-spacing:.04em;}
+  .grouphd:first-child{margin-top:4px;}
   .tag{display:inline-block;font-size:10.5px;font-weight:800;border-radius:5px;padding:1px 6px;color:#fff;}
   .t-final{background:var(--good)} .t-open{background:var(--warn)} .t-none{background:#9aa3ad}
-  .old{color:var(--bad);font-weight:700;}
+  .src-live{color:var(--good);font-weight:700;}
+  .src-todo{color:var(--warn);font-weight:700;}
   .soon{border:1px dashed var(--border);border-radius:12px;padding:16px;color:var(--ink2);font-size:13px;line-height:1.9;}
   .soon b{color:var(--ink);}
   .soon ul{margin:8px 0 0;padding-left:1.2em;}
   .err{padding:20px;color:var(--bad);font-weight:600;}
   .warnbox{background:var(--accent-weak);border-radius:10px;padding:10px 12px;font-size:12px;line-height:1.8;color:var(--ink2);margin-top:10px;}
+  .old{color:var(--bad);font-weight:700;}
   .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:60;background:var(--surface);border-top:1px solid var(--border);box-shadow:0 -2px 12px rgba(0,0,0,.07);padding-bottom:env(safe-area-inset-bottom);}
   .tabbar-in{max-width:720px;margin:0 auto;display:flex;}
   .tabbar a{flex:1;display:flex;align-items:center;justify-content:center;padding:13px 2px;text-decoration:none;color:var(--ink2);font-size:11.5px;font-weight:700;letter-spacing:.02em;-webkit-tap-highlight-color:transparent;border-top:2px solid transparent;}
@@ -88,16 +106,17 @@
 //  店舗運営（運営タブ）
 //
 //  【何のページか】
-//   数字（直営・FC・予実・経営）ではなく「現場の回し方」をまとめる入口。
-//   中は細かいタブに分ける：棚卸し / ラック効率 / 直営定例。
-//   この版で中身が入っているのは棚卸しだけで、あとは枠だけ置いてある。
+//   数字（直営・FC・予実・経営）とは別に、現場の回し方をまとめる入口。
+//   ★まず店舗を選ぶ → その店の中を細かいタブで分ける、という順にしてある。
+//   対象は直営店だけ（現場オペは直営で回すため。FCは選択肢に出さない）。
 //
-//  【棚卸しの実体は在庫アプリ】
-//   数えるページ（棚卸スキャン）は在庫アプリの /scan-stocktake。
-//   売上アプリは avend-inventory.vercel.app/sales/ に同居しているので、
-//   1つ上（../scan-stocktake）が在庫アプリのページになる。
-//   ここでは「どの店がいつ数えたか」だけを見せて、数えるのは向こうに任せる
-//   （同じ機能を2つ作らない）。
+//  【棚卸しタブ】
+//   店舗単位で「棚卸しの項目」を1枚に並べる。
+//   いまは項目（枠）を確定させる段階で、値の取得元は項目ごとにこれから決める。
+//     ・すでに繋いである項目 … 在庫アプリの棚卸スキャン（scan_session_totals）
+//     ・まだ決めていない項目 … 「取得元：未定」と画面に出す（黙って空にしない）
+//   数えるページそのものは在庫アプリの /scan-stocktake。ここには作らない
+//   （同じ機能を2つ持たない）。
 //
 //  【見せる相手】
 //   社内は全員（閲覧のみの人も含む）。加盟オーナー（社外）には出さない。
@@ -111,7 +130,9 @@ const MANUAL_URL="../scan-stocktake/manual.html";
 const A4_URL="../scan-stocktake/a4.pdf";
 
 let SB=null, ME={email:"",role:null};
-let TAB="stocktake";               // 細かいタブ。URLの ?t= と同期する
+let STORE=null;                    // 選んでいるPOS店舗id（null＝店舗選択の画面）
+let TAB="stocktake";               // 店舗の中の細かいタブ
+let SESSION_ID=null;               // 棚卸しタブで見ている棚卸し（null＝いちばん新しいもの）
 let SCAN={loaded:false,error:null,rows:[],stores:[],destName:{},posOfDest:{},destOfPos:{}};
 
 const NUM=n=>Math.round(n).toLocaleString("ja-JP");
@@ -155,7 +176,8 @@ async function boot(){
     if(!ME.role){ showDenied("アクセス権がありません。管理者にユーザー追加を依頼してください。"); return; }
     if(await isFranchisee()){ showDenied("このページは社内メンバー専用です。"); return; }
     render();
-    loadStocktake();     // 表は後追いで差し込む（枠を先に出して待たせない）
+    await loadStocktake();
+    render();
   }catch(e){ showError(e); }
 }
 
@@ -194,49 +216,100 @@ function showDenied(msg){
   document.getElementById("lo").onclick=async()=>{try{await SB.auth.signOut();}catch(e){}location.reload();};
 }
 
-// ---- 細かいタブ ------------------------------------------------------------
+// ---- 画面の状態はURLに載せる（共有・リロードで戻れるように）------------------
 const SUBTABS=[
   {key:"stocktake", label:"棚卸し"},
   {key:"rack",      label:"ラック効率"},
   {key:"teirei",    label:"直営定例"},
 ];
-function readTab(){
-  const t=new URLSearchParams(location.search).get("t");
-  return SUBTABS.some(x=>x.key===t)?t:"stocktake";
+function readState(){
+  const q=new URLSearchParams(location.search);
+  const s=q.get("store"); STORE=(s&&/^\d+$/.test(s))?+s:null;
+  const t=q.get("t");     TAB=SUBTABS.some(x=>x.key===t)?t:"stocktake";
 }
-function setTab(key){
-  TAB=key;
-  const u=new URL(location.href); u.searchParams.set("t",key);
-  history.replaceState(null,"",u.toString());     // 共有できるURLにしておく
-  render();
+function pushState(){
+  const u=new URL(location.href);
+  if(STORE==null)u.searchParams.delete("store"); else u.searchParams.set("store",STORE);
+  u.searchParams.set("t",TAB);
+  history.replaceState(null,"",u.toString());
 }
+function selectStore(id){ STORE=id; SESSION_ID=null; pushState(); render(); window.scrollTo(0,0); }
+function clearStore(){ STORE=null; SESSION_ID=null; pushState(); render(); window.scrollTo(0,0); }
+function setTab(key){ TAB=key; SESSION_ID=null; pushState(); render(); }
 
-function render(){
-  screen(`
-    <header>
+// ---- 描画 ------------------------------------------------------------------
+function headerHtml(sub){
+  return `<header>
       <h1>店舗運営</h1>
-      <span class="sub">${esc(ME.email)}</span>
+      <span class="sub">${esc(sub||ME.email)}</span>
       <a class="navlink" href="index.html" style="margin-left:auto">← ダッシュボード</a>
       <button class="themebtn" id="themebtn">◐ 表示</button>
       <button class="themebtn" id="logout">ログアウト</button>
       <a class="homebtn" href="../" title="アプリのトップへ">ホーム</a>
-    </header>
-    <div class="subtabs">${SUBTABS.map(t=>
-      `<button data-tab="${t.key}"${t.key===TAB?' class="on"':""}>${esc(t.label)}</button>`).join("")}</div>
-    <div id="body">${TAB==="stocktake"?stocktakeHtml():TAB==="rack"?rackHtml():teireiHtml()}</div>`);
+    </header>`;
+}
+function bindHeader(){
   document.getElementById("themebtn").onclick=()=>{const r=document.documentElement;
     const c=r.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");
     r.setAttribute("data-theme",c==="dark"?"light":"dark");};
   document.getElementById("logout").onclick=async()=>{try{await SB.auth.signOut();}catch(e){}location.reload();};
-  document.querySelectorAll(".subtabs button").forEach(b=>{b.onclick=()=>setTab(b.dataset.tab);});
+}
+function render(){ STORE==null?renderPicker():renderStore(); }
+
+// 店舗選択（直営のみ）。カードには最後に数えた日を出して、押す前に状況が分かるようにする。
+function renderPicker(){
+  const stores=ownStores();
+  const today=todayStr();
+  const cards=stores.map(s=>{
+    const t=latestOf(s.id);
+    const days=t?daysBetween(t.taken_on,today):null;
+    const meta=!SCAN.loaded?"読み込み中…"
+      :!t?"棚卸しの記録なし"
+      :`直近の棚卸し ${t.taken_on}（${days===0?"今日":NUM(days)+"日前"}）`+
+        `${t.status==="final"?"":"・作業中"}`;
+    return `<button class="storecard" data-store="${s.id}">
+      <span class="lbl"><span class="nm">${esc(s.name)}</span>
+        <span class="meta ${days!=null&&days>=45?"old":""}">${esc(meta)}</span></span>
+      <span class="go">›</span></button>`;
+  }).join("");
+  screen(`${headerHtml()}
+    <div class="panel">
+      <h2>店舗を選ぶ</h2>
+      <p class="lead">現場の作業は店舗ごとに回します。まず店舗を選んでください。<br>
+        <span class="sub">直営店だけを出しています。</span></p>
+      <div class="storelist">${cards||'<span class="sub">直営店が見つかりませんでした。</span>'}</div>
+      ${SCAN.error?`<div class="warnbox">棚卸しの記録を読み込めませんでした（${esc(SCAN.error)}）。店舗は選べます。</div>`:""}
+    </div>`);
+  bindHeader();
+  document.querySelectorAll(".storecard").forEach(b=>{b.onclick=()=>selectStore(+b.dataset.store);});
 }
 
-// ---- 棚卸し ----------------------------------------------------------------
-// 数えるのは在庫アプリの棚卸スキャン。ここは「どの店がいつ数えたか」の一覧だけ。
-//   店舗      … 売上アプリの店舗（dash_store）。棚卸しは発送先（destinations）単位なので
-//               pos_store_links で読み替える（対応付けは pos_store_links が正）
-//   集計      … scan_session_totals（確定・ダブルチェック済みだけを数えたビュー）
-//   着数と小物 … 服＝着 / 小物＝点。単位が違うので合算しない
+// 店舗を選んだあとの画面。細かいタブはこの中に置く。
+function renderStore(){
+  const s=storeOf(STORE);
+  screen(`${headerHtml()}
+    <div style="margin-top:12px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+      <button class="navlink" id="backstore">‹ 店舗を変える</button>
+      <span style="font-size:17px;font-weight:800">${esc(s?s.name:"（不明な店舗）")}</span></div>
+    <div class="subtabs">${SUBTABS.map(t=>
+      `<button data-tab="${t.key}"${t.key===TAB?' class="on"':""}>${esc(t.label)}</button>`).join("")}</div>
+    <div id="body">${TAB==="stocktake"?stocktakeHtml():TAB==="rack"?rackHtml():teireiHtml()}</div>`);
+  bindHeader();
+  document.getElementById("backstore").onclick=clearStore;
+  document.querySelectorAll(".subtabs button").forEach(b=>{b.onclick=()=>setTab(b.dataset.tab);});
+  bindStocktake();
+}
+// 棚卸しの選択（同じ店の過去ぶんを見る）。中身だけ差し替えるので、毎回つなぎ直す。
+function bindStocktake(){
+  const sel=document.getElementById("sesspick");
+  if(sel)sel.onchange=()=>{SESSION_ID=sel.value||null;
+    const b=document.getElementById("body"); if(b)b.innerHTML=stocktakeHtml(); bindStocktake();};
+}
+
+// ---- データ ----------------------------------------------------------------
+// 店舗      … 売上アプリの店舗（dash_store）。直営だけを使う
+// 対応付け  … pos_store_links（POS店舗→発送先。両アプリともこれを正とする）
+// 棚卸しの数 … scan_session_totals（ダブルチェック済みだけを数えたビュー）
 async function loadStocktake(){
   try{
     const [links,stores,sessions]=await Promise.all([
@@ -246,140 +319,117 @@ async function loadStocktake(){
         .select("session_id,destination_id,taken_on,status,garment_qty,accessory_qty,last_checked_at")
         .order("taken_on",{ascending:false}).limit(500),
     ]);
-    if(sessions.error)throw new Error(sessions.error.message);
-    SCAN.rows=sessions.data||[];
     SCAN.stores=((stores.data||[]).filter(s=>s.visible!==false)
       .map(s=>({id:s.store_id,name:s.name,own:s.ownership||""})));
-    SCAN.posOfDest={}; const destOfPos={};
+    SCAN.posOfDest={}; SCAN.destOfPos={};
     for(const l of (links.data||[])){ if(!l.destination_id)continue;
-      SCAN.posOfDest[l.destination_id]=l.pos_store_id; destOfPos[l.pos_store_id]=l.destination_id; }
-    SCAN.destOfPos=destOfPos;
-    // 対応付けの無い発送先は店名が引けないので、発送先マスタから拾えるぶんだけ補う。
-    // 読めない権限のときは黙って諦める（一覧は「（対応付けなし）」で出す）。
-    const unknown=[...new Set(SCAN.rows.map(r=>r.destination_id).filter(d=>!SCAN.posOfDest[d]))];
-    if(unknown.length){
-      try{ const {data}=await SB.from("destinations").select("id,name").in("id",unknown);
-           for(const d of (data||[]))SCAN.destName[d.id]=d.name; }catch(e){}
-    }
+      SCAN.posOfDest[l.destination_id]=l.pos_store_id; SCAN.destOfPos[l.pos_store_id]=l.destination_id; }
+    if(sessions.error)throw new Error(sessions.error.message);
+    SCAN.rows=sessions.data||[];
     SCAN.loaded=true;
   }catch(e){ SCAN.loaded=true; SCAN.error=String(e&&e.message||e); }
-  if(TAB==="stocktake"){const b=document.getElementById("body");if(b)b.innerHTML=stocktakeHtml();}
 }
+function ownStores(){ return SCAN.stores.filter(s=>s.own==="直営")
+  .sort((a,b)=>String(a.name).localeCompare(String(b.name),"ja")); }
+function storeOf(id){ return SCAN.stores.find(s=>String(s.id)===String(id))||null; }
+// その店の棚卸しを新しい順で返す（rows は taken_on の降順で読んである）
+function sessionsOf(posId){ const d=SCAN.destOfPos[posId]; if(!d)return [];
+  return SCAN.rows.filter(r=>r.destination_id===d); }
+function latestOf(posId){ return sessionsOf(posId)[0]||null; }
+
+// ---- 棚卸しタブ ------------------------------------------------------------
+// 項目（枠）をここに1本で持つ。値の取得元は項目ごとにこれから決める。
+//   src   … 画面に出す取得元の説明
+//   live  … すでに繋いである項目（true）／まだ決めていない項目（false）
+//   get   … live のときだけ使う。棚卸し1件（t）から値を作る
+const STOCKTAKE_ITEMS=[
+  {g:"実地で数えた数"},
+  {n:"① 棚卸日",            src:"棚卸スキャン",             live:true,  get:t=>t?t.taken_on:null},
+  {n:"② 状態",              src:"棚卸スキャン",             live:true,  get:t=>t?(t.status==="final"
+      ?'<span class="tag t-final">確定</span>':'<span class="tag t-open">作業中</span>'):null, raw:true},
+  {n:"③ 実地在庫（服）",     src:"棚卸スキャン",             live:true,  get:t=>t?NUM(t.garment_qty)+'<span class="u">着</span>':null, raw:true},
+  {n:"④ 実地在庫（小物）",   src:"棚卸スキャン",             live:true,  get:t=>t?NUM(t.accessory_qty)+'<span class="u">点</span>':null, raw:true},
+  {n:"⑤ 場所別の内訳（店内／BY／その他倉庫）", src:"取得元：未定", live:false},
+  {n:"⑥ 数えた人・確認した人", src:"取得元：未定",            live:false},
+
+  {g:"理論在庫の材料"},
+  {n:"⑦ 前月末の在庫（服）", src:"取得元：未定",              live:false},
+  {n:"⑧ 当月の入荷（服）",   src:"取得元：未定",              live:false},
+  {n:"⑨ 小計（⑦＋⑧）",      src:"計算（⑦と⑧が決まったら）", live:false},
+  {n:"⑩ 当月の販売数（服）", src:"取得元：未定",              live:false},
+  {n:"⑪ 控除（イレギュラー・返送など）", src:"取得元：未定",   live:false},
+  {n:"⑫ 理論在庫（⑨−⑩−⑪）", src:"計算（⑨〜⑪が決まったら）", live:false},
+
+  {g:"差分"},
+  {n:"⑬ 差分（③−⑫）",       src:"計算（③と⑫が決まったら）", live:false},
+  {n:"⑭ 差分率",             src:"計算（⑬÷⑫）",             live:false},
+  {n:"⑮ 差分の理由",         src:"取得元：未定",              live:false},
+
+  {g:"あと処理"},
+  {n:"⑯ 月次棚卸へ送ったか", src:"取得元：未定",              live:false},
+];
 
 function stocktakeHtml(){
+  const list=sessionsOf(STORE);
+  const cur=SESSION_ID?list.find(r=>r.session_id===SESSION_ID)||null:(list[0]||null);
+  const s=storeOf(STORE);
+  const linked=!!SCAN.destOfPos[STORE];
+  const scanHref=linked?`${SCAN_URL}?pos=${encodeURIComponent(STORE)}`:SCAN_URL;
+
+  const picker=list.length>1?`<div style="margin:0 0 10px">
+      <span class="sub">見る棚卸し：</span>
+      <select class="pick" id="sesspick">${list.slice(0,24).map(r=>
+        `<option value="${r.session_id}"${(cur&&cur.session_id===r.session_id)?" selected":""}>`+
+        `${esc(r.taken_on)}${r.status==="final"?"（確定）":"（作業中）"}</option>`).join("")}</select>
+    </div>`:"";
+
+  const rows=STOCKTAKE_ITEMS.map(it=>{
+    if(it.g)return `<div class="grouphd">${esc(it.g)}</div>`;
+    let v=null; if(it.live&&it.get)v=it.get(cur);
+    const val=(v==null||v==="")?'<span class="val none">—</span>'
+      :`<span class="val">${it.raw?v:esc(v)}</span>`;
+    return `<div class="item">
+      <span class="lbl"><span class="nm">${esc(it.n)}</span>
+        <span class="src ${it.live?"src-live":"src-todo"}">${esc(it.src)}</span></span>
+      ${val}</div>`;
+  }).join("");
+
   return `
     <div class="panel">
-      <h2>棚卸スキャン</h2>
-      <p class="lead">店頭の実地棚卸は、値札のバーコードで数えます。<br>
-        数える → ダブルチェック → 現場確認の完了、まで在庫アプリの棚卸スキャンで行います。</p>
+      <h2>棚卸し｜${esc(s?s.name:"")}</h2>
+      ${!SCAN.loaded?'<p class="lead">読み込み中…</p>':""}
+      ${SCAN.error?`<div class="warnbox">棚卸しの記録を読み込めませんでした（${esc(SCAN.error)}）。</div>`:""}
+      ${(!SCAN.error&&SCAN.loaded&&!linked)?`<div class="warnbox">この店舗は発送先（在庫アプリの店舗）と対応付いていないため、棚卸しの記録を引けません。<br>在庫アプリの「店舗の対応付け」（/store-links）で結んでください。</div>`:""}
+      ${(!SCAN.error&&SCAN.loaded&&linked&&!list.length)?'<div class="warnbox">この店舗の棚卸しはまだ記録がありません。</div>':""}
+      ${picker}
+      ${rows}
+      <p class="note">数はダブルチェックまで済んだぶんだけです（読み取ったままの場所は入りません）。<br>
+        服は「着」、小物は「点」で数え方が違うので合算していません。</p>
+    </div>
+    <div class="panel">
+      <h2>数える</h2>
+      <p class="lead">値札のバーコードで数えるのは、在庫アプリの棚卸スキャンです。</p>
       <div class="btnrow">
-        <a class="bigbtn" href="${SCAN_URL}">📷 棚卸スキャンを開く</a>
+        <a class="bigbtn" href="${scanHref}">📷 ${esc(s?s.name:"この店舗")}の棚卸スキャンを開く</a>
         <a class="ghost" href="${MANUAL_URL}" target="_blank" rel="noopener">📖 使い方</a>
         <a class="ghost" href="${A4_URL}" target="_blank" rel="noopener">🖨 店舗貼り出し用（A4・1枚）</a>
       </div>
       <p class="note">数える人（アルバイト・就労支援施設の方など）は、Googleでログインして棚卸スキャンを開くと自動で登録されます。事前のユーザー追加は不要です。</p>
     </div>
-    ${stocktakeTableHtml()}`;
-}
-
-function stocktakeTableHtml(){
-  if(!SCAN.loaded)return '<div class="panel"><div class="sub">棚卸しの記録を読み込み中…</div></div>';
-  if(SCAN.error)return '<div class="panel"><h2>店舗ごとの直近の棚卸し</h2>'+
-    '<div class="warnbox">棚卸しの記録を読み込めませんでした（'+esc(SCAN.error)+'）。<br>'+
-    '棚卸スキャンそのものは上のボタンから使えます。</div></div>';
-
-  // 発送先ごとの「いちばん新しい棚卸し」を作る（rows は taken_on の新しい順）
-  const latest={};
-  for(const r of SCAN.rows){ if(!latest[r.destination_id])latest[r.destination_id]=r; }
-
-  const today=todayStr();
-  const rows=SCAN.stores.map(s=>{
-    const dest=SCAN.destOfPos[s.id]||null;
-    const t=dest?latest[dest]:null;
-    return {store:s, dest, t, days:t?daysBetween(t.taken_on,today):null};
-  });
-  // 「間が空いている店」を上に出す。未実施＝いちばん上。
-  const order=(a,b)=>{
-    if((a.days==null)!==(b.days==null))return a.days==null?-1:1;
-    if(a.days!=null&&a.days!==b.days)return b.days-a.days;
-    return String(a.store.name).localeCompare(String(b.store.name),"ja");
-  };
-  const own=rows.filter(r=>r.store.own==="直営").sort(order);
-  const fc =rows.filter(r=>r.store.own!=="直営").sort(order);
-
-  const line=r=>{
-    const t=r.t;
-    const st=!t?'<span class="tag t-none">未実施</span>'
-            :t.status==="final"?'<span class="tag t-final">確定</span>'
-            :'<span class="tag t-open">作業中</span>';
-    const ago=r.days==null?"—":(r.days===0?"今日":`${NUM(r.days)}日前`);
-    const link=r.dest?`${SCAN_URL}?pos=${encodeURIComponent(r.store.id)}`:SCAN_URL;
-    return `<tr>
-      <td>${esc(r.store.name)}${r.dest?"":' <span class="sub">（発送先と未対応付け）</span>'}</td>
-      <td>${t?esc(t.taken_on):"—"}</td>
-      <td>${st}</td>
-      <td class="${r.days!=null&&r.days>=45?"old":""}">${ago}</td>
-      <td>${t?NUM(t.garment_qty)+"着":"—"}</td>
-      <td>${t?NUM(t.accessory_qty)+"点":"—"}</td>
-      <td><a class="navlink" href="${link}">開く ›</a></td>
-    </tr>`;
-  };
-  const group=(label,list)=>list.length
-    ? `<tr class="grouphd"><td colspan="7">${label}（${NUM(list.length)}店）</td></tr>`+list.map(line).join("")
-    : "";
-
-  // 対応付けが無くて一覧に出せない棚卸し（発送先だけあってPOS店舗が無い）
-  const orphan=Object.values(latest).filter(t=>!SCAN.posOfDest[t.destination_id]);
-
-  return `
     <div class="panel">
-      <h2>店舗ごとの直近の棚卸し</h2>
-      <p class="lead">最後に数えた日と、そのときの数です。<b>間が空いている店を上</b>に出しています。</p>
-      <div class="tblwrap"><table>
-        <thead><tr><th>店舗</th><th>直近の棚卸日</th><th>状態</th><th>経過</th><th>服</th><th>小物</th><th></th></tr></thead>
-        <tbody>${group("直営",own)}${group("FC",fc)}
-          ${(!own.length&&!fc.length)?'<tr><td colspan="7" class="sub">表示できる店舗がありません。</td></tr>':""}</tbody>
-      </table></div>
-      <p class="note">数はダブルチェックまで済んだぶんだけを数えています（読み取ったままの場所は入りません）。<br>
-        服は「着」、小物は「点」で数え方が違うので合算していません。<br>
-        「作業中」は、まだ現場確認の完了（本確定）を押していない棚卸しです。</p>
-      ${orphan.length?`<div class="warnbox">POS店舗と対応付いていない発送先の棚卸しが ${NUM(orphan.length)}件あります：`+
-        orphan.map(t=>esc(SCAN.destName[t.destination_id]||t.destination_id)+"（"+esc(t.taken_on)+"）").join("、")+
-        `<br>在庫アプリの「店舗の対応付け」（/store-links）で結ぶと、この表に出ます。</div>`:""}
-    </div>
-    ${historyHtml()}`;
-}
-
-function historyHtml(){
-  const rows=SCAN.rows.slice(0,20);
-  if(!rows.length)return "";
-  const nameOf=d=>{
-    const pos=SCAN.posOfDest[d];
-    const s=pos!=null?SCAN.stores.find(x=>String(x.id)===String(pos)):null;
-    return s?s.name:(SCAN.destName[d]||"（対応付けなし）");
-  };
-  return `
-    <div class="panel">
-      <h2>最近の棚卸し</h2>
-      <div class="tblwrap"><table style="min-width:460px">
-        <thead><tr><th>棚卸日</th><th class="lft">店舗</th><th>状態</th><th>服</th><th>小物</th></tr></thead>
-        <tbody>${rows.map(t=>`<tr>
-          <td>${esc(t.taken_on)}</td>
-          <td class="lft">${esc(nameOf(t.destination_id))}</td>
-          <td>${t.status==="final"?'<span class="tag t-final">確定</span>':'<span class="tag t-open">作業中</span>'}</td>
-          <td>${NUM(t.garment_qty)}着</td>
-          <td>${NUM(t.accessory_qty)}点</td>
-        </tr>`).join("")}</tbody>
-      </table></div>
-      <p class="note">直近20件。詳しい内訳（場所ごと・理論在庫との突き合わせ）は棚卸スキャンのレポートで見られます。</p>
+      <h2>取得元について</h2>
+      <div class="soon"><b>いまは項目（枠）を決めている段階です。</b>
+        <span class="src-live">緑</span>の項目はすでに棚卸スキャンから引いています。
+        <span class="src-todo">「取得元：未定」</span>の項目は、どこから引くか（または手入力にするか）を決めてから繋ぎます。</div>
     </div>`;
 }
 
 // ---- ラック効率（枠だけ）---------------------------------------------------
 function rackHtml(){
+  const s=storeOf(STORE);
   return `
     <div class="panel">
-      <h2>ラック効率</h2>
+      <h2>ラック効率｜${esc(s?s.name:"")}</h2>
       <div class="soon">
         <b>この版では枠だけです。</b>置き場所（ラック・什器）ごとに、置いている量に対してどれだけ売れているかを見るためのタブです。<br>
         作る前に決めることがあります：
@@ -394,14 +444,15 @@ function rackHtml(){
 
 // ---- 直営定例（枠だけ）-----------------------------------------------------
 function teireiHtml(){
+  const s=storeOf(STORE);
   return `
     <div class="panel">
-      <h2>直営定例</h2>
+      <h2>直営定例｜${esc(s?s.name:"")}</h2>
       <div class="soon">
         <b>この版では枠だけです。</b>直営店の定例で使うアジェンダを置くタブです。<br>
         作る前に決めることがあります：
         <ul>
-          <li><b>単位</b>… 定例1回ぶんで1件か、店舗ごとに分けるか</li>
+          <li><b>単位</b>… 定例1回ぶんで1件か、いまのように店舗ごとに分けるか</li>
           <li><b>中身</b>… 議題・決定事項・宿題（次回への持ち越し）をどこまで持つか</li>
           <li><b>書ける人</b>… 社内は全員書けるか、直営の担当だけか</li>
         </ul>
@@ -409,7 +460,7 @@ function teireiHtml(){
     </div>`;
 }
 
-TAB=readTab();
+readState();
 boot();
 </script>
 </body></html>
