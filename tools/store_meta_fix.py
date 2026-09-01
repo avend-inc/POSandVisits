@@ -150,6 +150,40 @@ def main():
         and s.business_date between '{DAYS_FROM}' and '{DAYS_TO}'""")
     print("[税抜の点検(明細行ベース)]", json.dumps(chk, ensure_ascii=False))
 
+    # 横断カバレッジ: ある営業日に売上がある店を全店一覧＋直近日の店数推移
+    cov = (os.environ.get("COVERAGE_DATE") or "").strip()
+    if cov:
+        print(f"\n=== 横断カバレッジ: business_date={cov} に売上がある店（全店） ===")
+        print("[当日 店舗別]", json.dumps(run(f"""
+          with tx as (select distinct on (s.store_id,s.pos_name,s.tx_id)
+                 s.store_id, s.sales_ex_tax
+               from public.sales s where s.business_date='{cov}'
+               order by s.store_id,s.pos_name,s.tx_id,s.line_no)
+          select st.name, count(*) tx, round(sum(tx.sales_ex_tax))::bigint ex
+          from tx join public.stores st on st.id=tx.store_id
+          group by st.name order by st.name"""), ensure_ascii=False, default=str))
+        print("[直近5営業日: 売上のある店数・総伝票]", json.dumps(run("""
+          with tx as (select distinct on (s.store_id,s.pos_name,s.tx_id)
+                 s.business_date, s.store_id
+               from public.sales s
+               where s.business_date >= (date '""" + cov + """' - 4)
+                 and s.business_date <= '""" + cov + """'
+               order by s.store_id,s.pos_name,s.tx_id,s.line_no)
+          select business_date::text d, count(distinct store_id) stores, count(*) tx
+          from tx group by business_date order by business_date"""),
+            ensure_ascii=False, default=str))
+        print(f"[所沢の直近5日]", json.dumps(run(f"""
+          with tx as (select distinct on (s.store_id,s.pos_name,s.tx_id)
+                 s.business_date, s.sales_ex_tax
+               from public.sales s join public.stores st on st.id=s.store_id
+               where st.name ilike '%所沢%'
+                 and s.business_date >= (date '{cov}' - 4) and s.business_date <= '{cov}'
+               order by s.store_id,s.pos_name,s.tx_id,s.line_no)
+          select business_date::text d, count(*) tx, round(sum(sales_ex_tax))::bigint ex
+          from tx group by business_date order by business_date"""),
+            ensure_ascii=False, default=str))
+        return 0
+
     # 診断: 指定営業日(締日)の売上が、実際は複数日の処理を束ねていないかを見る
     diag_date = (os.environ.get("DIAG_DATE") or "").strip()
     if diag_date:
