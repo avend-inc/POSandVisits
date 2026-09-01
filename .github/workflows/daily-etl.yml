@@ -182,7 +182,7 @@ jobs:
       # 失敗したときだけ、原因調査用のファイルを残す（7日で自動削除）
       - name: 失敗時の調査用ファイルを保存
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: debug-${{ github.run_id }}
           path: |
