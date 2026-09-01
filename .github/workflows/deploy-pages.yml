@@ -52,12 +52,12 @@ jobs:
 
     steps:
       - name: 配信元（default ブランチ）を取得
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: src
 
       - name: 配信先（gh-pages）を取得
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: gh-pages
           path: pages
