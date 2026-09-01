@@ -178,7 +178,11 @@ def run_live_pos(sb, business_date: str, run_id: str,
     results: list[Result] = []
     for c in conns:
         label = f'{c["pos_type"]}#{c["id"]}'
-        src = f'pos_{c["pos_name"] or c["pos_type"]}'
+        # ingest_log の source（＝二重取り込み判定キー）は接続ごとに一意にする。
+        #  account単位の接続（store_id=null）が複数あり pos_name も同じだと、
+        #  (source, 営業日, store_id) が衝突し、先に成功した1本を見て残りが
+        #  「取り込み済み」とスキップされる（所沢が毎日抜けた原因）。接続idを付けて必ず分ける。
+        src = f'pos_{c["pos_name"] or c["pos_type"]}#{c["id"]}'
         started = _now()
 
         # 二重取り込みチェック（store_id基準。複数店アカウントはstore_id無し=全体で1本）
