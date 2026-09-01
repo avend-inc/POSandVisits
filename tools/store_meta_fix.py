@@ -171,6 +171,59 @@ def main():
             "order by m.ym"), ensure_ascii=False, default=str))
         return 0
 
+    # 予測: 8月の商品単価(aup)から、9月の売上着地に対する商品販売数を出す。
+    #   aup = (税抜売上 − レジ袋 − 小物 − 明細なし) ÷ 商品販売数(小物/レジ袋/クーポン除外)
+    #   9月商品単価 ≈ 8月aup × 1.10、9月販売数 = 9月売上 ÷ 9月商品単価。
+    if (os.environ.get("AUG_AUP") or "").strip() == "1":
+        # 対象店（表示名の一部）と 9月売上着地見込み(税抜, 円)
+        targets = [
+            ("下北沢", 3_000_000),
+            ("山形",   1_750_000),
+            ("いわき", 1_750_000),
+            ("福井",   3_000_000),
+            ("長野",   4_000_000),
+        ]
+        AUG_FROM, AUG_TO = "2026-08-01", "2026-09-01"
+        print(f"\n=== 9月 商品販売数の予測（8月 商品単価×1.10 ベース） ===")
+        print(f"  8月実績期間: {AUG_FROM} 〜 {AUG_TO}未満")
+        print(f"  {'店舗':<8}{'8月税抜':>12}{'8月販売数':>10}{'8月商品単価':>12}"
+              f"{'9月単価110%':>12}{'9月売上見込':>12}{'9月販売数(予測)':>14}")
+        for nm, sep_sales in targets:
+            lk = q(nm)
+            res = run(f"""
+              with base as (
+                select s.store_id, s.pos_name, s.tx_id, s.line_no, s.sales_ex_tax,
+                       coalesce(nullif(trim(s.line_category),''),'その他') as cat,
+                       s.line_qty, s.line_amount
+                from public.sales s join public.stores st on st.id=s.store_id
+                where st.name ilike '%{lk}%'
+                  and s.business_date >= '{AUG_FROM}' and s.business_date < '{AUG_TO}'
+              ),
+              tx as (
+                select distinct on (store_id,pos_name,tx_id) sales_ex_tax
+                from base order by store_id,pos_name,tx_id,line_no
+              )
+              select
+                (select coalesce(round(sum(sales_ex_tax)),0) from tx)::bigint as ex,
+                coalesce(round(sum(line_amount) filter (where cat='レジ袋')),0)::bigint as bag_ex,
+                coalesce(round(sum(line_amount) filter (where cat='小物')),0)::bigint as kom_ex,
+                coalesce(round(sum(line_amount) filter (where cat in ('（明細なし）','明細なし'))),0)::bigint as nocat_ex,
+                coalesce(sum(line_qty) filter (where cat not in ('レジ袋','クーポン','小物')),0)::bigint as it
+              from base""")
+            # 管理APIは行の配列を返す
+            r0 = res[0] if isinstance(res, list) and res else {}
+            ex = float(r0.get("ex", 0) or 0)
+            bag = float(r0.get("bag_ex", 0) or 0)
+            kom = float(r0.get("kom_ex", 0) or 0)
+            noc = float(r0.get("nocat_ex", 0) or 0)
+            it = float(r0.get("it", 0) or 0)
+            aup = (ex - bag - kom - noc) / it if it > 0 else 0.0
+            sep_aup = aup * 1.10
+            sep_units = (sep_sales / sep_aup) if sep_aup > 0 else 0.0
+            print(f"  {nm:<8}{ex:>12,.0f}{it:>10,.0f}{aup:>12,.0f}"
+                  f"{sep_aup:>12,.0f}{sep_sales:>12,.0f}{sep_units:>14,.0f}")
+        return 0
+
     # 横断カバレッジ: ある営業日に売上がある店を全店一覧＋直近日の店数推移
     cov = (os.environ.get("COVERAGE_DATE") or "").strip()
     if cov:

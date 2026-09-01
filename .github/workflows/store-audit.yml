@@ -63,6 +63,11 @@ on:
         required: false
         default: false
         type: boolean
+      aug_aup:
+        description: "（storefix）8月の商品単価から9月の商品販売数を予測"
+        required: false
+        default: false
+        type: boolean
       diag_dup:
         description: "（storefix）pos_name食い違いによる二重計上を全店スキャン"
         required: false
@@ -108,6 +113,7 @@ jobs:
           DIAG_DATE: ${{ inputs.diag_date }}
           COVERAGE_DATE: ${{ inputs.coverage_date }}
           BIZPLAN_PROBE: ${{ inputs.bizplan_probe && '1' || '' }}
+          AUG_AUP: ${{ inputs.aug_aup && '1' || '' }}
           DIAG_DUP: ${{ inputs.diag_dup && '1' || '' }}
           DEDUP_STORE_ID: ${{ inputs.dedup_store_id }}
           KEEP_POS_NAME: ${{ inputs.keep_pos_name }}
