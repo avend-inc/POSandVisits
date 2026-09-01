@@ -150,6 +150,27 @@ def main():
         and s.business_date between '{DAYS_FROM}' and '{DAYS_TO}'""")
     print("[税抜の点検(明細行ベース)]", json.dumps(chk, ensure_ascii=False))
 
+    # 事業計画(bizplan)の中身を直接確認（目標設定モーダルが月ごとに拾う元データ）
+    if (os.environ.get("BIZPLAN_PROBE") or "").strip() == "1":
+        print("\n=== 事業計画(bizplan_monthly) 直接確認 ===")
+        print("[item別 件数]", json.dumps(run(
+            "select item, count(*) n from public.bizplan_monthly group by item order by n desc"),
+            ensure_ascii=False, default=str))
+        print("[売上 item の ym別 件数]", json.dumps(run(
+            "select ym, count(*) n, count(distinct plan_key) plans "
+            "from public.bizplan_monthly where item='売上' group by ym order by ym"),
+            ensure_ascii=False, default=str))
+        print("[store計画の pos_store_name 一覧(先頭20)]", json.dumps(run(
+            "select pos_store_name, plan_key from public.bizplan_plans "
+            "where kind='store' and pos_store_name is not null order by pos_store_name limit 20"),
+            ensure_ascii=False, default=str))
+        print("[いわきの 売上計画 月別]", json.dumps(run(
+            "select p.pos_store_name, m.ym, m.amount from public.bizplan_monthly m "
+            "join public.bizplan_plans p on p.plan_key=m.plan_key "
+            "where p.kind='store' and m.item='売上' and p.pos_store_name ilike '%いわき%' "
+            "order by m.ym"), ensure_ascii=False, default=str))
+        return 0
+
     # 横断カバレッジ: ある営業日に売上がある店を全店一覧＋直近日の店数推移
     cov = (os.environ.get("COVERAGE_DATE") or "").strip()
     if cov:

@@ -58,6 +58,11 @@ on:
         description: "（storefix）その営業日に売上がある店を全店横断で確認（例: 2026-08-31）"
         required: false
         default: ""
+      bizplan_probe:
+        description: "（storefix）事業計画(bizplan_monthly)の中身を直接確認"
+        required: false
+        default: false
+        type: boolean
       diag_dup:
         description: "（storefix）pos_name食い違いによる二重計上を全店スキャン"
         required: false
@@ -102,6 +107,7 @@ jobs:
           CONSOLIDATE_DROP: ${{ inputs.consolidate_drop }}
           DIAG_DATE: ${{ inputs.diag_date }}
           COVERAGE_DATE: ${{ inputs.coverage_date }}
+          BIZPLAN_PROBE: ${{ inputs.bizplan_probe && '1' || '' }}
           DIAG_DUP: ${{ inputs.diag_dup && '1' || '' }}
           DEDUP_STORE_ID: ${{ inputs.dedup_store_id }}
           KEEP_POS_NAME: ${{ inputs.keep_pos_name }}
