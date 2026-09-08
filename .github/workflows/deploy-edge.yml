@@ -29,7 +29,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Supabase CLI を用意
-        uses: supabase/setup-cli@v1
+        uses: supabase/setup-cli@v3
         with:
           version: latest
 
