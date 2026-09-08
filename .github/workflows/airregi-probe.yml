@@ -60,7 +60,7 @@ jobs:
       TREND_STORES: ${{ inputs.trend_stores }}
       SQL_FILES: ${{ inputs.sql_files }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
