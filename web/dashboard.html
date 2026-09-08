@@ -1046,8 +1046,6 @@ function renderFranchiseeHome(){
       <h1>売上KPI管理 <span class="gbadge">加盟店</span></h1>
       <button class="themebtn" id="themebtn" style="margin-left:auto">◐</button>
       ${SB?'<button class="themebtn" id="logoutbtn" style="margin-left:6px">ログアウト</button>':''}
-    
-      <a class="navlink homebtn" href="../" title="アプリのトップへ">ホーム</a>
     </header>
     <div class="sub" style="margin:8px 0 12px">ご覧になる店舗を選んでください。</div>
     <div class="frhome">${ids.map(id=>`<button class="frcard" data-sid="${id}"><span class="nm">${esc((storeMeta(id)||{}).name||("店舗"+id))}</span><span class="go">›</span></button>`).join("")||'<span class="sub">表示できる店舗がありません。管理者にお問い合わせください。</span>'}</div>`;
@@ -3597,7 +3595,7 @@ function renderMain(){
       <a class="navlink homebtn" href="../" title="アプリのトップへ">ホーム</a>
     </header>
     <div class="sub" style="margin:2px 0 6px">
-      最新データ 売上:<b style="color:var(--ink)">${DATA._salesMax}</b>／来店:<b style="color:var(--ink)">${DATA._visitMax}</b>　更新:${(DATA.generated_at||"").replace("T"," ").slice(5,16)} <span class="sub" title="表示中のアプリ版">· b192</span>
+      最新データ 売上:<b style="color:var(--ink)">${DATA._salesMax}</b>／来店:<b style="color:var(--ink)">${DATA._visitMax}</b>　更新:${(DATA.generated_at||"").replace("T"," ").slice(5,16)} <span class="sub" title="表示中のアプリ版">· b193</span>
     </div>
     <div class="panel">
       <h2>① 店舗選択</h2>
@@ -3699,8 +3697,8 @@ function renderDetail(){
       ${FRAN?'':'<button class="themebtn" id="storereportbtn" style="margin-left:auto;width:auto;padding:0 12px;gap:5px">レポート</button>'}
       <button class="themebtn" id="themebtn" style="margin-left:${FRAN?'auto':'6px'}">◐</button>
       ${SB?'<button class="themebtn" id="logoutbtn" style="margin-left:6px">ログアウト</button>':''}
-    
-      <a class="navlink homebtn" href="../" title="アプリのトップへ">ホーム</a>
+
+      ${FRAN?'':'<a class="navlink homebtn" href="../" title="アプリのトップへ">ホーム</a>'}
     </header>
     <div class="sub" style="margin:2px 0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
       最新 売上<b style="color:var(--ink)">${mdShort(DATA._salesMax)}</b>・来店<b style="color:var(--ink)">${mdShort(DATA._visitMax)}</b>｜更新 ${genShort(DATA.generated_at)}
