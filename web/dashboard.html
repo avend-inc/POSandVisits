@@ -3595,7 +3595,7 @@ function renderMain(){
       <a class="navlink homebtn" href="../" title="アプリのトップへ">ホーム</a>
     </header>
     <div class="sub" style="margin:2px 0 6px">
-      最新データ 売上:<b style="color:var(--ink)">${DATA._salesMax}</b>／来店:<b style="color:var(--ink)">${DATA._visitMax}</b>　更新:${(DATA.generated_at||"").replace("T"," ").slice(5,16)} <span class="sub" title="表示中のアプリ版">· b193</span>
+      最新データ 売上:<b style="color:var(--ink)">${DATA._salesMax}</b>／来店:<b style="color:var(--ink)">${DATA._visitMax}</b>　更新:${(DATA.generated_at||"").replace("T"," ").slice(5,16)} <span class="sub" title="表示中のアプリ版">· b194</span>
     </div>
     <div class="panel">
       <h2>① 店舗選択</h2>
@@ -3694,8 +3694,8 @@ function renderDetail(){
   document.getElementById("app").innerHTML=`
     <header>
       <h1>${esc(nm)} <span class="gbadge">店舗別</span></h1>
-      ${FRAN?'':'<button class="themebtn" id="storereportbtn" style="margin-left:auto;width:auto;padding:0 12px;gap:5px">レポート</button>'}
-      <button class="themebtn" id="themebtn" style="margin-left:${FRAN?'auto':'6px'}">◐</button>
+      ${FRAN?'<button class="themebtn" id="acctbtn" style="margin-left:auto;width:auto;padding:0 12px;gap:5px">アカウント管理</button>':'<button class="themebtn" id="storereportbtn" style="margin-left:auto;width:auto;padding:0 12px;gap:5px">レポート</button>'}
+      <button class="themebtn" id="themebtn" style="margin-left:6px">◐</button>
       ${SB?'<button class="themebtn" id="logoutbtn" style="margin-left:6px">ログアウト</button>':''}
 
       ${FRAN?'':'<a class="navlink homebtn" href="../" title="アプリのトップへ">ホーム</a>'}
@@ -3793,7 +3793,7 @@ function renderDetail(){
       <h2>AIのまとめ <span class="sub" style="font-weight:500">（直近2週間・毎週月曜更新）</span></h2>
       <div id="ai-out" style="margin-top:6px;padding:10px 12px;border-left:3px solid var(--accent);background:var(--surface2);border-radius:0 10px 10px 0;font-size:12.5px;line-height:1.9">⏳ 分析を読み込み中…</div>
     </div>`}
-    ${FRAN?`<div class="panel">
+    ${FRAN?`<div class="panel" id="frmem-panel">
       <h2>アカウント管理 <span class="sub" style="font-weight:500">（このお店を見られる人）</span></h2>
       <p class="note">スタッフや共同オーナーの Google アカウントを追加すると、その人も<b>このお店だけ</b>を見られます（他店は見られません）。</p>
       <div class="tblwrap"><table class="kmat" id="frmem"></table></div>
@@ -3830,6 +3830,8 @@ function renderDetail(){
   wireCommon();
   if(FRAN){
     const hb=document.getElementById("fr-home"); if(hb)hb.onclick=renderFranchiseeHome;
+    const ab=document.getElementById("acctbtn");
+    if(ab)ab.onclick=()=>{const p=document.getElementById("frmem-panel"); if(p)p.scrollIntoView({behavior:"smooth",block:"start"});};
     const addb=document.getElementById("frmem-add");
     if(addb)addb.onclick=async()=>{
       const inp=document.getElementById("frmem-email"), mm=document.getElementById("frmem-msg");
