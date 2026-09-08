@@ -38,7 +38,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: feature/supabase-etl
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: 依存インストール
