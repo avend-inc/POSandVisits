@@ -3582,6 +3582,7 @@ function openBukken(){
 function renderMain(){
   syncAdminTab();
   syncGroupTab();
+  if(!state.detail)state.sel=new Set(allGroupIds());   // 店舗選択スライサーは廃止＝常に全店（店舗別は③のリンクから）
   document.getElementById("app").classList.remove("detail","adsview");
   {const tb=document.querySelector(".tabbar"); if(tb)tb.style.display="";}
   document.getElementById("app").innerHTML=`
@@ -3595,24 +3596,17 @@ function renderMain(){
       <a class="navlink homebtn" href="../" title="アプリのトップへ">ホーム</a>
     </header>
     <div class="sub" style="margin:2px 0 6px">
-      最新データ 売上:<b style="color:var(--ink)">${DATA._salesMax}</b>／来店:<b style="color:var(--ink)">${DATA._visitMax}</b>　更新:${(DATA.generated_at||"").replace("T"," ").slice(5,16)} <span class="sub" title="表示中のアプリ版">· b194</span>
+      最新データ 売上:<b style="color:var(--ink)">${DATA._salesMax}</b>／来店:<b style="color:var(--ink)">${DATA._visitMax}</b>　更新:${(DATA.generated_at||"").replace("T"," ").slice(5,16)} <span class="sub" title="表示中のアプリ版">· b195</span>
     </div>
-    <div class="panel">
-      <h2>① 店舗選択</h2>
-      <details class="dd" id="store-dd">
-        <summary><span id="sel-count">全店</span><span class="ddarrow">▼</span></summary>
-        <div class="ddbody">
-          <div style="display:flex;gap:8px;margin-bottom:6px">
-            <button class="chip" id="sel-all">全選択</button>
-            <button class="chip" id="sel-none">全解除</button>
-          </div>
-          <div class="slicer" id="slicer"></div>
-        </div>
-      </details>
+    <div class="dtop headline four" style="margin-bottom:12px">
+      <div class="card bud"><div class="k">目標税抜売上</div><div class="val" id="hd-tgt">…</div><div class="knote">当月・${GROUP_LABEL}合計</div></div>
+      <div class="card"><div class="k">現在の売上</div><div class="val" id="hd-cur">—</div><div class="knote">税抜・当月経過</div></div>
+      <div class="card land"><div class="k">着地見込み</div><div class="val" id="hd-land">—</div><div class="knote">当月の月末予測</div></div>
+      <div class="card"><div class="k">達成率</div><div class="val" id="hd-rate">…</div><div class="knote" id="hd-rate-sub">着地÷目標</div></div>
     </div>
 
     <div class="panel">
-      <h2>② KPIまとめ <span class="sub" style="font-weight:500">（前日／今週／今月）</span></h2>
+      <h2>全店のKPI <span class="sub" style="font-weight:500">（前日／今週／今月）</span></h2>
       <div class="tblwrap"><table class="kmat" id="kpi2"></table></div>
       <p class="note" style="margin:7px 0 0">商品販売数＝実際に売れた商品の点数（レジ袋・クーポン・小物・セット割の器「セール商品」は数えない）／平均購入数＝商品販売数÷取引数／商品単価＝(税抜売上−レジ袋−小物−明細なし売上)÷商品販売数（分子・分母をそろえる）／客単価＝売上÷取引数（レジ袋・小物・明細なし売上も客が払った額なので含む）。</p>
     </div>
@@ -3673,8 +3667,6 @@ function renderMain(){
       店舗名を押すとその店だけに絞り込めます。表示は<b>${GROUP_LABEL}</b>（下タブで直営／FC切替）。
     </div>`;
 
-  document.getElementById("sel-all").onclick=()=>{state.sel=new Set(allGroupIds());saveSel();draw();};
-  document.getElementById("sel-none").onclick=()=>{state.sel=new Set();saveSel();draw();};
   wireCommon();
   draw();
 }
@@ -5100,17 +5092,17 @@ function catNeed(f,t){
 async function draw(){ if(VIEW==="line"){ drawPeriod(); drawLine(); return; }
   if(VIEW==="ads"){ drawPeriod(); drawAds(); return; }
   if(VIEW==="ig"){ renderIg(); return; }
-  drawSlicer(); drawPeriod();
+  drawPeriod();
   // 描く前に、その期間のカテゴリ別がそろっているか確かめる
   await ensureCatRange(state.from,state.to);
   refresh(); }
 // 選択・期間の変更でスライサー本体以外を描き直す（チェックのたびにリストを作り直さない）
-function refresh(){ if(state.detail){drawDetailExtras(); drawDayKpi(); drawStoreAds();} drawKpi2(); drawStoreKpi(); drawTrend2();
+function refresh(){ if(!state.detail)drawHeadline(); if(state.detail){drawDetailExtras(); drawDayKpi(); drawStoreAds();} drawKpi2(); drawStoreKpi(); drawTrend2();
   if(state.detail){ drawHeatX(); }                       // 店舗ページ＝1表（販売数/税抜売上を切替）
   else{ const D=heatData();                              // ⑥⑦で同じ集計・同じ列順を使う
     const cats=heatCatsOf(D);                            // 売上降順・共通
     drawHeat("heatQ","q",D,cats); drawHeat("heatA","a",D,cats); }
-  updateSelCount(); }
+  }
 // 比率表の列（カテゴリ）：税抜売上の降順・上位10（販売数表示でも列順は共通）
 function heatCatsOf(D){ return Object.keys(D.catTot).sort((a,b)=>D.catTot[b].a-D.catTot[a].a).slice(0,10); }
 // 店舗ページの比率表：選択中の指標（販売数/税抜売上）で自店とブランド全体の2表を描き、切替チップを点灯。
@@ -5125,24 +5117,6 @@ function drawHeatX(){
   drawHeat("heatB",state.heatMetric,heatData(ids),cats,{pctOnly:true,noDrill:true});
   document.querySelectorAll(".hmet").forEach(b=>b.classList.toggle("on",b.dataset.hmet===state.heatMetric));
   document.querySelectorAll(".hchip").forEach(b=>b.classList.toggle("on",b.dataset.hpreset===state.hKind));
-}
-
-// ① 店舗選択（ドロップダウン内のチェックボックス）
-function drawSlicer(){
-  const el=document.getElementById("slicer"); if(!el)return;
-  const us=usableStores().filter(s=>storeMatch(s.id,GROUP));
-  el.innerHTML=us.map(s=>`<label class="scheck"><input type="checkbox" data-sid="${s.id}" ${state.sel.has(s.id)?"checked":""}><span>${esc(s.name)}</span></label>`).join("")
-    ||'<span class="sub">表示できる店舗がありません</span>';
-  el.querySelectorAll("input[type=checkbox]").forEach(cb=>cb.onchange=()=>{
-    const id=+cb.dataset.sid; if(cb.checked)state.sel.add(id); else state.sel.delete(id);
-    saveSel(); refresh();});
-  updateSelCount();
-}
-function updateSelCount(){
-  const us=usableStores().filter(s=>storeMatch(s.id,GROUP));
-  const c=document.getElementById("sel-count"); if(!c)return;
-  const n=state.sel.size,tot=us.length;
-  c.textContent = n===0?"未選択" : (n===tot?`全店（${tot}店）` : `${n}/${tot}店を選択中`);
 }
 
 // ===== 着地見込み（アプリ共通の唯一の定義。ページ・店舗で計算方法は変えない）=====
@@ -5171,6 +5145,25 @@ function landingMonth(){
   const sd=DATA._salesMax||DATA._max, ym=sd.slice(0,7);
   const ids=(state.sel&&state.sel.size)?state.sel:new Set(usableStores().map(s=>s.id));
   return landingForIds(ids,ym);
+}
+// 最上部ダッシュボード：目標税抜売上／現在の売上（当月経過）／着地見込み／達成率（グループ全店）。
+function drawHeadline(){
+  if(state.detail)return;
+  const sd=DATA._salesMax||DATA._max, ym=sd.slice(0,7);
+  const ids=allGroupIds(), idset=new Set(ids);
+  const cur=M("ex").calc(sumRowsForIds(ym+"-01",sd,idset));         // 当月経過の税抜実績
+  const land=landingForIds(idset,ym);                              // 着地見込み
+  const tgtReady=ensureKpiTargets(ym);                            // 目標（事業計画/予実/ファイル）
+  const tgt=tgtReady?sumTargets(ids):null;
+  const set=(id,v)=>{const e=document.getElementById(id); if(e)e.textContent=v;};
+  set("hd-cur",  cur!=null?YEN(cur)+"円":"—");
+  set("hd-land", land==null?"—":YEN(land)+"円");
+  set("hd-tgt",  !tgtReady?"…":(tgt==null?"—":YEN(tgt)+"円"));
+  if(tgtReady && tgt && tgt>0){
+    const rl=(land!=null)?land/tgt*100:null, rc=(cur||0)/tgt*100;
+    set("hd-rate", rl!=null?F1(rl)+"%":"—");
+    set("hd-rate-sub","着地÷目標（実績 "+F1(rc)+"%）");
+  }else{ set("hd-rate", tgtReady?"—":"…"); set("hd-rate-sub","着地÷目標"); }
 }
 // 着地見込みの手入力ポップアップ（店舗ページのKPIまとめから開く）。平日/土日祝の平均売上(税抜/日)を保存＝アプリ全体に反映。
 function openFcModal(id,ym){
@@ -6527,7 +6520,7 @@ async function loadKpiTargets(ym){
 function ensureKpiTargets(ym){
   if(KPI_TGT.ym===ym)return true;
   if(_kpiTgtLoading!==ym){ _kpiTgtLoading=ym;
-    loadKpiTargets(ym).then(()=>{ _kpiTgtLoading=null; if(state.sel&&!state.detail)drawStoreKpi(); })
+    loadKpiTargets(ym).then(()=>{ _kpiTgtLoading=null; if(state.sel&&!state.detail){drawStoreKpi(); drawHeadline();} })
                       .catch(()=>{ _kpiTgtLoading=null; }); }
   return false;
 }

@@ -1,0 +1,105 @@
+# ============================================================
+#  NOTIME 当日速報ETL（6時間おき）
+#
+#  目的：画面の「最新データ」を“前日”ではなく“当日の◯時時点”にする。
+#        営業時間帯に6時間おきで cashier / Airレジ / SIPOS / デジテール の
+#        「当日ぶん」を取り込み直し（--force）、ダッシュボードを再配信する。
+#
+#  ・夜間のフル取り込み（daily-etl.yml＝前日ぶん・全ソース）はそのまま維持。
+#    こちらは“当日速報”専用（軽め・対象を4ソースに限定）。
+#  ・コスト（GitHub Actions 実行分）を抑えるため、深夜は動かさず日中3回に絞る。
+#  ・当日は毎回 --force で取り直す（ingest_log の既取得スキップを回避）。売上は
+#    (store_id,pos_name,tx_id,line_no) で upsert されるので、増えた取引だけ増える。
+#  ・1ソースが失敗しても他は継続し、取り込めた分でダッシュボードを必ず更新する。
+# ============================================================
+name: NOTIME 当日速報ETL（6時間おき）
+
+on:
+  schedule:
+    - cron: "0 1 * * *"    # 10:00 JST
+    - cron: "0 7 * * *"    # 16:00 JST
+    - cron: "0 13 * * *"   # 22:00 JST
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "対象営業日 (YYYY-MM-DD)。空なら当日(JST)"
+        required: false
+        default: ""
+
+concurrency:
+  group: notime-intraday-etl
+  cancel-in-progress: false
+
+jobs:
+  intraday:
+    name: 当日ぶんを速報取得（cashier / Airレジ / SIPOS / デジテール）
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      TZ: Asia/Tokyo
+      POS_LIMIT: ""
+      POS_ONLY_STORE: ""
+      CASHIER_ID: ${{ secrets.CASHIER_ID }}
+      CASHIER_PW: ${{ secrets.CASHIER_PW }}
+      DIGITAIL_ID: ${{ secrets.DIGITAIL_ID }}
+      DIGITAIL_PW: ${{ secrets.DIGITAIL_PW }}
+      DIGITAIL_SF_ID: ${{ secrets.DIGITAIL_SF_ID }}
+      DIGITAIL_SF_PW: ${{ secrets.DIGITAIL_SF_PW }}
+      AIRREGI_ID: ${{ secrets.AIRREGI_ID }}
+      AIRREGI_PW: ${{ secrets.AIRREGI_PW }}
+      AIRREGI_DEBUG: ${{ vars.AIRREGI_DEBUG }}
+      AIRREGI_SALES_URL: ${{ vars.AIRREGI_SALES_URL }}
+      AIRREGI_CSV_SELECTOR: ${{ vars.AIRREGI_CSV_SELECTOR }}
+      AIRREGI_DATE_FROM_SEL: ${{ vars.AIRREGI_DATE_FROM_SEL }}
+      AIRREGI_DATE_TO_SEL: ${{ vars.AIRREGI_DATE_TO_SEL }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@v4
+
+      - name: Python を用意
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: ライブラリをインストール
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: ブラウザ(Chromium)を用意
+        run: python -m playwright install --with-deps chromium
+
+      - name: 当日ぶんを速報取得（cashier / airregi / sipos / digitel・当日・強制）
+        run: |
+          DATE="${{ inputs.date }}"
+          if [ -z "$DATE" ]; then DATE="$(date +%F)"; fi   # env TZ=Asia/Tokyo なので当日(JST)
+          echo "当日速報：$DATE を取り込みます（cashier / airregi / sipos / digitel）"
+          rc=0
+          for src in cashier airregi sipos digitel; do
+            echo "===== $src ====="
+            python -m etl.run_daily --only "$src" --date "$DATE" --force \
+              || { echo "::warning::$src の当日取得に失敗しました（他ソースは継続）"; rc=1; }
+          done
+          # 1つ失敗しても取り込めた分は次のステップで必ず配信するため、ここでは落とさない。
+          exit 0
+
+      - name: ダッシュボードを更新（当日反映）
+        if: ${{ !cancelled() }}
+        run: python -m tools.export_dashboard
+
+      - name: 失敗時の調査用ファイルを保存
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-intraday-${{ github.run_id }}
+          path: |
+            debug/
+            raw/
+          if-no-files-found: ignore
+          retention-days: 7
