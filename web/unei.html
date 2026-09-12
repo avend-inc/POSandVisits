@@ -1069,7 +1069,7 @@ function plRecompute(){
 //    Tシャツ系は正式4分類へ寄せ、セール（バンドル割引の擬似カテゴリ）は除外。
 // ============================================================
 const F2=n=>(Math.round(n*100)/100).toLocaleString("ja-JP",{minimumFractionDigits:2,maximumFractionDigits:2});
-const PT={loaded:false,loading:false,err:null,gran:"week",scope:"all",catMode:"qty",cat:null,catKey:null};
+const PT={loaded:false,loading:false,err:null,gran:"week",scope:"all",catMode:"qty",view:"table",cat:null,catKey:null};
 const PT_CFG={day:{n:45,win:60},week:{n:16,win:130},month:{n:12,win:400}};
 const PT_KPIS=[
   {k:"v",  name:"来店客数",        fmt:v=>NUM(v)+"人"},
@@ -1172,6 +1172,37 @@ function renderTrend(){
   // 横＝日付。最新（右端）が最初に見えるよう右端へスクロール。
   document.querySelectorAll(".pt-scrollright").forEach(el=>{el.scrollLeft=el.scrollWidth;});
 }
+// 折れ線（1指標ぶん）。pts=[{label,v}]（vはnull可）。横=期間、縦=値。
+function ptChartLine(pts,fmt){
+  const W=320,H=140,padL=6,padR=6,padT=14,padB=18;
+  const vals=pts.map(p=>p.v).filter(v=>v!=null&&isFinite(v));
+  if(!vals.length)return '<div class="sub" style="padding:8px 0">データなし</div>';
+  let mn=Math.min(...vals),mx=Math.max(...vals); if(mn===mx){const d=Math.abs(mn)||1;mn-=d*0.05;mx+=d*0.05;}
+  const n=pts.length, X=i=>padL+(n>1?i/(n-1):0.5)*(W-padL-padR), Y=v=>padT+(1-(v-mn)/(mx-mn))*(H-padT-padB);
+  let dpath="",started=false;
+  pts.forEach((p,i)=>{ if(p.v==null||!isFinite(p.v))return; dpath+=(started?"L":"M")+X(i).toFixed(1)+" "+Y(p.v).toFixed(1)+" "; started=true; });
+  const dots=pts.map((p,i)=>(p.v==null||!isFinite(p.v))?"":`<circle cx="${X(i).toFixed(1)}" cy="${Y(p.v).toFixed(1)}" r="2.2" fill="var(--accent)"><title>${esc(p.label)}：${esc(fmt(p.v))}</title></circle>`).join("");
+  const idxs=[...new Set([0, n>2?Math.floor((n-1)/2):0, n-1])];
+  const xl=idxs.map(i=>`<text x="${X(i).toFixed(1)}" y="${H-4}" font-size="9" fill="var(--muted)" text-anchor="${i===0?'start':i===n-1?'end':'middle'}">${esc(pts[i].label)}</text>`).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block" preserveAspectRatio="xMidYMid meet">
+    <text x="${padL}" y="10" font-size="9" fill="var(--muted)">${esc(fmt(mx))}</text>
+    <text x="${padL}" y="${H-padB+9}" font-size="9" fill="var(--muted)">${esc(fmt(mn))}</text>
+    <path d="${dpath.trim()}" fill="none" stroke="var(--accent)" stroke-width="2" vector-effect="non-scaling-stroke"/>
+    ${dots}${xl}</svg>`;
+}
+// カテゴリ比率の100%積み上げ（縦棒）。横=期間、各棒をカテゴリで積む。
+function ptChartStacked(C){
+  const rows=C.rows,cats=C.cats,n=rows.length;
+  if(!n)return '<div class="sub" style="padding:8px 0">データなし</div>';
+  const W=Math.max(300,n*38),H=190,padT=6,padB=20,padL=6,padR=6,H0=H-padT-padB,step=(W-padL-padR)/n,bw=Math.min(30,step*0.7);
+  const bars=rows.map((r,i)=>{ const cx=padL+(i+0.5)*step; let yTop=padT;
+    const segs=cats.map((c,ci)=>{const sh=r.sh[c]||0; if(!(sh>0))return ""; const h=sh*H0,y=yTop; yTop+=h;
+      return `<rect x="${(cx-bw/2).toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" fill="${ptCatColor(cats,ci)}"><title>${esc(r.label)} ${esc(c)}：${F1(sh*100)}%</title></rect>`;}).join("");
+    const show=(i===0||i===n-1||i%Math.ceil(n/8)===0);
+    const lbl=show?`<text x="${cx.toFixed(1)}" y="${H-6}" font-size="9" fill="var(--muted)" text-anchor="middle">${esc(r.label)}</text>`:"";
+    return segs+lbl;}).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:${n>10?W+"px":"100%"};max-width:none;height:190px" preserveAspectRatio="xMinYMid meet">${bars}</svg>`;
+}
 function ptControlsHtml(){
   const scopes=ptScopeList();
   const G=[["day","日次"],["week","週次"],["month","月次"]];
@@ -1179,27 +1210,52 @@ function ptControlsHtml(){
       <div class="segbar" id="pt-gran">${G.map(([k,l])=>`<button data-g="${k}"${PT.gran===k?' class="on"':""}>${l}</button>`).join("")}</div>
       <label style="margin-left:6px">店舗</label>
       <select class="pick" id="pt-scope">${scopes.map(s=>`<option value="${s.id}"${String(s.id)===String(PT.scope)?" selected":""}>${esc(s.name)}</option>`).join("")}</select>
+      <div class="segbar" id="pt-view" style="margin-left:auto">
+        <button data-v="table"${PT.view==="table"?' class="on"':""}>表</button>
+        <button data-v="chart"${PT.view==="chart"?' class="on"':""}>グラフ</button>
+      </div>
     </div>`;
 }
 function ptBodyHtml(){
   const gran=PT.gran, granLbl={day:"日次",week:"週次",month:"月次"}[gran];
   const scopeName=(ptScopeList().find(s=>String(s.id)===String(PT.scope))||{}).name||"";
   const unit=gran==="month"?"ヶ月":gran==="week"?"週":"日";
-  // ---- 主要KPI（横＝日付・縦＝指標）----
+  const chart=PT.view==="chart";
+  // ---- 主要KPI ----
   const S=ptKpiSeries();   // 古い→新しい（左→右が時系列）
-  const kHead=`<thead><tr><th>指標</th>${S.map(p=>`<th>${esc(p.label)}</th>`).join("")}</tr></thead>`;
-  const kRows=PT_KPIS.map(m=>`<tr><td>${m.name}</td>${S.map(p=>`<td>${p[m.k]==null?"—":m.fmt(p[m.k])}</td>`).join("")}</tr>`).join("");
-  // ---- 販売カテゴリ比率（横＝日付・縦＝カテゴリ）----
+  let kpiInner;
+  if(chart){
+    kpiInner=`<div class="sparkgrid">${PT_KPIS.map(m=>{
+      const pts=S.map(p=>({label:p.label,v:p[m.k]}));
+      const nn=S.map(p=>p[m.k]).filter(v=>v!=null&&isFinite(v));
+      const last=nn.length?nn[nn.length-1]:null;
+      return `<div class="sparkcard"><div class="k">${m.name}</div>
+        <div class="v">${last==null?"—":m.fmt(last)}</div>
+        ${ptChartLine(pts,m.fmt)}</div>`;}).join("")}</div>`;
+  }else{
+    const kHead=`<thead><tr><th>指標</th>${S.map(p=>`<th>${esc(p.label)}</th>`).join("")}</tr></thead>`;
+    const kRows=PT_KPIS.map(m=>`<tr><td>${m.name}</td>${S.map(p=>`<td>${p[m.k]==null?"—":m.fmt(p[m.k])}</td>`).join("")}</tr>`).join("");
+    kpiInner=`<div class="tblwrap pt-scrollright"><table class="pl">${kHead}<tbody>${kRows||`<tr><td class="mut">データがありません</td></tr>`}</tbody></table></div>`;
+  }
+  // ---- 販売カテゴリ比率 ----
   const C=ptCatSeries();
-  const cHead=`<thead><tr><th>カテゴリ</th>${C.rows.map(r=>`<th>${esc(r.label)}</th>`).join("")}</tr></thead>`;
-  const cRows=C.cats.map((c,i)=>`<tr><td><span class="catswatch" style="background:${ptCatColor(C.cats,i)}"></span>${esc(c)}</td>`+
-    C.rows.map(r=>{const v=r.sh[c]; return `<td>${(v==null||!(r.tot>0))?"—":F1(v*100)+"%"}</td>`;}).join("")+`</tr>`).join("");
   const catModeLbl=PT.catMode==="amount"?"売上":"販売数";
+  let catInner;
+  if(chart){
+    const legend=C.cats.map((c,i)=>`<span class="pill" style="padding:4px 9px"><span class="catswatch" style="background:${ptCatColor(C.cats,i)}"></span>${esc(c)}</span>`).join("");
+    catInner=`<div class="pills" style="margin:10px 0 6px">${legend}</div>
+      <div class="tblwrap pt-scrollright">${ptChartStacked(C)}</div>`;
+  }else{
+    const cHead=`<thead><tr><th>カテゴリ</th>${C.rows.map(r=>`<th>${esc(r.label)}</th>`).join("")}</tr></thead>`;
+    const cRows=C.cats.map((c,i)=>`<tr><td><span class="catswatch" style="background:${ptCatColor(C.cats,i)}"></span>${esc(c)}</td>`+
+      C.rows.map(r=>{const v=r.sh[c]; return `<td>${(v==null||!(r.tot>0))?"—":F1(v*100)+"%"}</td>`;}).join("")+`</tr>`).join("");
+    catInner=`<div class="tblwrap pt-scrollright" style="margin-top:10px"><table class="pl">${cHead}<tbody>${cRows||`<tr><td class="mut">カテゴリ明細データがありません</td></tr>`}</tbody></table></div>`;
+  }
   return `
     <p class="note" style="margin:10px 0 0">${esc(scopeName)}・${granLbl}の推移（直近${S.length||0}${unit}・左→右が古い→新しい）。締日＝取り込み済みの最新日まで。</p>
     <div class="panel">
       <h2>主要KPIの推移</h2>
-      <div class="tblwrap pt-scrollright"><table class="pl">${kHead}<tbody>${kRows||`<tr><td class="mut">データがありません</td></tr>`}</tbody></table></div>
+      ${kpiInner}
       <p class="note">来店客数・購入率は入店計測のある店だけで算出。客単価＝税込売上÷取引数／平均購入数＝販売数÷取引数／商品単価＝税抜売上（レジ袋・小物・未分類を除く）÷販売数。</p>
     </div>
     <div class="panel">
@@ -1208,13 +1264,14 @@ function ptBodyHtml(){
         <button data-m="qty"${PT.catMode==="qty"?' class="on"':""}>販売数</button>
         <button data-m="amount"${PT.catMode==="amount"?' class="on"':""}>売上比率</button>
       </div>
-      <div class="tblwrap pt-scrollright" style="margin-top:10px"><table class="pl">${cHead}<tbody>${cRows||`<tr><td class="mut">カテゴリ明細データがありません</td></tr>`}</tbody></table></div>
-      <p class="note">各期間の${catModeLbl}に占める割合（列合計＝100%）。上位8カテゴリ＋その他。Tシャツ系は正式4分類に寄せ、セール（バンドル割引の擬似カテゴリ）は除外しています。</p>
+      ${catInner}
+      <p class="note">各期間の${catModeLbl}に占める割合（${chart?"各棒":"列"}合計＝100%）。上位8カテゴリ＋その他。Tシャツ系は正式4分類に寄せ、セール（バンドル割引の擬似カテゴリ）は除外しています。</p>
     </div>`;
 }
 function ptBind(){
   document.querySelectorAll("#pt-gran button").forEach(b=>b.onclick=()=>{ if(PT.gran===b.dataset.g)return; PT.gran=b.dataset.g; PT.loaded=false; renderTrend(); });
   const sc=document.getElementById("pt-scope"); if(sc)sc.onchange=e=>{ PT.scope=e.target.value; PT.loaded=false; renderTrend(); };
+  document.querySelectorAll("#pt-view button").forEach(b=>b.onclick=()=>{ if(PT.view===b.dataset.v)return; PT.view=b.dataset.v; renderTrend(); });
   document.querySelectorAll("#pt-catmode button").forEach(b=>b.onclick=()=>{ if(PT.catMode===b.dataset.m)return; PT.catMode=b.dataset.m; renderTrend(); });
 }
 
