@@ -1063,9 +1063,9 @@ function plRecompute(){
 //  ・粒度：週次（既定）／日次／月次を切り替え。
 //  ・店舗：既定は全店。全店／直営／FC／各店を選べる。
 //  ・主要KPI（来店客数・購入率・客単価・平均購入数・商品単価）の推移を
-//    小さな折れ線＋数表で見せる。KPIは dash_daily から集計（PLと共通ロード）。
+//    数字の表で見せる（横＝日付、縦＝指標）。KPIは dash_daily から集計（PLと共通ロード）。
 //  ・販売カテゴリ比率：dash_category を期間粒度で集計するRPCから取り、
-//    「販売数」「売上比率」をタブで切り替え。上位カテゴリ＋その他の100%積み上げ。
+//    「販売数」「売上比率」をタブで切り替え。表は横＝日付・縦＝カテゴリ（上位＋その他）の構成比%。
 //    Tシャツ系は正式4分類へ寄せ、セール（バンドル割引の擬似カテゴリ）は除外。
 // ============================================================
 const F2=n=>(Math.round(n*100)/100).toLocaleString("ja-JP",{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -1144,16 +1144,6 @@ function ptCatSeries(){
     return {key:k,label:ptPeriodLabel(k,PT.gran),tot,sh};});
   return {cats,rows};
 }
-function ptSpark(vals){
-  const pts=vals.map((v,i)=>({i,v})).filter(p=>p.v!=null&&isFinite(p.v));
-  if(pts.length<2)return '<svg viewBox="0 0 100 30" preserveAspectRatio="none"></svg>';
-  const n=vals.length; let mn=Infinity,mx=-Infinity; pts.forEach(p=>{if(p.v<mn)mn=p.v;if(p.v>mx)mx=p.v;});
-  const pad=(mx-mn)||Math.abs(mx)||1, X=i=>n>1?i/(n-1)*100:50, Y=v=>28-((v-mn)/pad)*26-1;
-  const d=pts.map((p,idx)=>(idx?"L":"M")+X(p.i).toFixed(1)+" "+Y(p.v).toFixed(1)).join(" ");
-  const last=pts[pts.length-1];
-  return `<svg viewBox="0 0 100 30" preserveAspectRatio="none"><path d="${d}" fill="none" stroke="var(--accent)" stroke-width="2" vector-effect="non-scaling-stroke"/><circle cx="${X(last.i).toFixed(1)}" cy="${Y(last.v).toFixed(1)}" r="2.4" fill="var(--accent)"/></svg>`;
-}
-
 async function ptLoadCat(){
   const key=PT.gran+"|"+PT.scope;
   if(PT.catKey===key&&PT.cat)return;
@@ -1179,6 +1169,8 @@ function renderTrend(){
   if(PT.err){ root.innerHTML=`<div class="warnbox">推移を読み込めませんでした：${esc(PT.err)}</div>`; return; }
   root.innerHTML=ptControlsHtml()+ptBodyHtml();
   ptBind();
+  // 横＝日付。最新（右端）が最初に見えるよう右端へスクロール。
+  document.querySelectorAll(".pt-scrollright").forEach(el=>{el.scrollLeft=el.scrollWidth;});
 }
 function ptControlsHtml(){
   const scopes=ptScopeList();
@@ -1192,38 +1184,23 @@ function ptControlsHtml(){
 function ptBodyHtml(){
   const gran=PT.gran, granLbl={day:"日次",week:"週次",month:"月次"}[gran];
   const scopeName=(ptScopeList().find(s=>String(s.id)===String(PT.scope))||{}).name||"";
-  // ---- 主要KPI ----
-  const S=ptKpiSeries();
-  const cards=PT_KPIS.map(m=>{
-    const vals=S.map(p=>p[m.k]), nn=vals.filter(v=>v!=null&&isFinite(v));
-    const last=nn.length?nn[nn.length-1]:null, first=nn.length?nn[0]:null;
-    const delta=(first!=null&&last!=null&&first!==0)?(last/first-1)*100:null;
-    const dcls=delta==null?"mut":(delta>=0?"up":"down");
-    return `<div class="sparkcard"><div class="k">${m.name}</div>
-      <div class="v">${last==null?"—":m.fmt(last)}</div>
-      <div class="d ${dcls}">${delta==null?"&nbsp;":(delta>=0?"▲":"▼")+" "+F1(Math.abs(delta))+"%（期間内）"}</div>
-      ${ptSpark(vals)}</div>`;
-  }).join("");
-  const kHead=`<thead><tr><th>期間</th>${PT_KPIS.map(m=>`<th>${m.name}</th>`).join("")}</tr></thead>`;
-  const kRows=S.slice().reverse().map(p=>`<tr><td>${esc(p.label)}</td>${PT_KPIS.map(m=>`<td>${p[m.k]==null?"—":m.fmt(p[m.k])}</td>`).join("")}</tr>`).join("");
-  // ---- 販売カテゴリ比率 ----
+  const unit=gran==="month"?"ヶ月":gran==="week"?"週":"日";
+  // ---- 主要KPI（横＝日付・縦＝指標）----
+  const S=ptKpiSeries();   // 古い→新しい（左→右が時系列）
+  const kHead=`<thead><tr><th>指標</th>${S.map(p=>`<th>${esc(p.label)}</th>`).join("")}</tr></thead>`;
+  const kRows=PT_KPIS.map(m=>`<tr><td>${m.name}</td>${S.map(p=>`<td>${p[m.k]==null?"—":m.fmt(p[m.k])}</td>`).join("")}</tr>`).join("");
+  // ---- 販売カテゴリ比率（横＝日付・縦＝カテゴリ）----
   const C=ptCatSeries();
-  const legend=C.cats.map((c,i)=>`<span class="pill" style="padding:4px 9px"><span class="catswatch" style="background:${ptCatColor(C.cats,i)}"></span>${esc(c)}</span>`).join("");
-  const catRows=C.rows.slice().reverse().map(r=>{
-    const segs=C.cats.map((c,i)=>{const w=(r.sh[c]||0)*100; return w>0?`<span class="barcell" title="${esc(c)} ${F1(w)}%" style="width:${w.toFixed(2)}%;background:${ptCatColor(C.cats,i)}"></span>`:"";}).join("");
-    let tc=null,tv=-1;C.cats.forEach(c=>{if((r.sh[c]||0)>tv){tv=r.sh[c]||0;tc=c;}});
-    return `<tr><td>${esc(r.label)}</td>
-      <td style="min-width:200px"><span style="display:flex;width:100%;height:13px;border-radius:3px;overflow:hidden;background:var(--surface2)">${segs}</span></td>
-      <td>${tc?esc(tc)+" "+F1(tv*100)+"%":"—"}</td></tr>`;
-  }).join("");
+  const cHead=`<thead><tr><th>カテゴリ</th>${C.rows.map(r=>`<th>${esc(r.label)}</th>`).join("")}</tr></thead>`;
+  const cRows=C.cats.map((c,i)=>`<tr><td><span class="catswatch" style="background:${ptCatColor(C.cats,i)}"></span>${esc(c)}</td>`+
+    C.rows.map(r=>{const v=r.sh[c]; return `<td>${(v==null||!(r.tot>0))?"—":F1(v*100)+"%"}</td>`;}).join("")+`</tr>`).join("");
   const catModeLbl=PT.catMode==="amount"?"売上":"販売数";
   return `
-    <p class="note" style="margin:10px 0 0">${esc(scopeName)}・${granLbl}の推移（直近${S.length||0}${gran==="month"?"ヶ月":gran==="week"?"週":"日"}）。締日＝取り込み済みの最新日まで。</p>
+    <p class="note" style="margin:10px 0 0">${esc(scopeName)}・${granLbl}の推移（直近${S.length||0}${unit}・左→右が古い→新しい）。締日＝取り込み済みの最新日まで。</p>
     <div class="panel">
       <h2>主要KPIの推移</h2>
-      <div class="sparkgrid">${cards||'<span class="sub">データがありません。</span>'}</div>
-      <div class="tblwrap" style="margin-top:12px"><table class="pl">${kHead}<tbody>${kRows||`<tr><td colspan="${PT_KPIS.length+1}" class="mut">データがありません</td></tr>`}</tbody></table></div>
-      <p class="note">来店客数・購入率は入店計測のある店だけで算出。客単価＝税込売上÷取引数／平均購入数＝販売数÷取引数／商品単価＝税抜売上（レジ袋・小物・未分類を除く）÷販売数。増減は期間内の最初→最新の比較。</p>
+      <div class="tblwrap pt-scrollright"><table class="pl">${kHead}<tbody>${kRows||`<tr><td class="mut">データがありません</td></tr>`}</tbody></table></div>
+      <p class="note">来店客数・購入率は入店計測のある店だけで算出。客単価＝税込売上÷取引数／平均購入数＝販売数÷取引数／商品単価＝税抜売上（レジ袋・小物・未分類を除く）÷販売数。</p>
     </div>
     <div class="panel">
       <h2>販売カテゴリ比率</h2>
@@ -1231,12 +1208,8 @@ function ptBodyHtml(){
         <button data-m="qty"${PT.catMode==="qty"?' class="on"':""}>販売数</button>
         <button data-m="amount"${PT.catMode==="amount"?' class="on"':""}>売上比率</button>
       </div>
-      <div class="pills" style="margin:10px 0 4px">${legend}</div>
-      <div class="tblwrap"><table class="pl">
-        <thead><tr><th>期間</th><th>構成比（${catModeLbl}・100%）</th><th>首位</th></tr></thead>
-        <tbody>${catRows||`<tr><td colspan="3" class="mut">カテゴリ明細データがありません</td></tr>`}</tbody>
-      </table></div>
-      <p class="note">各期間の${catModeLbl}に占める割合。上位8カテゴリ＋その他。Tシャツ系は正式4分類に寄せ、セール（バンドル割引の擬似カテゴリ）は除外しています。バーにカーソルを合わせると内訳が出ます。</p>
+      <div class="tblwrap pt-scrollright" style="margin-top:10px"><table class="pl">${cHead}<tbody>${cRows||`<tr><td class="mut">カテゴリ明細データがありません</td></tr>`}</tbody></table></div>
+      <p class="note">各期間の${catModeLbl}に占める割合（列合計＝100%）。上位8カテゴリ＋その他。Tシャツ系は正式4分類に寄せ、セール（バンドル割引の擬似カテゴリ）は除外しています。</p>
     </div>`;
 }
 function ptBind(){
