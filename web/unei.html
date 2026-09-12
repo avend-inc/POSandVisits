@@ -96,6 +96,36 @@
   .gate .logo{font-size:22px;font-weight:750;} .gate .t{font-size:16px;font-weight:700;margin:18px 0 6px;} .gate .m{color:var(--ink2);font-size:14px;line-height:1.8;}
   .gbtn{display:inline-flex;align-items:center;gap:10px;background:var(--surface);color:var(--ink);border:1px solid var(--border);border-radius:11px;padding:12px 20px;font-size:15px;font-weight:700;cursor:pointer;box-shadow:var(--shadow);margin-top:18px;}
   .gbtn .g{width:18px;height:18px;border-radius:50%;background:conic-gradient(#ea4335 0 25%,#fbbc05 0 50%,#34a853 0 75%,#4285f4 0);}
+  /* ---- 月次予実（P&L）---- */
+  .plctl{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:14px 0 2px;}
+  .plctl label{font-size:12px;color:var(--muted);}
+  select.pick{border:1px solid var(--border);background:var(--surface);color:var(--ink);border-radius:9px;padding:8px 10px;font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;max-width:100%;}
+  .hero{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;}
+  .hcard{background:var(--surface2);border:1px solid var(--border);border-radius:11px;padding:11px 12px;}
+  .hcard .k{font-size:12px;color:var(--ink2);font-weight:600;}
+  .hcard .v{font-size:22px;font-weight:800;margin-top:3px;line-height:1.1;}
+  .hcard .s{font-size:11.5px;color:var(--muted);margin-top:3px;font-weight:600;}
+  .tblwrap{overflow-x:auto;}
+  table.pl{width:100%;border-collapse:collapse;font-size:13px;min-width:520px;}
+  table.pl th,table.pl td{padding:7px 8px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--border);}
+  table.pl th:first-child,table.pl td:first-child{text-align:left;position:sticky;left:0;background:var(--surface);}
+  table.pl th{color:var(--ink2);font-weight:700;font-size:11px;background:var(--surface);}
+  table.pl tr.sect td{background:var(--surface2);font-weight:750;font-size:11.5px;color:var(--ink2);}
+  table.pl tr.total td{font-weight:750;border-top:2px solid var(--border);background:var(--surface2);}
+  table.pl tr.subitem td:first-child{padding-left:22px;color:var(--ink2);font-weight:600;}
+  table.pl tr.subitem td{background:var(--surface);}
+  .toggle-oth{border:0;background:transparent;color:var(--accent);font-size:12px;font-weight:700;cursor:pointer;padding:0;font-family:inherit;text-decoration:underline;}
+  input.num{width:104px;background:var(--surface);color:var(--ink);border:1px solid var(--border);border-radius:8px;padding:6px 8px;font-size:13px;font-weight:600;text-align:right;font-family:inherit;}
+  input.num:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-weak);}
+  input.num:disabled{opacity:.65;cursor:not-allowed;background:var(--surface2);color:var(--ink2);}
+  input.num.editing{border-color:var(--bad);background:rgba(192,57,43,.07);}
+  input.num.saved{border-color:var(--good);background:rgba(26,138,90,.12);transition:background .4s,border-color .4s;}
+  .auto{color:var(--ink);font-weight:700;} .up{color:var(--good);} .down{color:var(--bad);} .mut{color:var(--muted);}
+  .btn-save{border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:9px;padding:8px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;}
+  .btn-save:disabled{opacity:.45;cursor:default;} .btn-save.dirty{box-shadow:0 0 0 3px var(--accent-weak);}
+  .savebar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:10px 0 0;}
+  .chip{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:8px;padding:7px 11px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;}
+  .chip:hover{color:var(--ink);border-color:var(--accent);}
 </style>
 </head>
 <body>
@@ -227,14 +257,18 @@ function showDenied(msg){
 
 // ---- 画面の状態はURLに載せる（共有・リロードで戻れるように）------------------
 const SUBTABS=[
+  {key:"pl",        label:"月次予実"},
   {key:"stocktake", label:"棚卸し"},
   {key:"rack",      label:"ラック効率"},
   {key:"teirei",    label:"直営定例"},
 ];
+// 月次予実は「まず店舗を選ぶ」の流れに乗らない（直営全店＋店舗別を自前で切り替える）。
+// 棚卸し・ラック・定例は従来どおり店舗を選んでから中を見る。
+const STORE_FIRST=new Set(["stocktake","rack","teirei"]);
 function readState(){
   const q=new URLSearchParams(location.search);
   const s=q.get("store"); STORE=(s&&/^\d+$/.test(s))?+s:null;
-  const t=q.get("t");     TAB=SUBTABS.some(x=>x.key===t)?t:"stocktake";
+  const t=q.get("t");     TAB=SUBTABS.some(x=>x.key===t)?t:"pl";
 }
 function pushState(){
   const u=new URL(location.href);
@@ -263,7 +297,19 @@ function bindHeader(){
     r.setAttribute("data-theme",c==="dark"?"light":"dark");};
   document.getElementById("logout").onclick=async()=>{try{await SB.auth.signOut();}catch(e){}location.reload();};
 }
-function render(){ STORE==null?renderPicker():renderStore(); }
+// 細かいタブのバー（画面のいちばん上・店舗を選ぶ前から出す）。
+// これで「棚卸しの店舗選択」に入らなくても月次予実へ行ける。
+function subtabBarHtml(){
+  return `<div class="subtabs">${SUBTABS.map(t=>
+    `<button data-tab="${t.key}"${t.key===TAB?' class="on"':""}>${esc(t.label)}</button>`).join("")}</div>`;
+}
+function bindSubtabBar(){
+  document.querySelectorAll(".subtabs button").forEach(b=>{b.onclick=()=>setTab(b.dataset.tab);});
+}
+function render(){
+  if(TAB==="pl")return renderPL();
+  STORE==null?renderPicker():renderStore();
+}
 
 // 店舗選択（直営のみ）。カードには最後に数えた日を出して、押す前に状況が分かるようにする。
 function renderPicker(){
@@ -281,15 +327,18 @@ function renderPicker(){
         <span class="meta ${days!=null&&days>=45?"old":""}">${esc(meta)}</span></span>
       <span class="go">›</span></button>`;
   }).join("");
+  const label=(SUBTABS.find(t=>t.key===TAB)||{}).label||"";
   screen(`${headerHtml()}
+    ${subtabBarHtml()}
     <div class="panel">
-      <h2>店舗を選ぶ</h2>
+      <h2>店舗を選ぶ${label?`（${esc(label)}）`:""}</h2>
       <p class="lead">現場の作業は店舗ごとに回します。まず店舗を選んでください。<br>
         <span class="sub">直営店だけを出しています。</span></p>
       <div class="storelist">${cards||'<span class="sub">直営店が見つかりませんでした。</span>'}</div>
       ${SCAN.error?`<div class="warnbox">棚卸しの記録を読み込めませんでした（${esc(SCAN.error)}）。店舗は選べます。</div>`:""}
     </div>`);
   bindHeader();
+  bindSubtabBar();
   document.querySelectorAll(".storecard").forEach(b=>{b.onclick=()=>selectStore(+b.dataset.store);});
 }
 
@@ -297,15 +346,14 @@ function renderPicker(){
 function renderStore(){
   const s=storeOf(STORE);
   screen(`${headerHtml()}
+    ${subtabBarHtml()}
     <div style="margin-top:12px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
       <button class="navlink" id="backstore">‹ 店舗を変える</button>
       <span style="font-size:17px;font-weight:800">${esc(s?s.name:"（不明な店舗）")}</span></div>
-    <div class="subtabs">${SUBTABS.map(t=>
-      `<button data-tab="${t.key}"${t.key===TAB?' class="on"':""}>${esc(t.label)}</button>`).join("")}</div>
     <div id="body">${TAB==="stocktake"?stocktakeHtml():TAB==="rack"?rackHtml():teireiHtml()}</div>`);
   bindHeader();
+  bindSubtabBar();
   document.getElementById("backstore").onclick=clearStore;
-  document.querySelectorAll(".subtabs button").forEach(b=>{b.onclick=()=>setTab(b.dataset.tab);});
   bindStocktake();
   if(TAB==="stocktake")loadDetail(currentSession());
 }
@@ -709,6 +757,283 @@ function teireiHtml(){
         </ul>
       </div>
     </div>`;
+}
+
+// ============================================================
+//  月次予実（P&L）タブ ＝ 運営の最初の小タブ
+//
+//  ・対象は直営のみ。「直営全店」＋「店舗別」を店舗セレクタで切り替える。
+//  ・予算は事業計画（bizplan）から RPC bizplan_store_pl で引く（本部だけが読める）。
+//     販管費の細目は bizplan の粗い区分に寄せ、区分に無いものは「その他」にまとめる。
+//  ・実績：税抜売上は POS 取込データから自動。原価・販管費は POS に無いので手入力
+//     （plan_data page="mpl"・店舗×月ごと・全端末で共有）。
+//  ・「その他」の実績は、細目（PR費用・配送料…）を表示/非表示で開閉して入力できる。
+//     その合計が「その他」の実績になる。予算側は bizplan の「その他」1本にまとめる。
+// ============================================================
+const YEN=n=>Math.round(n).toLocaleString("ja-JP");
+const F1=n=>(Math.round(n*10)/10).toLocaleString("ja-JP",{minimumFractionDigits:1,maximumFractionDigits:1});
+const NUMc=n=>Number(n).toLocaleString("ja-JP");
+const plParse=s=>{const n=Number(String(s).replace(/[,，\s]/g,""));return Number.isFinite(n)?n:NaN;};
+function setTxt(id,txt,cls){const el=document.getElementById(id);if(!el)return;el.textContent=txt;if(cls!==undefined)el.className=cls;}
+function plDiff(d){return (d>=0?"+":"−")+YEN(Math.abs(d))+"円";}
+
+// 販管費の区分（予算は bizplan、実績は手入力）。人件費は bizplan の3項目を合算。
+const PL_SGA=[
+  {label:"家賃",      bz:["家賃"]},
+  {label:"人件費",    bz:["給与・交通費","就労支援","アルバイト"]},
+  {label:"広告費",    bz:["広告費"]},
+  {label:"決済手数料", bz:["支払い手数料"]},
+  {label:"本社配賦",  bz:["本社配賦"]},
+  {label:"水光熱",    bz:["水道高熱費"]},
+  {label:"減価償却",  bz:["減価償却"]},
+];
+// 「その他」の実績・細目（予算は bizplan「その他」1本にまとめる）。
+const PL_OTHER=["PR費用","配送料","タグ代","通信・USEN","監視カメラ","火災保険","初期ローン","入店管理システム","レジ利用料","物件更新手数料","保証会社更新手数料","雑費"];
+
+const PL={loaded:false,loading:false,err:null,data:null,daily:null,
+  budget:{},budgetYm:null,scope:"own",ym:null,M:{},MALL:{},showOther:false,dirty:false};
+
+function plIsAgg(){return PL.scope==="own";}
+function plStoreMeta(sid){return (PL.data.stores||[]).find(x=>String(x.id)===String(sid))||null;}
+function plOwnStores(){ const w=new Set(PL.daily.map(r=>r.s));
+  return (PL.data.stores||[]).filter(s=>((s.own||"直営")==="直営")&&s.visible!==false&&w.has(s.id))
+    .sort((a,b)=>String(a.name).localeCompare(String(b.name),"ja")); }
+function plIds(){ return plIsAgg()? new Set(plOwnStores().map(s=>s.id)) : new Set([Number(PL.scope)]); }
+function plMonths(){return [...new Set(PL.daily.map(r=>r.d.slice(0,7)))].sort();}
+// dash店舗名(NOTIME山形店)に含まれる bizplan の店名(山形店)で予算を引く
+function plBizNameOf(sid){const nm=(plStoreMeta(sid)||{}).name||"";
+  for(const bn in PL.budget){ if(bn&&nm.indexOf(bn)>=0)return bn; } return null; }
+function plBudSum(ids,items){let t=0,any=false;
+  for(const sid of ids){const bn=plBizNameOf(sid);if(!bn)continue;const b=PL.budget[bn]||{};
+    for(const it of items){ if(Number.isFinite(b[it])){t+=b[it];any=true;} }}
+  return any?t:null; }
+function plMval(sid,key){const m=plIsAgg()?(PL.MALL[String(sid)]||{}):PL.M;const v=m[key];return Number.isFinite(v)?v:0;}
+function plActSum(ids,key){let t=0;for(const sid of ids)t+=plMval(sid,key);return t;}
+function plOtherActSum(ids){let t=0;PL_OTHER.forEach((_,j)=>t+=plActSum(ids,"o"+j+"_a"));return t;}
+function plComputeActual(ids,ym){const a={in:0,ex:0,tx:0,it:0,v:0,bag:0};
+  for(const r of PL.daily){ if(!ids.has(r.s))continue; if(r.d.slice(0,7)!==ym)continue;
+    a.in+=r.in||0;a.ex+=r.ex||0;a.tx+=r.tx||0;a.it+=r.it||0;a.v+=r.v||0;a.bag+=r.bag||0; }
+  return a; }
+
+// ---- 読み込み ----
+async function plLoadDaily(){
+  const PAGE=1000,CONC=8,cols="date,store_id,sales_in,sales_ex,tx,items,visitors,bag_in";
+  const out=[];let page=0,done=false;
+  while(!done){const jobs=[];
+    for(let i=0;i<CONC;i++,page++){const off=page*PAGE;jobs.push(SB.from("dash_daily").select(cols).order("date").range(off,off+PAGE-1));}
+    const res=await Promise.all(jobs);
+    for(const {data,error} of res){ if(error)throw new Error("日別データ取得失敗："+error.message); out.push(...(data||[])); if(!data||data.length<PAGE)done=true; }}
+  return out.map(r=>({d:r.date,s:r.store_id,in:r.sales_in,ex:r.sales_ex,tx:r.tx,it:r.items,v:r.visitors,bag:r.bag_in}));
+}
+async function plEnsureBase(){ if(PL.daily)return;
+  const {data,error}=await SB.storage.from("dashboard-data").download("data.json");
+  if(error)throw new Error("店舗データ取得失敗："+error.message);
+  PL.data=JSON.parse(await data.text());
+  PL.daily=await plLoadDaily();
+}
+async function plLoadBudget(ym){ PL.budget={};PL.budgetYm=ym;
+  try{const {data,error}=await SB.rpc("bizplan_store_pl",{p_ym:ym});
+    if(error)return;
+    (data||[]).forEach(r=>{const k=r.pos_store_name;(PL.budget[k]=PL.budget[k]||{})[r.item]=Number(r.amount)||0;});
+  }catch(e){}
+}
+async function plPlanLoad(scope,ym){try{const {data}=await SB.from("plan_data").select("data").eq("page","mpl").eq("scope",String(scope)).eq("ym",ym).maybeSingle();return data?(data.data||{}):{};}catch(e){return {};}}
+async function plPlanLoadAll(ym){try{const {data}=await SB.from("plan_data").select("scope,data").eq("page","mpl").eq("ym",ym);const m={};(data||[]).forEach(r=>m[r.scope]=r.data||{});return m;}catch(e){return {};}}
+async function plPlanSave(scope,ym,data){try{await SB.from("plan_data").upsert({page:"mpl",scope:String(scope),ym,data,updated_at:new Date().toISOString(),updated_by:ME.email},{onConflict:"page,scope,ym"});}catch(e){}}
+async function plPlanDelete(scope,ym){try{await SB.from("plan_data").delete().eq("page","mpl").eq("scope",String(scope)).eq("ym",ym);}catch(e){}}
+async function loadPL(){
+  if(PL.loading)return; PL.loading=true; PL.err=null;
+  try{
+    await plEnsureBase();
+    const months=plMonths();
+    if(!months.length)throw new Error("売上データがまだありません");
+    if(!PL.ym||!months.includes(PL.ym))PL.ym=months[months.length-1];
+    if(PL.budgetYm!==PL.ym)await plLoadBudget(PL.ym);
+    if(plIsAgg()){PL.MALL=await plPlanLoadAll(PL.ym);PL.M={};}
+    else{PL.M=await plPlanLoad(PL.scope,PL.ym);PL.MALL={};}
+    PL.loaded=true;
+  }catch(e){PL.err=String(e&&e.message||e);}
+  PL.loading=false;
+}
+
+// ---- 描画 ----
+function renderPL(){
+  screen(`${headerHtml()}${subtabBarHtml()}<div id="plroot"></div>`);
+  bindHeader(); bindSubtabBar();
+  const root=document.getElementById("plroot");
+  if(!PL.loaded){
+    root.innerHTML='<div class="panel"><p class="sub">読み込み中…</p></div>';
+    if(!PL.loading)loadPL().then(()=>{ if(TAB==="pl")renderPL(); });
+    return;
+  }
+  if(PL.err){ root.innerHTML=`<div class="warnbox">月次予実を読み込めませんでした：${esc(PL.err)}</div>`; return; }
+  root.innerHTML=plControlsHtml()+plBodyHtml();
+  plBindControls(); plBindInputs(); plRecompute();
+}
+function plControlsHtml(){
+  const months=plMonths();
+  const scopes=[{id:"own",name:"直営全店"},...plOwnStores().map(s=>({id:String(s.id),name:s.name}))];
+  const editable=!plIsAgg()&&canEdit();
+  return `<div class="plctl">
+      <label>店舗</label>
+      <select class="pick" id="pl-scope">${scopes.map(s=>`<option value="${s.id}"${String(s.id)===String(PL.scope)?" selected":""}>${esc(s.name)}</option>`).join("")}</select>
+      <label style="margin-left:6px">対象月</label>
+      <select class="pick" id="pl-ym">${months.slice().reverse().map(m=>{const[a,b]=m.split("-");return `<option value="${m}"${m===PL.ym?" selected":""}>${a}年${+b}月</option>`;}).join("")}</select>
+    </div>
+    ${editable
+      ? `<div class="savebar"><button class="btn-save" id="pl-commit" disabled>更新</button><span class="sub" id="pl-commit-note">実績（原価・販管費）を入力→「更新」で全端末に保存</span><button class="chip" id="pl-reset">この月の入力を消す</button></div>`
+      : `<p class="note" style="margin:8px 0 0">${plIsAgg()?"直営全店は各店に入力した実績の合計です（自動）。原価・販管費を入力するには店舗を選んでください。":"閲覧のみ（入力・編集は「編集」または「管理」権限の方）。"}</p>`}`;
+}
+function plBudCell(id){return `<span id="${id}">—</span>`;}
+function plAmtCell(key){
+  if(!plIsAgg()&&canEdit()){const v=PL.M[key];
+    return `<input class="num plin" data-k="${key}" type="text" inputmode="decimal" value="${Number.isFinite(v)?NUMc(v):""}" placeholder="—">`;}
+  return `<span class="auto" id="pl-cell-${key}">—</span>`;
+}
+function plBodyHtml(){
+  const ids=plIds();
+  const A=plComputeActual(ids,PL.ym);
+  const scopeName=plIsAgg()?"直営全店":((plStoreMeta(PL.scope)||{}).name||"");
+  const [y,mm]=PL.ym.split("-"); const monthLabel=`${y}年${+mm}月`;
+  const sgaRows=PL_SGA.map((r,i)=>`<tr>
+      <td>${esc(r.label)}</td>
+      <td>${plBudCell("pl-b-s"+i)}</td>
+      <td>${plAmtCell("s"+i+"_a")}</td>
+      <td id="pl-d-s${i}" class="mut"></td></tr>`).join("");
+  const otherSubRows=PL_OTHER.map((c,j)=>`<tr class="subitem"${PL.showOther?"":' hidden'}>
+      <td>${esc(c)}</td><td class="mut">—</td><td>${plAmtCell("o"+j+"_a")}</td><td></td></tr>`).join("");
+  // 参考：売上KPI（実績のみ）
+  const kpi=(lbl,val)=>`<tr><td>${lbl}</td><td class="auto">${val}</td></tr>`;
+  return `
+    <div class="panel">
+      <h2>${monthLabel}・${esc(scopeName)} サマリー</h2>
+      <div class="hero">
+        <div class="hcard"><div class="k">税抜売上（実績）</div><div class="v" id="h-ex">—</div><div class="s" id="h-ex-s"></div></div>
+        <div class="hcard"><div class="k">売上 予実達成率</div><div class="v" id="h-rate">—</div><div class="s">予算（税抜）に対して</div></div>
+        <div class="hcard"><div class="k">営業利益（実績）</div><div class="v" id="h-op">—</div><div class="s" id="h-op-s"></div></div>
+        <div class="hcard"><div class="k">営業利益率</div><div class="v" id="h-opr">—</div><div class="s">対 税抜売上</div></div>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>損益（P&amp;L）予実 <span class="sub" style="font-weight:500">※予算＝事業計画／実績の原価・販管費は手入力</span></h2>
+      <div class="tblwrap"><table class="pl">
+        <thead><tr><th>項目</th><th>予算</th><th>実績</th><th>差異／率</th></tr></thead>
+        <tbody>
+          <tr class="keyrow"><td>税抜売上</td><td>${plBudCell("pl-b-ex")}</td><td class="auto" id="pl-a-ex">—</td><td id="pl-d-ex" class="mut"></td></tr>
+          <tr><td>売上原価</td><td>${plBudCell("pl-b-genka")}</td><td>${plAmtCell("genka_a")}</td><td id="pl-d-genka" class="mut"></td></tr>
+          <tr class="total"><td>粗利</td><td>${plBudCell("pl-b-gross")}</td><td class="auto" id="pl-a-gross">—</td><td id="pl-d-gross" class="mut"></td></tr>
+          <tr class="sect"><td>販管費（内訳）</td><td>予算</td><td>実績</td><td></td></tr>
+          ${sgaRows}
+          <tr>
+            <td>その他 <button class="toggle-oth" id="pl-oth-toggle">${PL.showOther?"▲ 細目を隠す":"▼ 細目を入力"}</button></td>
+            <td>${plBudCell("pl-b-oth")}</td>
+            <td class="auto" id="pl-a-oth">—</td>
+            <td id="pl-d-oth" class="mut"></td></tr>
+          ${otherSubRows}
+          <tr class="total"><td>販管費 合計</td><td>${plBudCell("pl-b-sga")}</td><td class="auto" id="pl-a-sga">—</td><td id="pl-d-sga" class="mut"></td></tr>
+          <tr class="total"><td>営業利益</td><td>${plBudCell("pl-b-op")}</td><td class="auto" id="pl-a-op">—</td><td id="pl-d-op" class="mut"></td></tr>
+          <tr><td>営業利益率</td><td>${plBudCell("pl-b-opr")}</td><td class="auto" id="pl-a-opr">—</td><td></td></tr>
+        </tbody>
+      </table></div>
+      <p class="note">予算は事業計画（bizplan）から自動。粗利＝税抜売上−原価／営業利益＝粗利−販管費合計／営業利益率＝営業利益÷税抜売上。<b>「その他」の細目</b>（PR費用・配送料など）は「▼ 細目を入力」で開いて実績を入れると、その合計が「その他 実績」になります（予算側は事業計画の「その他」1本）。</p>
+    </div>
+    <div class="panel">
+      <h2>参考：売上KPI（実績）</h2>
+      <div class="tblwrap"><table class="pl" style="min-width:360px">
+        <thead><tr><th>指標</th><th>実績</th></tr></thead>
+        <tbody>
+          ${kpi("税込売上（レジ袋込）",YEN(A.in+A.bag)+"円")}
+          ${kpi("税抜売上",YEN(A.ex)+"円")}
+          ${kpi("販売数",NUM(A.it)+"点")}
+          ${kpi("購入客数（取引数）",NUM(A.tx)+"件")}
+          ${kpi("来店客数",NUM(A.v)+"人")}
+          ${kpi("客単価（税込）",A.tx?YEN((A.in)/A.tx)+"円":"—")}
+          ${kpi("商品単価（税抜）",A.it?YEN(A.ex/A.it)+"円":"—")}
+        </tbody>
+      </table></div>
+      <p class="note">実績はアプリの取込データから自動（レジ袋・クーポン・小物は販売数から除外）。</p>
+    </div>`;
+}
+function plBindControls(){
+  document.getElementById("pl-scope").onchange=e=>{ if(PL.dirty&&!confirm("未保存の変更があります。切り替えると破棄されます。よろしいですか？")){e.target.value=String(PL.scope);return;} PL.scope=e.target.value; PL.dirty=false; PL.loaded=false; renderPL(); };
+  document.getElementById("pl-ym").onchange=e=>{ if(PL.dirty&&!confirm("未保存の変更があります。切り替えると破棄されます。よろしいですか？")){e.target.value=PL.ym;return;} PL.ym=e.target.value; PL.dirty=false; PL.loaded=false; PL.budgetYm=null; renderPL(); };
+  const c=document.getElementById("pl-commit"); if(c)c.onclick=plCommit;
+  const rb=document.getElementById("pl-reset"); if(rb)rb.onclick=async()=>{ if(confirm("この店舗・この月の入力を消しますか？")){await plPlanDelete(PL.scope,PL.ym); PL.M={}; PL.dirty=false; PL.loaded=false; renderPL(); } };
+  const ot=document.getElementById("pl-oth-toggle"); if(ot)ot.onclick=()=>{ PL.showOther=!PL.showOther; renderPL(); };
+}
+function plBindInputs(){
+  document.querySelectorAll(".plin").forEach(el=>{
+    el.oninput=()=>{const k=el.dataset.k;const v=plParse(el.value);
+      if(el.value.trim()===""){delete PL.M[k];}else if(Number.isFinite(v)){PL.M[k]=v;}else{delete PL.M[k];}
+      el.classList.remove("saved");el.classList.add("editing");plMarkDirty();plRecompute();};
+    el.onfocus=()=>{const k=el.dataset.k;if(Number.isFinite(PL.M[k]))el.value=String(PL.M[k]);};
+    el.onblur=()=>{const k=el.dataset.k;el.value=Number.isFinite(PL.M[k])?NUMc(PL.M[k]):"";};
+  });
+  if(PL.dirty)plMarkDirty();
+}
+function plMarkDirty(){PL.dirty=true;const c=document.getElementById("pl-commit");
+  if(c){c.disabled=false;c.classList.add("dirty");c.textContent="更新（未保存）";}
+  const n=document.getElementById("pl-commit-note");if(n)n.textContent="未保存の変更があります。「更新」で保存してください";}
+async function plCommit(){
+  const c=document.getElementById("pl-commit");if(c){c.disabled=true;c.textContent="保存中…";}
+  await plPlanSave(PL.scope,PL.ym,PL.M); PL.dirty=false;
+  document.querySelectorAll("input.num.editing").forEach(el=>{el.classList.remove("editing");el.classList.add("saved");setTimeout(()=>el.classList.remove("saved"),1600);});
+  if(c){c.classList.remove("dirty");c.textContent="更新済み ✓";}
+  const n=document.getElementById("pl-commit-note");if(n)n.textContent="保存しました（全端末に反映）";
+  setTimeout(()=>{const cc=document.getElementById("pl-commit");if(cc&&!PL.dirty){cc.textContent="更新";cc.disabled=true;}
+    const nn=document.getElementById("pl-commit-note");if(nn&&!PL.dirty)nn.textContent="実績（原価・販管費）を入力→「更新」で全端末に保存";},1800);
+}
+function plRecompute(){
+  const ids=plIds();
+  const A=plComputeActual(ids,PL.ym), exA=A.ex;
+  const exB=plBudSum(ids,["売上"]), genB=plBudSum(ids,["原価"]);
+  const genA=plActSum(ids,"genka_a");
+  // 税抜売上
+  setTxt("pl-b-ex", exB!=null?YEN(exB)+"円":"—");
+  setTxt("pl-a-ex", YEN(exA)+"円","auto");
+  setTxt("pl-d-ex", exB!=null?plDiff(exA-exB):"", exB!=null?(exA>=exB?"up":"down"):"mut");
+  // 原価
+  setTxt("pl-b-genka", genB!=null?YEN(genB)+"円":"—");
+  setTxt("pl-cell-genka_a", YEN(genA)+"円","auto");
+  setTxt("pl-d-genka", exA>0?("原価率 "+F1(genA/exA*100)+"%"):(genB!=null?plDiff(genA-genB):""), "mut");
+  // 粗利
+  const grA=exA-genA, grB=(exB!=null&&genB!=null)?exB-genB:null;
+  setTxt("pl-a-gross", YEN(grA)+"円","auto");
+  setTxt("pl-b-gross", grB!=null?YEN(grB)+"円":"—");
+  setTxt("pl-d-gross", grB!=null?plDiff(grA-grB):"", grB!=null?(grA>=grB?"up":"down"):"mut");
+  // 販管費 各区分
+  let sgaA=0,sgaB=0,anyB=false;
+  PL_SGA.forEach((r,i)=>{const a=plActSum(ids,"s"+i+"_a");const b=plBudSum(ids,r.bz);
+    sgaA+=a; if(b!=null){sgaB+=b;anyB=true;}
+    setTxt("pl-b-s"+i, b!=null?YEN(b)+"円":"—");
+    setTxt("pl-cell-s"+i+"_a", YEN(a)+"円","auto");
+    setTxt("pl-d-s"+i, (a||b!=null)?plDiff(a-(b||0)):"", "mut");});
+  // その他（実績＝細目合計、予算＝bizplan「その他」）
+  const othA=plOtherActSum(ids), othB=plBudSum(ids,["その他"]);
+  sgaA+=othA; if(othB!=null){sgaB+=othB;anyB=true;}
+  PL_OTHER.forEach((_,j)=>setTxt("pl-cell-o"+j+"_a", YEN(plActSum(ids,"o"+j+"_a"))+"円","auto"));
+  setTxt("pl-b-oth", othB!=null?YEN(othB)+"円":"—");
+  setTxt("pl-a-oth", YEN(othA)+"円","auto");
+  setTxt("pl-d-oth", (othA||othB!=null)?plDiff(othA-(othB||0)):"", "mut");
+  // 販管費合計
+  setTxt("pl-a-sga", YEN(sgaA)+"円","auto");
+  setTxt("pl-b-sga", anyB?YEN(sgaB)+"円":"—");
+  setTxt("pl-d-sga", anyB?plDiff(sgaA-sgaB):"", "mut");
+  // 営業利益
+  const opA=grA-sgaA, opB=(grB!=null)?grB-sgaB:null;
+  setTxt("pl-a-op", YEN(opA)+"円","auto");
+  setTxt("pl-b-op", opB!=null?YEN(opB)+"円":"—");
+  setTxt("pl-d-op", opB!=null?plDiff(opA-opB):"", opB!=null?(opA>=opB?"up":"down"):"mut");
+  setTxt("pl-a-opr", exA>0?F1(opA/exA*100)+"%":"—","auto "+(opA>=0?"up":"down"));
+  setTxt("pl-b-opr", (opB!=null&&exB)?F1(opB/exB*100)+"%":"—");
+  // ヒーロー
+  setTxt("h-ex", YEN(exA)+"円");
+  setTxt("h-ex-s", exB!=null?("予算 "+YEN(exB)+"円"):"予算 未登録");
+  setTxt("h-rate", exB?F1(exA/exB*100)+"%":"—", "v "+(exB&&exA>=exB?"up":exB?"down":""));
+  const showOp = exA>0 && (sgaA>0||genA>0);
+  setTxt("h-op", showOp?YEN(opA)+"円":"—", "v "+(showOp?(opA>=0?"up":"down"):""));
+  setTxt("h-op-s", showOp?("粗利 "+YEN(grA)+"円"):"原価・販管費を入力");
+  setTxt("h-opr", showOp?F1(opA/exA*100)+"%":"—", "v "+(showOp?(opA>=0?"up":"down"):""));
 }
 
 readState();
