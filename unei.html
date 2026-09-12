@@ -126,6 +126,18 @@
   .savebar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:10px 0 0;}
   .chip{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:8px;padding:7px 11px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;}
   .chip:hover{color:var(--ink);border-color:var(--accent);}
+  /* ---- 推移（トレンド）---- */
+  .segbar{display:inline-flex;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:3px;gap:2px;}
+  .segbar button{border:0;background:transparent;color:var(--ink2);font-size:13px;font-weight:700;padding:7px 14px;border-radius:8px;cursor:pointer;font-family:inherit;}
+  .segbar button.on{background:var(--accent);color:#fff;}
+  .sparkgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;}
+  .sparkcard{background:var(--surface2);border:1px solid var(--border);border-radius:11px;padding:10px 12px;}
+  .sparkcard .k{font-size:12px;color:var(--ink2);font-weight:700;}
+  .sparkcard .v{font-size:20px;font-weight:800;line-height:1.15;margin-top:2px;}
+  .sparkcard .d{font-size:11.5px;font-weight:700;margin-top:1px;}
+  .sparkcard svg{display:block;width:100%;height:44px;margin-top:6px;overflow:visible;}
+  .catswatch{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:baseline;}
+  table.pl td .barcell{display:inline-block;height:8px;border-radius:2px;vertical-align:middle;}
 </style>
 </head>
 <body>
@@ -258,11 +270,12 @@ function showDenied(msg){
 // ---- 画面の状態はURLに載せる（共有・リロードで戻れるように）------------------
 const SUBTABS=[
   {key:"pl",        label:"月次予実"},
+  {key:"trend",     label:"推移"},
   {key:"stocktake", label:"棚卸し"},
   {key:"rack",      label:"ラック効率"},
   {key:"teirei",    label:"直営定例"},
 ];
-// 月次予実は「まず店舗を選ぶ」の流れに乗らない（直営全店＋店舗別を自前で切り替える）。
+// 月次予実・推移は「まず店舗を選ぶ」の流れに乗らない（全店/スコープを自前で切り替える）。
 // 棚卸し・ラック・定例は従来どおり店舗を選んでから中を見る。
 const STORE_FIRST=new Set(["stocktake","rack","teirei"]);
 function readState(){
@@ -308,6 +321,7 @@ function bindSubtabBar(){
 }
 function render(){
   if(TAB==="pl")return renderPL();
+  if(TAB==="trend")return renderTrend();
   STORE==null?renderPicker():renderStore();
 }
 
@@ -810,21 +824,28 @@ function plBudSum(ids,items){let t=0,any=false;
 function plMval(sid,key){const m=plIsAgg()?(PL.MALL[String(sid)]||{}):PL.M;const v=m[key];return Number.isFinite(v)?v:0;}
 function plActSum(ids,key){let t=0;for(const sid of ids)t+=plMval(sid,key);return t;}
 function plOtherActSum(ids){let t=0;PL_OTHER.forEach((_,j)=>t+=plActSum(ids,"o"+j+"_a"));return t;}
-function plComputeActual(ids,ym){const a={in:0,ex:0,tx:0,it:0,v:0,bag:0};
+function plComputeActual(ids,ym){const a={in:0,ex:0,tx:0,it:0,v:0,bag:0,aupEx:0};
   for(const r of PL.daily){ if(!ids.has(r.s))continue; if(r.d.slice(0,7)!==ym)continue;
-    a.in+=r.in||0;a.ex+=r.ex||0;a.tx+=r.tx||0;a.it+=r.it||0;a.v+=r.v||0;a.bag+=r.bag||0; }
+    a.in+=r.in||0;a.ex+=r.ex||0;a.tx+=r.tx||0;a.it+=r.it||0;a.v+=r.v||0;a.bag+=r.bag||0;
+    a.aupEx+=(r.ex||0)-(r.bagEx||0)-(r.komEx||0)-(r.nocatEx||0); }   // 商品単価の分子（レジ袋・小物・未分類を除いた税抜）
   return a; }
 
 // ---- 読み込み ----
 async function plLoadDaily(){
-  const PAGE=1000,CONC=8,cols="date,store_id,sales_in,sales_ex,tx,items,visitors,bag_in";
+  const PAGE=1000,CONC=8,cols="date,store_id,sales_in,sales_ex,tx,items,visitors,bag_in,bag_ex,komono_ex,nocat_ex";
   const out=[];let page=0,done=false;
   while(!done){const jobs=[];
     for(let i=0;i<CONC;i++,page++){const off=page*PAGE;jobs.push(SB.from("dash_daily").select(cols).order("date").range(off,off+PAGE-1));}
     const res=await Promise.all(jobs);
     for(const {data,error} of res){ if(error)throw new Error("日別データ取得失敗："+error.message); out.push(...(data||[])); if(!data||data.length<PAGE)done=true; }}
-  return out.map(r=>({d:r.date,s:r.store_id,in:r.sales_in,ex:r.sales_ex,tx:r.tx,it:r.items,v:r.visitors,bag:r.bag_in}));
+  return out.map(r=>({d:r.date,s:r.store_id,in:r.sales_in,ex:r.sales_ex,tx:r.tx,it:r.items,v:r.visitors,bag:r.bag_in,
+    bagEx:r.bag_ex,komEx:r.komono_ex,nocatEx:r.nocat_ex}));
 }
+// 店舗メタ（data.json）から：来店をKPIに使うか／区分（直営・FC）／ブランド
+function plKvOf(sid){const s=plStoreMeta(sid);return s?(s.kv!==false):true;}
+function plStoreOwn(sid){const s=plStoreMeta(sid);return (s&&s.own)?s.own:"直営";}
+function plBrandOf(sid){const s=plStoreMeta(sid);const n=(s&&s.name)||"";
+  if(n.indexOf("SELFURUGI")>=0)return "SELFURUGI"; if(n.indexOf("NOTIME")>=0)return "NOTIME"; return "その他";}
 async function plEnsureBase(){ if(PL.daily)return;
   const {data,error}=await SB.storage.from("dashboard-data").download("data.json");
   if(error)throw new Error("店舗データ取得失敗："+error.message);
@@ -948,7 +969,7 @@ function plBodyHtml(){
           ${kpi("購入客数（取引数）",NUM(A.tx)+"件")}
           ${kpi("来店客数",NUM(A.v)+"人")}
           ${kpi("客単価（税込）",A.tx?YEN((A.in)/A.tx)+"円":"—")}
-          ${kpi("商品単価（税抜）",A.it?YEN(A.ex/A.it)+"円":"—")}
+          ${kpi("商品単価（税抜）",A.it?YEN(A.aupEx/A.it)+"円":"—")}
         </tbody>
       </table></div>
       <p class="note">実績はアプリの取込データから自動（レジ袋・クーポン・小物は販売数から除外）。</p>
@@ -1034,6 +1055,194 @@ function plRecompute(){
   setTxt("h-op", showOp?YEN(opA)+"円":"—", "v "+(showOp?(opA>=0?"up":"down"):""));
   setTxt("h-op-s", showOp?("粗利 "+YEN(grA)+"円"):"原価・販管費を入力");
   setTxt("h-opr", showOp?F1(opA/exA*100)+"%":"—", "v "+(showOp?(opA>=0?"up":"down"):""));
+}
+
+// ============================================================
+//  推移（トレンド）タブ ＝ 運営の2つ目の小タブ
+//
+//  ・粒度：週次（既定）／日次／月次を切り替え。
+//  ・店舗：既定は全店。全店／直営／FC／各店を選べる。
+//  ・主要KPI（来店客数・購入率・客単価・平均購入数・商品単価）の推移を
+//    小さな折れ線＋数表で見せる。KPIは dash_daily から集計（PLと共通ロード）。
+//  ・販売カテゴリ比率：dash_category を期間粒度で集計するRPCから取り、
+//    「販売数」「売上比率」をタブで切り替え。上位カテゴリ＋その他の100%積み上げ。
+//    Tシャツ系は正式4分類へ寄せ、セール（バンドル割引の擬似カテゴリ）は除外。
+// ============================================================
+const F2=n=>(Math.round(n*100)/100).toLocaleString("ja-JP",{minimumFractionDigits:2,maximumFractionDigits:2});
+const PT={loaded:false,loading:false,err:null,gran:"week",scope:"all",catMode:"qty",cat:null,catKey:null};
+const PT_CFG={day:{n:45,win:60},week:{n:16,win:130},month:{n:12,win:400}};
+const PT_KPIS=[
+  {k:"v",  name:"来店客数",        fmt:v=>NUM(v)+"人"},
+  {k:"pr", name:"購入率",          fmt:v=>F1(v)+"%"},
+  {k:"aov",name:"客単価（税込）",    fmt:v=>YEN(v)+"円"},
+  {k:"upt",name:"平均購入数",      fmt:v=>F2(v)+"点"},
+  {k:"aup",name:"商品単価（税抜）",  fmt:v=>YEN(v)+"円"},
+];
+const PT_COLORS=["#2f6fd0","#1baf7a","#eb6834","#8e5bd0","#d0a72f","#2fb6d0","#d0517a","#5b7d1b"];
+function ptCatColor(cats,i){return cats[i]==="その他"?"#9aa3ad":PT_COLORS[i%PT_COLORS.length];}
+
+function ptStoresAll(){const w=new Set(PL.daily.map(r=>r.s));
+  return (PL.data.stores||[]).filter(s=>s.visible!==false&&w.has(s.id))
+    .sort((a,b)=>String(a.name).localeCompare(String(b.name),"ja"));}
+function ptScopeIsAll(){return PT.scope==="all";}
+function ptScopeList(){const us=ptStoresAll();const out=[{id:"all",name:"全店"}];
+  if(us.some(s=>plStoreOwn(s.id)==="直営"))out.push({id:"own",name:"直営"});
+  if(us.some(s=>plStoreOwn(s.id)==="FC"))out.push({id:"fc",name:"FC"});
+  return out.concat(us.map(s=>({id:String(s.id),name:s.name})));}
+function ptIds(){const us=ptStoresAll();
+  if(PT.scope==="all")return new Set(us.map(s=>s.id));
+  if(PT.scope==="own")return new Set(us.filter(s=>plStoreOwn(s.id)==="直営").map(s=>s.id));
+  if(PT.scope==="fc") return new Set(us.filter(s=>plStoreOwn(s.id)==="FC").map(s=>s.id));
+  return new Set([Number(PT.scope)]);}
+
+function ptAddDays(d,n){const t=new Date(d+"T00:00:00Z");t.setUTCDate(t.getUTCDate()+n);return t.toISOString().slice(0,10);}
+function ptMaxDate(){let mx="";for(const r of PL.daily){if((r.tx||0)>0||(r.in||0)>0){if(r.d>mx)mx=r.d;}}return mx||todayStr();}
+function ptWindowStart(gran){return ptAddDays(ptMaxDate(),-(PT_CFG[gran].win));}
+function ptMondayOf(d){const t=new Date(d+"T00:00:00Z");const g=(t.getUTCDay()+6)%7;t.setUTCDate(t.getUTCDate()-g);return t.toISOString().slice(0,10);}
+function ptPeriodKey(d,gran){return gran==="day"?d:gran==="month"?d.slice(0,7)+"-01":ptMondayOf(d);}
+function ptPeriodLabel(k,gran){const p=k.split("-");
+  if(gran==="month")return p[0].slice(2)+"/"+(+p[1]);
+  return (+p[1])+"/"+(+p[2]);}
+// カテゴリ表示の正規化（dashboard.html と同じ考え方）。null＝集計から外す。
+function ptNormCat(c){c=(c||"").trim();
+  if(!c||c==="nan"||c==="NaN")return null;
+  if(c.indexOf("セール")>=0||c==="SALE")return null;   // バンドル割引の擬似カテゴリは除外
+  if(c.indexOf("シャツ")>=0){
+    if(c.indexOf("プリント")>=0)return "プリントTシャツ";
+    if(c.indexOf("アニメ")>=0||c.indexOf("ムービー")>=0||c.indexOf("映画")>=0)return "アニメ/ムービーTシャツ";
+    if(c.indexOf("バンド")>=0||c.indexOf("ミュージック")>=0)return "バンド/ミュージックTシャツ";
+    if(c.indexOf("Tシャツ")>=0||c.indexOf("Ｔシャツ")>=0)return "Tシャツ";
+  }
+  return c;}
+
+function ptKpiSeries(){
+  const gran=PT.gran, win=ptWindowStart(gran), ids=ptIds(), per={};
+  for(const r of PL.daily){ if(!ids.has(r.s))continue; if(r.d<win)continue;
+    const k=ptPeriodKey(r.d,gran);
+    const b=per[k]||(per[k]={in:0,ex:0,tx:0,it:0,v:0,txv:0,aupEx:0});
+    b.in+=r.in||0;b.ex+=r.ex||0;b.tx+=r.tx||0;b.it+=r.it||0;
+    b.aupEx+=(r.ex||0)-(r.bagEx||0)-(r.komEx||0)-(r.nocatEx||0);
+    if(plKvOf(r.s)){ b.txv+=r.tx||0; if(r.v!=null)b.v+=r.v; }
+  }
+  return Object.keys(per).sort().slice(-PT_CFG[gran].n).map(k=>{const b=per[k];
+    return {key:k,label:ptPeriodLabel(k,gran),
+      v:b.v, pr:b.v>0?b.txv/b.v*100:null, aov:b.tx>0?b.in/b.tx:null,
+      upt:b.tx>0?b.it/b.tx:null, aup:b.it>0?b.aupEx/b.it:null};});
+}
+function ptCatSeries(){
+  const metricA=PT.catMode==="amount", per={}, catTot={};
+  for(const r of (PT.cat||[])){ const c=ptNormCat(r.c); if(!c)continue;
+    const val=metricA?r.a:r.q; if(!(val>0))continue;
+    const b=per[r.p]||(per[r.p]={_tot:0}); b[c]=(b[c]||0)+val; b._tot+=val; catTot[c]=(catTot[c]||0)+val; }
+  const keys=Object.keys(per).sort().slice(-PT_CFG[PT.gran].n);
+  const ranked=Object.keys(catTot).sort((a,b)=>catTot[b]-catTot[a]);
+  const TOPN=8, top=ranked.slice(0,TOPN), hasOther=ranked.length>TOPN;
+  const cats=hasOther?[...top,"その他"]:top;
+  const rows=keys.map(k=>{const p=per[k],tot=p._tot||0,sh={};let acc=0;
+    top.forEach(c=>{const v=p[c]||0;sh[c]=tot>0?v/tot:0;acc+=v;});
+    if(hasOther)sh["その他"]=tot>0?(tot-acc)/tot:0;
+    return {key:k,label:ptPeriodLabel(k,PT.gran),tot,sh};});
+  return {cats,rows};
+}
+function ptSpark(vals){
+  const pts=vals.map((v,i)=>({i,v})).filter(p=>p.v!=null&&isFinite(p.v));
+  if(pts.length<2)return '<svg viewBox="0 0 100 30" preserveAspectRatio="none"></svg>';
+  const n=vals.length; let mn=Infinity,mx=-Infinity; pts.forEach(p=>{if(p.v<mn)mn=p.v;if(p.v>mx)mx=p.v;});
+  const pad=(mx-mn)||Math.abs(mx)||1, X=i=>n>1?i/(n-1)*100:50, Y=v=>28-((v-mn)/pad)*26-1;
+  const d=pts.map((p,idx)=>(idx?"L":"M")+X(p.i).toFixed(1)+" "+Y(p.v).toFixed(1)).join(" ");
+  const last=pts[pts.length-1];
+  return `<svg viewBox="0 0 100 30" preserveAspectRatio="none"><path d="${d}" fill="none" stroke="var(--accent)" stroke-width="2" vector-effect="non-scaling-stroke"/><circle cx="${X(last.i).toFixed(1)}" cy="${Y(last.v).toFixed(1)}" r="2.4" fill="var(--accent)"/></svg>`;
+}
+
+async function ptLoadCat(){
+  const key=PT.gran+"|"+PT.scope;
+  if(PT.catKey===key&&PT.cat)return;
+  const since=ptWindowStart(PT.gran), ids=ptScopeIsAll()?null:[...ptIds()];
+  const {data,error}=await SB.rpc("dash_category_trend",{p_since:since,p_gran:PT.gran,p_store_ids:ids});
+  if(error)throw new Error("カテゴリ推移取得失敗："+error.message);
+  PT.cat=(data||[]).map(r=>({p:r.period,c:r.category,q:+r.qty||0,a:+r.amount||0}));
+  PT.catKey=key;
+}
+async function loadTrend(){
+  if(PT.loading)return; PT.loading=true; PT.err=null;
+  try{ await plEnsureBase(); await ptLoadCat(); PT.loaded=true; }
+  catch(e){PT.err=String(e&&e.message||e);}
+  PT.loading=false;
+}
+function renderTrend(){
+  screen(`${headerHtml()}${subtabBarHtml()}<div id="ptroot"></div>`);
+  bindHeader(); bindSubtabBar();
+  const root=document.getElementById("ptroot");
+  if(!PT.loaded){ root.innerHTML='<div class="panel"><p class="sub">読み込み中…</p></div>';
+    if(!PT.loading)loadTrend().then(()=>{ if(TAB==="trend")renderTrend(); });
+    return; }
+  if(PT.err){ root.innerHTML=`<div class="warnbox">推移を読み込めませんでした：${esc(PT.err)}</div>`; return; }
+  root.innerHTML=ptControlsHtml()+ptBodyHtml();
+  ptBind();
+}
+function ptControlsHtml(){
+  const scopes=ptScopeList();
+  const G=[["day","日次"],["week","週次"],["month","月次"]];
+  return `<div class="plctl">
+      <div class="segbar" id="pt-gran">${G.map(([k,l])=>`<button data-g="${k}"${PT.gran===k?' class="on"':""}>${l}</button>`).join("")}</div>
+      <label style="margin-left:6px">店舗</label>
+      <select class="pick" id="pt-scope">${scopes.map(s=>`<option value="${s.id}"${String(s.id)===String(PT.scope)?" selected":""}>${esc(s.name)}</option>`).join("")}</select>
+    </div>`;
+}
+function ptBodyHtml(){
+  const gran=PT.gran, granLbl={day:"日次",week:"週次",month:"月次"}[gran];
+  const scopeName=(ptScopeList().find(s=>String(s.id)===String(PT.scope))||{}).name||"";
+  // ---- 主要KPI ----
+  const S=ptKpiSeries();
+  const cards=PT_KPIS.map(m=>{
+    const vals=S.map(p=>p[m.k]), nn=vals.filter(v=>v!=null&&isFinite(v));
+    const last=nn.length?nn[nn.length-1]:null, first=nn.length?nn[0]:null;
+    const delta=(first!=null&&last!=null&&first!==0)?(last/first-1)*100:null;
+    const dcls=delta==null?"mut":(delta>=0?"up":"down");
+    return `<div class="sparkcard"><div class="k">${m.name}</div>
+      <div class="v">${last==null?"—":m.fmt(last)}</div>
+      <div class="d ${dcls}">${delta==null?"&nbsp;":(delta>=0?"▲":"▼")+" "+F1(Math.abs(delta))+"%（期間内）"}</div>
+      ${ptSpark(vals)}</div>`;
+  }).join("");
+  const kHead=`<thead><tr><th>期間</th>${PT_KPIS.map(m=>`<th>${m.name}</th>`).join("")}</tr></thead>`;
+  const kRows=S.slice().reverse().map(p=>`<tr><td>${esc(p.label)}</td>${PT_KPIS.map(m=>`<td>${p[m.k]==null?"—":m.fmt(p[m.k])}</td>`).join("")}</tr>`).join("");
+  // ---- 販売カテゴリ比率 ----
+  const C=ptCatSeries();
+  const legend=C.cats.map((c,i)=>`<span class="pill" style="padding:4px 9px"><span class="catswatch" style="background:${ptCatColor(C.cats,i)}"></span>${esc(c)}</span>`).join("");
+  const catRows=C.rows.slice().reverse().map(r=>{
+    const segs=C.cats.map((c,i)=>{const w=(r.sh[c]||0)*100; return w>0?`<span class="barcell" title="${esc(c)} ${F1(w)}%" style="width:${w.toFixed(2)}%;background:${ptCatColor(C.cats,i)}"></span>`:"";}).join("");
+    let tc=null,tv=-1;C.cats.forEach(c=>{if((r.sh[c]||0)>tv){tv=r.sh[c]||0;tc=c;}});
+    return `<tr><td>${esc(r.label)}</td>
+      <td style="min-width:200px"><span style="display:flex;width:100%;height:13px;border-radius:3px;overflow:hidden;background:var(--surface2)">${segs}</span></td>
+      <td>${tc?esc(tc)+" "+F1(tv*100)+"%":"—"}</td></tr>`;
+  }).join("");
+  const catModeLbl=PT.catMode==="amount"?"売上":"販売数";
+  return `
+    <p class="note" style="margin:10px 0 0">${esc(scopeName)}・${granLbl}の推移（直近${S.length||0}${gran==="month"?"ヶ月":gran==="week"?"週":"日"}）。締日＝取り込み済みの最新日まで。</p>
+    <div class="panel">
+      <h2>主要KPIの推移</h2>
+      <div class="sparkgrid">${cards||'<span class="sub">データがありません。</span>'}</div>
+      <div class="tblwrap" style="margin-top:12px"><table class="pl">${kHead}<tbody>${kRows||`<tr><td colspan="${PT_KPIS.length+1}" class="mut">データがありません</td></tr>`}</tbody></table></div>
+      <p class="note">来店客数・購入率は入店計測のある店だけで算出。客単価＝税込売上÷取引数／平均購入数＝販売数÷取引数／商品単価＝税抜売上（レジ袋・小物・未分類を除く）÷販売数。増減は期間内の最初→最新の比較。</p>
+    </div>
+    <div class="panel">
+      <h2>販売カテゴリ比率</h2>
+      <div class="segbar" id="pt-catmode">
+        <button data-m="qty"${PT.catMode==="qty"?' class="on"':""}>販売数</button>
+        <button data-m="amount"${PT.catMode==="amount"?' class="on"':""}>売上比率</button>
+      </div>
+      <div class="pills" style="margin:10px 0 4px">${legend}</div>
+      <div class="tblwrap"><table class="pl">
+        <thead><tr><th>期間</th><th>構成比（${catModeLbl}・100%）</th><th>首位</th></tr></thead>
+        <tbody>${catRows||`<tr><td colspan="3" class="mut">カテゴリ明細データがありません</td></tr>`}</tbody>
+      </table></div>
+      <p class="note">各期間の${catModeLbl}に占める割合。上位8カテゴリ＋その他。Tシャツ系は正式4分類に寄せ、セール（バンドル割引の擬似カテゴリ）は除外しています。バーにカーソルを合わせると内訳が出ます。</p>
+    </div>`;
+}
+function ptBind(){
+  document.querySelectorAll("#pt-gran button").forEach(b=>b.onclick=()=>{ if(PT.gran===b.dataset.g)return; PT.gran=b.dataset.g; PT.loaded=false; renderTrend(); });
+  const sc=document.getElementById("pt-scope"); if(sc)sc.onchange=e=>{ PT.scope=e.target.value; PT.loaded=false; renderTrend(); };
+  document.querySelectorAll("#pt-catmode button").forEach(b=>b.onclick=()=>{ if(PT.catMode===b.dataset.m)return; PT.catMode=b.dataset.m; renderTrend(); });
 }
 
 readState();
