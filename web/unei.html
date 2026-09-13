@@ -137,6 +137,7 @@
   .sparkcard .d{font-size:11.5px;font-weight:700;margin-top:1px;}
   .sparkcard svg{display:block;width:100%;height:44px;margin-top:6px;overflow:visible;}
   .catswatch{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:baseline;}
+  table.pl td .ptd{font-size:10.5px;font-weight:700;margin-top:1px;}
   table.pl td .barcell{display:inline-block;height:8px;border-radius:2px;vertical-align:middle;}
 </style>
 </head>
@@ -1084,10 +1085,12 @@ function plRecompute(){
 //  ・粒度：週次（既定）／日次／月次を切り替え。
 //  ・店舗：既定は全店。全店／直営／FC／各店を選べる。
 //  ・主要KPI（来店客数・購入率・客単価・平均購入数・商品単価）の推移を
-//    数字の表で見せる（横＝日付、縦＝指標）。KPIは dash_daily から集計（PLと共通ロード）。
+//    数字の表／グラフで見せる（横＝日付・左が最新→右へ古い、縦＝指標）。各値に1つ前の
+//    期間比（前日比／先週比／前月比）をプラス緑・マイナス赤で添える。dash_daily から集計。
 //  ・販売カテゴリ比率：dash_category を期間粒度で集計するRPCから取り、
-//    「販売数」「売上比率」をタブで切り替え。表は横＝日付・縦＝カテゴリ（上位＋その他）の構成比%。
-//    Tシャツ系は正式4分類へ寄せ、セール（バンドル割引の擬似カテゴリ）は除外。
+//    「販売数」「売上比率」を切り替え。並びはアプリ共通の基準順(PT_CAT_ORDER)で固定。
+//    直営だけTシャツを4分類（Tシャツ／プリント／バンド／アニメ・ムービー＝小カテゴリ）で表示し、
+//    直営以外はTシャツに統合。基準に無い分類・小物・セール（擬似カテゴリ）は「その他」へ。
 // ============================================================
 const F2=n=>(Math.round(n*100)/100).toLocaleString("ja-JP",{minimumFractionDigits:2,maximumFractionDigits:2});
 const PT={loaded:false,loading:false,err:null,gran:"week",scope:"all",catMode:"qty",view:"table",cat:null,catKey:null};
@@ -1099,8 +1102,32 @@ const PT_KPIS=[
   {k:"upt",name:"平均購入数",      fmt:v=>F2(v)+"点"},
   {k:"aup",name:"商品単価（税抜）",  fmt:v=>YEN(v)+"円"},
 ];
-const PT_COLORS=["#2f6fd0","#1baf7a","#eb6834","#8e5bd0","#d0a72f","#2fb6d0","#d0517a","#5b7d1b"];
+const PT_COLORS=["#2f6fd0","#1baf7a","#eb6834","#8e5bd0","#d0a72f","#2fb6d0","#d0517a","#5b7d1b",
+  "#4a5bd0","#1b9e8a","#c0603a","#a05bd0","#b0902f","#3a9ab0","#b05a8a","#7a9b3b"];
 function ptCatColor(cats,i){return cats[i]==="その他"?"#9aa3ad":PT_COLORS[i%PT_COLORS.length];}
+// カテゴリの並び順（アプリ共通の基準：ボトムス→Tシャツ→シャツ類→軽衣類→アウター）。
+// POS由来の表記ゆれも拾えるよう実データ名を広めに含める。ここに無い名称は「その他」へ寄せる。
+const PT_CAT_ORDER=[
+  "デニム","チノ/スラックス等","ハーフパンツ","パンツ","ボトムス",
+  "Tシャツ","プリントTシャツ","バンド/ミュージックTシャツ","アニメ/ムービーTシャツ",
+  "ポロシャツ","半袖シャツ","長袖シャツ","ロンT",
+  "スウェット/パーカー","スウェット",
+  "ニット/フリース","セーター/フリース","春秋セーター・フリース","ニット","冬セーター",
+  "薄手アウター","中間アウター","アウター/ジャケット","厚手アウター","ヘビーアウター",
+];
+// 直営だけTシャツを4分類に分ける。この3つはTシャツの小カテゴリ（直営以外はTシャツへ統合）。
+const PT_TEE_SUB=new Set(["プリントTシャツ","バンド/ミュージックTシャツ","アニメ/ムービーTシャツ"]);
+function ptScopeIsOwn(){
+  if(PT.scope==="own")return true;
+  if(PT.scope==="all"||PT.scope==="fc")return false;
+  return plStoreOwn(Number(PT.scope))==="直営";
+}
+// 1つ前の期間との比較（前日比／先週比／前月比）。プラス緑・マイナス赤。
+function ptDeltaHtml(cur,prev){
+  if(cur==null||prev==null||!isFinite(cur)||!isFinite(prev)||prev===0)return "";
+  const d=(cur/prev-1)*100, cls=d>0?"up":(d<0?"down":"mut"), sign=d>0?"+":(d<0?"−":"±");
+  return `<div class="ptd ${cls}">${sign}${F1(Math.abs(d))}%</div>`;
+}
 
 function ptStoresAll(){const w=new Set(PL.daily.map(r=>r.s));
   return (PL.data.stores||[]).filter(s=>s.visible!==false&&w.has(s.id))
@@ -1151,19 +1178,21 @@ function ptKpiSeries(){
       upt:b.tx>0?b.it/b.tx:null, aup:b.it>0?b.aupEx/b.it:null};});
 }
 function ptCatSeries(){
-  const metricA=PT.catMode==="amount", per={}, catTot={};
-  for(const r of (PT.cat||[])){ const c=ptNormCat(r.c); if(!c)continue;
+  const metricA=PT.catMode==="amount", own=ptScopeIsOwn(), per={}, catTot={};
+  for(const r of (PT.cat||[])){ let c=ptNormCat(r.c); if(!c)continue;
+    if(!own && PT_TEE_SUB.has(c)) c="Tシャツ";      // 直営以外はTシャツを1つに統合
     const val=metricA?r.a:r.q; if(!(val>0))continue;
     const b=per[r.p]||(per[r.p]={_tot:0}); b[c]=(b[c]||0)+val; b._tot+=val; catTot[c]=(catTot[c]||0)+val; }
   const keys=Object.keys(per).sort().slice(-PT_CFG[PT.gran].n);
-  const ranked=Object.keys(catTot).sort((a,b)=>catTot[b]-catTot[a]);
-  const TOPN=8, top=ranked.slice(0,TOPN), hasOther=ranked.length>TOPN;
-  const cats=hasOther?[...top,"その他"]:top;
+  // 表示は基準順（PT_CAT_ORDER）に固定。基準に無い名称・小物・ノイズは「その他」へまとめる。
+  const known=PT_CAT_ORDER.filter(c=>catTot[c]>0);
+  const hasOther=Object.keys(catTot).some(c=>PT_CAT_ORDER.indexOf(c)<0);
+  const cats=hasOther?[...known,"その他"]:known;
   const rows=keys.map(k=>{const p=per[k],tot=p._tot||0,sh={};let acc=0;
-    top.forEach(c=>{const v=p[c]||0;sh[c]=tot>0?v/tot:0;acc+=v;});
+    known.forEach(c=>{const v=p[c]||0;sh[c]=tot>0?v/tot:0;acc+=v;});
     if(hasOther)sh["その他"]=tot>0?(tot-acc)/tot:0;
     return {key:k,label:ptPeriodLabel(k,PT.gran),tot,sh};});
-  return {cats,rows};
+  return {cats,rows,own};
 }
 async function ptLoadCat(){
   const key=PT.gran+"|"+PT.scope;
@@ -1190,8 +1219,8 @@ function renderTrend(){
   if(PT.err){ root.innerHTML=`<div class="warnbox">推移を読み込めませんでした：${esc(PT.err)}</div>`; return; }
   root.innerHTML=ptControlsHtml()+ptBodyHtml();
   ptBind();
-  // 横＝日付。最新（右端）が最初に見えるよう右端へスクロール。
-  document.querySelectorAll(".pt-scrollright").forEach(el=>{el.scrollLeft=el.scrollWidth;});
+  // 横＝日付で左が最新。最新（左端）が最初に見えるよう左端へ。
+  document.querySelectorAll(".pt-scrollright").forEach(el=>{el.scrollLeft=0;});
 }
 // 折れ線（1指標ぶん）。pts=[{label,v}]（vはnull可）。横=期間、縦=値。
 function ptChartLine(pts,fmt){
@@ -1242,42 +1271,50 @@ function ptBodyHtml(){
   const scopeName=(ptScopeList().find(s=>String(s.id)===String(PT.scope))||{}).name||"";
   const unit=gran==="month"?"ヶ月":gran==="week"?"週":"日";
   const chart=PT.view==="chart";
-  // ---- 主要KPI ----
-  const S=ptKpiSeries();   // 古い→新しい（左→右が時系列）
+  const cmpLbl=gran==="month"?"前月比":gran==="week"?"先週比":"前日比";
+  // ---- 主要KPI（左＝最新・右へ行くほど古い）----
+  const DS=ptKpiSeries().slice().reverse();   // 新しい→古い
   let kpiInner;
   if(chart){
     kpiInner=`<div class="sparkgrid">${PT_KPIS.map(m=>{
-      const pts=S.map(p=>({label:p.label,v:p[m.k]}));
-      const nn=S.map(p=>p[m.k]).filter(v=>v!=null&&isFinite(v));
-      const last=nn.length?nn[nn.length-1]:null;
+      const pts=DS.map(p=>({label:p.label,v:p[m.k]}));   // 左＝最新
+      const latest=DS.length?DS[0][m.k]:null, prev=DS.length>1?DS[1][m.k]:null;
+      const dPct=(latest!=null&&prev!=null&&isFinite(latest)&&isFinite(prev)&&prev!==0)?(latest/prev-1)*100:null;
+      const dCard=dPct==null?"":`<div class="d ${dPct>0?"up":dPct<0?"down":"mut"}">${cmpLbl} ${dPct>0?"+":dPct<0?"−":"±"}${F1(Math.abs(dPct))}%</div>`;
       return `<div class="sparkcard"><div class="k">${m.name}</div>
-        <div class="v">${last==null?"—":m.fmt(last)}</div>
+        <div class="v">${latest==null?"—":m.fmt(latest)}</div>
+        ${dCard}
         ${ptChartLine(pts,m.fmt)}</div>`;}).join("")}</div>`;
   }else{
-    const kHead=`<thead><tr><th>指標</th>${S.map(p=>`<th>${esc(p.label)}</th>`).join("")}</tr></thead>`;
-    const kRows=PT_KPIS.map(m=>`<tr><td>${m.name}</td>${S.map(p=>`<td>${p[m.k]==null?"—":m.fmt(p[m.k])}</td>`).join("")}</tr>`).join("");
+    const kHead=`<thead><tr><th>指標</th>${DS.map(p=>`<th>${esc(p.label)}</th>`).join("")}</tr></thead>`;
+    const kRows=PT_KPIS.map(m=>`<tr><td>${m.name}</td>${DS.map((p,i)=>{
+      const v=p[m.k], prev=DS[i+1]?DS[i+1][m.k]:null;   // 1つ前＝右隣（古い方）
+      return `<td>${v==null?"—":m.fmt(v)}${ptDeltaHtml(v,prev)}</td>`;
+    }).join("")}</tr>`).join("");
     kpiInner=`<div class="tblwrap pt-scrollright"><table class="pl">${kHead}<tbody>${kRows||`<tr><td class="mut">データがありません</td></tr>`}</tbody></table></div>`;
   }
-  // ---- 販売カテゴリ比率 ----
+  // ---- 販売カテゴリ比率（左＝最新）----
   const C=ptCatSeries();
+  const DR=C.rows.slice().reverse();   // 新しい→古い
   const catModeLbl=PT.catMode==="amount"?"売上":"販売数";
+  const subCls=c=>(C.own&&PT_TEE_SUB.has(c))?" class=\"subitem\"":"";
   let catInner;
   if(chart){
     const legend=C.cats.map((c,i)=>`<span class="pill" style="padding:4px 9px"><span class="catswatch" style="background:${ptCatColor(C.cats,i)}"></span>${esc(c)}</span>`).join("");
     catInner=`<div class="pills" style="margin:10px 0 6px">${legend}</div>
-      <div class="tblwrap pt-scrollright">${ptChartStacked(C)}</div>`;
+      <div class="tblwrap pt-scrollright">${ptChartStacked({cats:C.cats,rows:DR})}</div>`;
   }else{
-    const cHead=`<thead><tr><th>カテゴリ</th>${C.rows.map(r=>`<th>${esc(r.label)}</th>`).join("")}</tr></thead>`;
-    const cRows=C.cats.map((c,i)=>`<tr><td><span class="catswatch" style="background:${ptCatColor(C.cats,i)}"></span>${esc(c)}</td>`+
-      C.rows.map(r=>{const v=r.sh[c]; return `<td>${(v==null||!(r.tot>0))?"—":F1(v*100)+"%"}</td>`;}).join("")+`</tr>`).join("");
+    const cHead=`<thead><tr><th>カテゴリ</th>${DR.map(r=>`<th>${esc(r.label)}</th>`).join("")}</tr></thead>`;
+    const cRows=C.cats.map((c,i)=>`<tr${subCls(c)}><td><span class="catswatch" style="background:${ptCatColor(C.cats,i)}"></span>${esc(c)}</td>`+
+      DR.map(r=>{const v=r.sh[c]; return `<td>${(v==null||!(r.tot>0))?"—":F1(v*100)+"%"}</td>`;}).join("")+`</tr>`).join("");
     catInner=`<div class="tblwrap pt-scrollright" style="margin-top:10px"><table class="pl">${cHead}<tbody>${cRows||`<tr><td class="mut">カテゴリ明細データがありません</td></tr>`}</tbody></table></div>`;
   }
   return `
-    <p class="note" style="margin:10px 0 0">${esc(scopeName)}・${granLbl}の推移（直近${S.length||0}${unit}・左→右が古い→新しい）。締日＝取り込み済みの最新日まで。</p>
+    <p class="note" style="margin:10px 0 0">${esc(scopeName)}・${granLbl}の推移（直近${DS.length||0}${unit}・左＝最新→右へ行くほど古い）。締日＝取り込み済みの最新日まで。</p>
     <div class="panel">
-      <h2>主要KPIの推移</h2>
+      <h2>主要KPIの推移 <span class="sub" style="font-weight:500">（各値の下は${cmpLbl}）</span></h2>
       ${kpiInner}
-      <p class="note">来店客数・購入率は入店計測のある店だけで算出。客単価＝税込売上÷取引数／平均購入数＝販売数÷取引数／商品単価＝税抜売上（レジ袋・小物・未分類を除く）÷販売数。</p>
+      <p class="note">来店客数・購入率は入店計測のある店だけで算出。客単価＝税込売上÷取引数／平均購入数＝販売数÷取引数／商品単価＝税抜売上（レジ袋・小物・未分類を除く）÷販売数。各値の下は1つ前の期間との比較（${cmpLbl}・プラス緑／マイナス赤）。</p>
     </div>
     <div class="panel">
       <h2>販売カテゴリ比率</h2>
@@ -1286,7 +1323,7 @@ function ptBodyHtml(){
         <button data-m="amount"${PT.catMode==="amount"?' class="on"':""}>売上比率</button>
       </div>
       ${catInner}
-      <p class="note">各期間の${catModeLbl}に占める割合（${chart?"各棒":"列"}合計＝100%）。上位8カテゴリ＋その他。Tシャツ系は正式4分類に寄せ、セール（バンドル割引の擬似カテゴリ）は除外しています。</p>
+      <p class="note">各期間の${catModeLbl}に占める割合（${chart?"各棒":"列"}合計＝100%）。並びは共通の基準順。${C.own?"直営はTシャツを4分類（Tシャツ／プリント／バンド／アニメ・ムービー）で表示。":"Tシャツは1つに統合（直営を選ぶと4分類で表示）。"}基準に無い分類・小物・セール（擬似カテゴリ）は「その他」にまとめています。</p>
     </div>`;
 }
 function ptBind(){
