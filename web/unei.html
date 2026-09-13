@@ -202,9 +202,30 @@ function syncAdminTab(){const ad=!!(ME&&ME.role==="admin");
   const t=document.getElementById("tab-admin");if(t)t.style.display=ad?"":"none";
   const k=document.getElementById("tab-keiei");if(k)k.style.display=ad?"":"none";}
 
+// 設定(config.json)は数回試す。一時的な通信失敗で「ログインが必要」を誤表示して
+// 運営タブだけ毎回ログインを求められる事故を防ぐ（他タブは公開data.jsonへ退避できるが運営は退避先が無い）。
+async function loadConfig(){
+  for(let i=0;i<3;i++){
+    try{ const r=await fetch(CONFIG_URL,{cache:"no-store"}); if(r&&r.ok){const c=await r.json(); if(c)return c;} }catch(e){}
+    await new Promise(res=>setTimeout(res,400*(i+1)));
+  }
+  return null;
+}
+// 保存済みセッションの復元・トークン更新が間に合わず getSession が一瞬 null を返すことがある。
+// すぐログイン画面に飛ばさず、復元完了(onAuthStateChange)を最大数秒待ってから判定する。
+async function getSessionSettled(){
+  let {data:{session}}=await SB.auth.getSession();
+  if(session)return session;
+  return await new Promise(resolve=>{
+    let done=false, subscription=null;
+    const finish=s=>{ if(done)return; done=true; try{subscription&&subscription.unsubscribe();}catch(e){} resolve(s||null); };
+    try{ const r=SB.auth.onAuthStateChange((_e,s)=>{ if(s)finish(s); }); subscription=r&&r.data&&r.data.subscription; }catch(e){}
+    setTimeout(async()=>{ try{const {data:{session:s2}}=await SB.auth.getSession(); finish(s2);}catch(e){finish(null);} }, 2500);
+  });
+}
 async function boot(){
   try{
-    let cfg=null; try{cfg=await (await fetch(CONFIG_URL,{cache:"no-store"})).json();}catch(e){}
+    const cfg=await loadConfig();
     if(!cfg||cfg.mode!=="auth"){
       screen('<div class="gate"><div class="logo">店舗運営</div><div class="t">ログインが必要です</div>'+
         '<div class="m">Googleログインの設定が完了すると利用できます。</div>'+
@@ -212,7 +233,7 @@ async function boot(){
     }
     await ensureSupabase();
     SB=window.supabase.createClient(cfg.url,cfg.anon,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,flowType:"pkce",storageKey:"notime-auth"}});
-    const {data:{session}}=await SB.auth.getSession();
+    const session=await getSessionSettled();
     if(!session){showLogin();return;}
     ME.email=(session.user&&session.user.email||"").toLowerCase();
     // 名簿は在庫アプリと共通の users テーブル1枚。ロールの語彙が違うので読み替える。
