@@ -1096,6 +1096,7 @@ const F2=n=>(Math.round(n*100)/100).toLocaleString("ja-JP",{minimumFractionDigit
 const PT={loaded:false,loading:false,err:null,gran:"week",scope:"own",catMode:"qty",view:"table",cat:null,catKey:null};
 const PT_CFG={day:{n:45,win:60},week:{n:16,win:130},month:{n:12,win:400}};
 const PT_KPIS=[
+  {k:"ex", name:"税抜売上",        fmt:v=>YEN(v)+"円"},
   {k:"v",  name:"来店客数",        fmt:v=>NUM(v)+"人"},
   {k:"pr", name:"購入率",          fmt:v=>F1(v)+"%"},
   {k:"aov",name:"客単価（税込）",    fmt:v=>YEN(v)+"円"},
@@ -1174,7 +1175,7 @@ function ptKpiSeries(){
   }
   return Object.keys(per).sort().slice(-PT_CFG[gran].n).map(k=>{const b=per[k];
     return {key:k,label:ptPeriodLabel(k,gran),
-      v:b.v, pr:b.v>0?b.txv/b.v*100:null, aov:b.tx>0?b.in/b.tx:null,
+      ex:b.ex, v:b.v, pr:b.v>0?b.txv/b.v*100:null, aov:b.tx>0?b.in/b.tx:null,
       upt:b.tx>0?b.it/b.tx:null, aup:b.it>0?b.aupEx/b.it:null};});
 }
 function ptCatSeries(){
