@@ -138,6 +138,7 @@
   .sparkcard svg{display:block;width:100%;height:44px;margin-top:6px;overflow:visible;}
   .catswatch{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:baseline;}
   table.pl td .ptd{font-size:10.5px;font-weight:700;margin-top:1px;}
+  table.pl tr.catparent td{font-weight:750;background:var(--surface2);}
   table.pl td .barcell{display:inline-block;height:8px;border-radius:2px;vertical-align:middle;}
 </style>
 </head>
@@ -212,6 +213,17 @@ async function loadConfig(){
   }
   return null;
 }
+// 売上ページは storageKey="notime-auth"、在庫アプリ(同一ドメイン)は "sb-<ref>-auth-token" で
+// ログインを保存している。運営タブは同一プロジェクトなので、既にあるセッションのキーを採用して
+// 「在庫アプリにログイン済みなら運営も素通り」できるようにする（二重ログインを避ける）。
+function ptPickStorageKey(url){
+  let ref=""; try{ref=new URL(url).hostname.split(".")[0];}catch(e){}
+  const invKey=ref?("sb-"+ref+"-auth-token"):"";
+  const has=k=>{ if(!k)return false; try{const v=localStorage.getItem(k);return !!(v&&v!=="null"&&v!=="undefined"&&v.length>2);}catch(e){return false;} };
+  if(has("notime-auth"))return "notime-auth";   // 売上ページ自身のログインを最優先
+  if(has(invKey))return invKey;                  // 無ければ在庫アプリのログインを借りる
+  return "notime-auth";                          // どちらも無ければ既定（新規ログインはこちらへ保存）
+}
 // 保存済みセッションの復元・トークン更新が間に合わず getSession が一瞬 null を返すことがある。
 // すぐログイン画面に飛ばさず、復元完了(onAuthStateChange)を最大数秒待ってから判定する。
 async function getSessionSettled(){
@@ -233,7 +245,7 @@ async function boot(){
         '<div style="margin-top:14px"><a class="navlink" href="index.html">← ダッシュボードへ</a></div></div>'); return;
     }
     await ensureSupabase();
-    SB=window.supabase.createClient(cfg.url,cfg.anon,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,flowType:"pkce",storageKey:"notime-auth"}});
+    SB=window.supabase.createClient(cfg.url,cfg.anon,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,flowType:"pkce",storageKey:ptPickStorageKey(cfg.url)}});
     const session=await getSessionSettled();
     if(!session){showLogin();return;}
     ME.email=(session.user&&session.user.email||"").toLowerCase();
@@ -1117,8 +1129,10 @@ const PT_CAT_ORDER=[
   "ニット/フリース","セーター/フリース","春秋セーター・フリース","ニット","冬セーター",
   "薄手アウター","中間アウター","アウター/ジャケット","厚手アウター","ヘビーアウター",
 ];
-// 直営だけTシャツを4分類に分ける。この3つはTシャツの小カテゴリ（直営以外はTシャツへ統合）。
+// Tシャツは「親カテゴリ」。その下に4つの小カテゴリ（無地／プリント／バンド／アニメ・ムービー）。
 const PT_TEE_SUB=new Set(["プリントTシャツ","バンド/ミュージックTシャツ","アニメ/ムービーTシャツ"]);
+const PT_TEE_ALL=["Tシャツ","プリントTシャツ","バンド/ミュージックTシャツ","アニメ/ムービーTシャツ"];
+const PT_TEE_LABEL={"Tシャツ":"Tシャツ（無地）","プリントTシャツ":"プリント","バンド/ミュージックTシャツ":"バンド","アニメ/ムービーTシャツ":"アニメ・ムービー"};
 function ptScopeIsOwn(){
   if(PT.scope==="own")return true;
   if(PT.scope==="all"||PT.scope==="fc")return false;
@@ -1189,10 +1203,10 @@ function ptCatSeries(){
   const known=PT_CAT_ORDER.filter(c=>catTot[c]>0);
   const hasOther=Object.keys(catTot).some(c=>PT_CAT_ORDER.indexOf(c)<0);
   const cats=hasOther?[...known,"その他"]:known;
-  const rows=keys.map(k=>{const p=per[k],tot=p._tot||0,sh={};let acc=0;
-    known.forEach(c=>{const v=p[c]||0;sh[c]=tot>0?v/tot:0;acc+=v;});
-    if(hasOther)sh["その他"]=tot>0?(tot-acc)/tot:0;
-    return {key:k,label:ptPeriodLabel(k,PT.gran),tot,sh};});
+  const rows=keys.map(k=>{const p=per[k],tot=p._tot||0,sh={},raw={};let acc=0;
+    known.forEach(c=>{const v=p[c]||0;sh[c]=tot>0?v/tot:0;raw[c]=v;acc+=v;});
+    if(hasOther){sh["その他"]=tot>0?(tot-acc)/tot:0;raw["その他"]=tot-acc;}
+    return {key:k,label:ptPeriodLabel(k,PT.gran),tot,sh,raw};});
   return {cats,rows,own};
 }
 async function ptLoadCat(){
@@ -1298,16 +1312,31 @@ function ptBodyHtml(){
   const C=ptCatSeries();
   const DR=C.rows.slice().reverse();   // 新しい→古い
   const catModeLbl=PT.catMode==="amount"?"売上":"販売数";
-  const subCls=c=>PT_TEE_SUB.has(c)?" class=\"subitem\"":"";
+  const catDisp=c=>PT_TEE_LABEL[c]||c;
   let catInner;
   if(chart){
-    const legend=C.cats.map((c,i)=>`<span class="pill" style="padding:4px 9px"><span class="catswatch" style="background:${ptCatColor(C.cats,i)}"></span>${esc(c)}</span>`).join("");
+    const legend=C.cats.map((c,i)=>`<span class="pill" style="padding:4px 9px"><span class="catswatch" style="background:${ptCatColor(C.cats,i)}"></span>${esc(catDisp(c))}</span>`).join("");
     catInner=`<div class="pills" style="margin:10px 0 6px">${legend}</div>
       <div class="tblwrap pt-scrollright">${ptChartStacked({cats:C.cats,rows:DR})}</div>`;
   }else{
+    // 1行ぶんのセル群：構成比% ＋ 1つ前の期間比（その分類の実数＝販売数/売上 の増減）。
+    const cells=rawOf=>DR.map((r,i)=>{const cur=rawOf(r),tot=r.tot||0,share=tot>0?cur/tot:null,prev=DR[i+1]?rawOf(DR[i+1]):null;
+      return `<td>${share==null?"—":F1(share*100)+"%"}${ptDeltaHtml(cur,prev)}</td>`;}).join("");
+    const rowHtml=(label,rawOf,cls,color)=>`<tr${cls?` class="${cls}"`:""}><td>${color?`<span class="catswatch" style="background:${color}"></span>`:""}${esc(label)}</td>${cells(rawOf)}</tr>`;
+    const teePresent=PT_TEE_ALL.filter(c=>C.cats.includes(c));
+    let teeDone=false, cRows="";
+    C.cats.forEach((c,i)=>{
+      if(PT_TEE_ALL.includes(c)){
+        if(!teeDone){
+          cRows+=rowHtml("Tシャツ", r=>PT_TEE_ALL.reduce((a,x)=>a+(r.raw[x]||0),0), "catparent", "");   // 親＝4種合計
+          teePresent.forEach(tc=>{ cRows+=rowHtml(catDisp(tc), r=>r.raw[tc]||0, "subitem", ptCatColor(C.cats,C.cats.indexOf(tc))); });
+          teeDone=true;
+        }
+        return;   // tee各行は親＋子でまとめて出したのでスキップ
+      }
+      cRows+=rowHtml(c, r=>r.raw[c]||0, "", ptCatColor(C.cats,i));
+    });
     const cHead=`<thead><tr><th>カテゴリ</th>${DR.map(r=>`<th>${esc(r.label)}</th>`).join("")}</tr></thead>`;
-    const cRows=C.cats.map((c,i)=>`<tr${subCls(c)}><td><span class="catswatch" style="background:${ptCatColor(C.cats,i)}"></span>${esc(c)}</td>`+
-      DR.map(r=>{const v=r.sh[c]; return `<td>${(v==null||!(r.tot>0))?"—":F1(v*100)+"%"}</td>`;}).join("")+`</tr>`).join("");
     catInner=`<div class="tblwrap pt-scrollright" style="margin-top:10px"><table class="pl">${cHead}<tbody>${cRows||`<tr><td class="mut">カテゴリ明細データがありません</td></tr>`}</tbody></table></div>`;
   }
   return `
@@ -1324,7 +1353,7 @@ function ptBodyHtml(){
         <button data-m="amount"${PT.catMode==="amount"?' class="on"':""}>売上比率</button>
       </div>
       ${catInner}
-      <p class="note">各期間の${catModeLbl}に占める割合（${chart?"各棒":"列"}合計＝100%）。並びは共通の基準順（POS名）。Tシャツは4分類（Tシャツ／プリントT／バンドT／アニメ・ムービーT）の小カテゴリで表示。基準に無い分類・小物・セール（擬似カテゴリ）は「その他」にまとめています。</p>
+      <p class="note">各期間の${catModeLbl}構成比（${chart?"各棒":"列"}合計＝100%）。${chart?"":`各%の下は${cmpLbl}（その分類の${catModeLbl}の増減・プラス緑／マイナス赤）。`}並びは共通の基準順（POS名）。Tシャツは親カテゴリで、下に 無地／プリント／バンド／アニメ・ムービー の小カテゴリ。基準に無い分類・小物・セール（擬似）は「その他」。</p>
     </div>`;
 }
 function ptBind(){
