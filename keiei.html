@@ -60,6 +60,14 @@
     border-radius:9px;padding:7px 11px;font-size:12px;font-weight:700;
     text-decoration:none;cursor:pointer;}
   .homebtn:hover{border-color:var(--accent);}
+  .edlink{font-size:11px;color:var(--accent);text-decoration:none;font-weight:700;margin-left:4px;white-space:nowrap;}
+  .edlink:hover{text-decoration:underline;}
+  .aureset{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:6px;padding:2px 7px;font-size:12px;cursor:pointer;font-family:inherit;}
+  .aureset:hover{border-color:var(--accent);color:var(--accent);}
+  .txtmodal{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:100;display:flex;align-items:center;justify-content:center;padding:20px;}
+  .txtmodal .box{background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);padding:14px 16px;max-width:560px;width:100%;}
+  .txtmodal textarea{width:100%;height:230px;border:1px solid var(--border);border-radius:8px;background:var(--surface2);color:var(--ink);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;padding:10px;line-height:1.8;resize:vertical;}
+  .txtmodal .row{display:flex;gap:8px;justify-content:flex-end;align-items:center;margin-top:10px;}
 </style>
 </head>
 <body>
@@ -152,6 +160,14 @@ async function keieiSave(ym,payload){
   try{ localStorage.setItem("mgmtReport:"+ym,JSON.stringify(payload)); }catch(e){}
   return server;
 }
+
+// 直営表の「商品単価（着地見込）」の手入力上書き。plan_data page="keiei_aup" scope=店id ym。
+async function loadAupOv(ym){const m={}; if(!SB)return m;
+  try{const {data}=await SB.from("plan_data").select("scope,data").eq("page","keiei_aup").eq("ym",ym);
+    (data||[]).forEach(r=>{const v=r.data&&r.data.aup; if(Number.isFinite(+v))m[String(r.scope)]=+v;});}catch(e){}
+  return m;}
+async function saveAupOv(ym,id,val){ if(!SB)return; try{await SB.from("plan_data").upsert({page:"keiei_aup",scope:String(id),ym,data:{aup:val},updated_at:new Date().toISOString(),updated_by:(ME&&ME.email)||null},{onConflict:"page,scope,ym"});}catch(e){} }
+async function delAupOv(ym,id){ if(!SB)return; try{await SB.from("plan_data").delete().eq("page","keiei_aup").eq("scope",String(id)).eq("ym",ym);}catch(e){} }
 
 // ---- 認証（管理者のみ）＋データ読込 ----
 async function ensureSupabase(){ if(window.supabase)return; await new Promise((res,rej)=>{const s=document.createElement("script");
@@ -254,6 +270,7 @@ async function renderKeiei(){
   const NEWSTORES=[{id:50,name:"NOTIME長野店",open:"2026-09"}].filter(x=>x.open<=cur);
   const newTgtEx={};
   for(const ns of NEWSTORES){ try{const {data}=await SB.rpc("new_store_sales_target",{p_open_ym:ns.open,p_ym:cur}); newTgtEx[ns.id]=Number.isFinite(+data)?Math.round(+data):null; }catch(e){ newTgtEx[ns.id]=null; } }
+  const aupOv=await loadAupOv(cur);   // 商品単価の手入力上書き（着地見込）
   const plBud={};   // "ym|scope" -> 予実タブ保存の税抜予算 b_ex
   if(SB){ try{ const {data}=await SB.from("plan_data").select("scope,ym,data").eq("page","pl").in("ym",[cur,next]);
     (data||[]).forEach(r=>{const v=r.data&&r.data.b_ex; if(Number.isFinite(v))plBud[r.ym+"|"+r.scope]=Math.round(v);}); }catch(e){} }
@@ -305,30 +322,42 @@ async function renderKeiei(){
     </header>`;
   h+=`<div class="note">前月＝実績確定／当月＝<b>ダッシュボードと同じ着地見込み（①②③）</b>／翌月以降＝<b>予算（事業計画 bizplan）</b>を着地見込みに（予算が無い店のみ前年同月比で推定）。自動入力ですが編集できます（「保存する」で全員に共有）。</div>`;
   // ■ 直営：店舗×指標（目標・着地見込・実績）＝ご指定の並び（下北沢/山形/いわき/福井/長野/合計）
+  //   ・税抜売上の着地見込は「編集」リンクから店舗ページ(見込設定)で変更（直営タブと同じ動線）。
+  //   ・商品単価の着地見込は自動入力＋手で上書き可（↺で自動に戻す）。
+  //   ・商品販売数の着地見込＝税抜売上着地 ÷ 商品単価（単価を変えるとその場で再計算）。
+  const DIRECT_SEQ=["下北沢","山形","いわき","福井"];
+  const seqStores=DIRECT_SEQ.map(tok=>dstores.find(s=>(s.name||"").indexOf(tok)>=0)).filter(Boolean);
+  const panelRows=[...seqStores.map(s=>({id:s.id,name:s.name,neu:false})), ...NEWSTORES.map(ns=>({id:ns.id,name:ns.name,neu:true}))].map(r=>{
+    const idset=new Set([r.id]);
+    const so=curEnd?sumIds(idset,cf,curEnd):{ex:0,it:0}; r.actEx=Math.round(so.ex||0); r.actIt=Math.round(so.it||0);
+    let L={ex:0,it:0}; try{L=fcLandingEx(r.id,cur)||L;}catch(e){} r.landEx=Math.round(L.ex||0); r.landIt=Math.round(L.it||0);
+    r.autoUnit=r.landIt>0?Math.round(r.landEx/r.landIt):0;
+    r.ovUnit=(aupOv[String(r.id)]!=null)?Math.round(aupOv[String(r.id)]):null;
+    r.unit=r.ovUnit!=null?r.ovUnit:r.autoUnit;
+    r.landQty=r.unit>0?Math.round(r.landEx/r.unit):r.landIt;
+    r.tgt=r.neu?newTgtEx[r.id]:budgetEx(r.id,cur);
+    r.actUnit=r.actIt>0?Math.round(r.actEx/r.actIt):null;
+    return r;});
   {
-    const DIRECT_SEQ=["下北沢","山形","いわき","福井"];
-    const seqStores=DIRECT_SEQ.map(tok=>dstores.find(s=>(s.name||"").indexOf(tok)>=0)).filter(Boolean);
-    const rows=[...seqStores.map(s=>({id:s.id,name:s.name,neu:false})), ...NEWSTORES.map(ns=>({id:ns.id,name:ns.name,neu:true}))];
     const dash='<span class="sub">—</span>';
-    const rowVals=id=>{const idset=new Set([id]);
-      const so=curEnd?sumIds(idset,cf,curEnd):{ex:0,it:0}; const actEx=Math.round(so.ex||0),actIt=Math.round(so.it||0);
-      let L={ex:0,it:0}; try{L=fcLandingEx(id,cur)||L;}catch(e){} const landEx=Math.round(L.ex||0),landIt=Math.round(L.it||0);
-      return {actEx,actIt,landEx,landIt};};
-    let tTgt=0,anyTgt=false,tLandEx=0,tActEx=0,tLandIt=0,tActIt=0, body="";
-    rows.forEach(r=>{const v=rowVals(r.id); const tg=r.neu?newTgtEx[r.id]:budgetEx(r.id,cur);
-      if(tg!=null){tTgt+=tg;anyTgt=true;} tLandEx+=v.landEx; tActEx+=v.actEx; tLandIt+=v.landIt; tActIt+=v.actIt;
-      const uL=v.landIt>0?Math.round(v.landEx/v.landIt):null, uA=v.actIt>0?Math.round(v.actEx/v.actIt):null;
+    let tTgt=0,anyTgt=false,tLandEx=0,tActEx=0,tActIt=0, body="";
+    panelRows.forEach(r=>{
+      if(r.tgt!=null){tTgt+=r.tgt;anyTgt=true;} tLandEx+=r.landEx; tActEx+=r.actEx; tActIt+=r.actIt;
+      const edit=r.landEx?` <a class="edlink" href="index.html?g=own&store=${r.id}" title="着地見込みを店舗ページで変更">編集</a>`:"";
+      const unitCell=`<span class="yenin">¥<input class="au ki" data-au="${r.id}" value="${r.unit||''}" inputmode="decimal" style="width:74px"></span> <button type="button" class="aureset" data-aur="${r.id}" title="自動に戻す">↺</button>`;
       body+=`<tr><td>${esc(r.name)}${r.neu?' <span class="sub">（新店舗）</span>':''}</td>`
-        +`<td>${tg!=null?yf(tg):dash}</td><td>${v.landEx?yf(v.landEx):dash}</td><td>${v.actEx?yf(v.actEx):dash}</td>`
-        +`<td>${uL!=null?yf(uL):dash}</td><td>${uA!=null?yf(uA):dash}</td>`
-        +`<td>${v.landIt?NUM(v.landIt)+"点":dash}</td><td>${v.actIt?NUM(v.actIt)+"点":dash}</td></tr>`;});
-    const tuL=tLandIt>0?Math.round(tLandEx/tLandIt):null, tuA=tActIt>0?Math.round(tActEx/tActIt):null;
-    body+=`<tr class="total"><td>合計</td><td>${anyTgt?yf(tTgt):'—'}</td><td>${yf(tLandEx)}</td><td>${yf(tActEx)}</td><td>${tuL!=null?yf(tuL):'—'}</td><td>${tuA!=null?yf(tuA):'—'}</td><td>${NUM(tLandIt)}点</td><td>${NUM(tActIt)}点</td></tr>`;
-    h+=`<div class="panel"><h2>■ 直営：目標・着地見込・実績（${ml(cur)}）</h2><div class="tblwrap"><table style="min-width:760px"><thead>
+        +`<td>${r.tgt!=null?yf(r.tgt):dash}</td><td>${r.landEx?yf(r.landEx)+edit:dash}</td><td>${r.actEx?yf(r.actEx):dash}</td>`
+        +`<td>${r.landEx?unitCell:dash}</td><td>${r.actUnit!=null?yf(r.actUnit):dash}</td>`
+        +`<td id="qt-${r.id}">${r.landEx?NUM(r.landQty)+"点":dash}</td><td>${r.actIt?NUM(r.actIt)+"点":dash}</td></tr>`;});
+    const tuA=tActIt>0?Math.round(tActEx/tActIt):null;
+    body+=`<tr class="total"><td>合計</td><td>${anyTgt?yf(tTgt):'—'}</td><td>${yf(tLandEx)}</td><td>${yf(tActEx)}</td><td id="au-tot">—</td><td>${tuA!=null?yf(tuA):'—'}</td><td id="qt-tot">—</td><td>${NUM(tActIt)}点</td></tr>`;
+    h+=`<div class="panel"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h2 style="margin:0">■ 直営：目標・着地見込・実績（${ml(cur)}）</h2>
+      <button type="button" id="ki-copy" class="themebtn" style="margin-left:auto">テキスト化（Slack用）</button></div>
+      <div class="tblwrap" style="margin-top:8px"><table style="min-width:820px"><thead>
       <tr><th rowspan="2">店舗</th><th colspan="3">税抜売上</th><th colspan="2">商品単価</th><th colspan="2">商品販売数</th></tr>
       <tr><th>目標</th><th>着地見込</th><th>実績</th><th>着地見込</th><th>実績</th><th>着地見込</th><th>実績</th></tr>
       </thead><tbody>${body}</tbody></table></div>
-      <div class="note">税抜売上の目標＝事業計画（既存店＝bizplan、新店舗＝新店舗モデル＋オープン景気）。着地見込＝ダッシュボードと同じ（①②③）。実績＝当月の締日までの取込。商品単価＝税抜売上÷商品販売数。単価・販売数は目標なし（着地見込・実績のみ）。新店舗はオープン月から表示（データが無い期間は「—」）。</div></div>`;
+      <div class="note">税抜売上の目標＝事業計画（既存店＝bizplan／新店舗＝新店舗モデル＋オープン景気）。着地見込＝ダッシュボードと同じ（①②③）、<b>「編集」で店舗ページの見込設定へ</b>。実績＝当月の締日までの取込。<b>商品単価の着地見込は自動入力＋手で上書き可（↺で自動に戻す）</b>。商品販売数の着地見込＝税抜売上着地÷商品単価（単価を変えると再計算）。単価・販売数の目標は無し。新店舗はオープン月から表示（データが無い期間は「—」）。</div></div>`;
   }
   // ■ 予算達成の見込み（目標 vs 着地）※月次予実Excelから取込んだ目標を店舗に紐付け
   const trows=Object.keys(T).map(tok=>{ const cand=usableStores().filter(s=>(s.name||"").indexOf(tok)>=0); return {tok,st:cand.find(s=>ownOf(s.id)==="直営")||cand[0]}; }).filter(x=>x.st&&T[x.tok][cur]);
@@ -388,6 +417,48 @@ async function renderKeiei(){
       const exT=budgetEx(st.id,cur); const tr=D.getElementById("trate-"+st.id); if(tr)tr.textContent=exT?(Math.round(land/exT*100)+"%"):"—"; });
   };
   D.querySelectorAll(".ki").forEach(e=>e.addEventListener("input",recalc)); recalc();
+  // ---- 直営表：商品単価（着地見込）の手入力→販売数・合計を再計算。↺で自動に戻す ----
+  const auNum=id=>{const e=D.querySelector('[data-au="'+id+'"]');const v=e?parseFloat(String(e.value).replace(/[^0-9.]/g,'')):NaN;return (Number.isFinite(v)&&v>0)?v:null;};
+  function recalcAup(){ let tQty=0,tEx=0;
+    panelRows.forEach(r=>{ if(!r.landEx)return; const u=auNum(r.id)||r.autoUnit||0; const qty=u>0?Math.round(r.landEx/u):r.landQty;
+      const qe=D.getElementById('qt-'+r.id); if(qe)qe.textContent=NUM(qty)+'点'; tQty+=qty; tEx+=r.landEx; });
+    const qt=D.getElementById('qt-tot'); if(qt)qt.textContent=NUM(tQty)+'点';
+    const at=D.getElementById('au-tot'); if(at)at.textContent=tQty>0?yf(Math.round(tEx/tQty)):'—'; }
+  D.querySelectorAll('.au').forEach(e=>{ e.addEventListener('input',recalcAup);
+    e.addEventListener('change',()=>{const id=e.dataset.au,v=auNum(id); if(v!=null){saveAupOv(cur,id,v);}else{delAupOv(cur,id);}}); });
+  D.querySelectorAll('.aureset').forEach(b=>{ b.addEventListener('click',async()=>{const id=b.dataset.aur,r=panelRows.find(x=>String(x.id)===String(id));
+    await delAupOv(cur,id); const e=D.querySelector('[data-au="'+id+'"]'); if(e)e.value=(r&&r.autoUnit)||''; recalcAup(); }); });
+  recalcAup();
+  // ---- テキスト化（Slack貼り付け用）----
+  function showTextModal(text){
+    const old=D.getElementById('txtmodal'); if(old)old.remove();
+    const m=D.createElement('div'); m.className='txtmodal'; m.id='txtmodal';
+    m.innerHTML=`<div class="box"><div style="font-weight:800;margin-bottom:8px">テキスト（Slackに貼り付け）</div>`
+      +`<textarea id="txtout" readonly></textarea>`
+      +`<div class="row"><span class="sub" id="txtmsg" style="margin-right:auto"></span>`
+      +`<button type="button" class="themebtn" id="txtcopy" style="background:var(--accent);color:#fff;border-color:var(--accent)">コピー</button>`
+      +`<button type="button" class="themebtn" id="txtclose">閉じる</button></div></div>`;
+    D.body.appendChild(m);
+    const ta=D.getElementById('txtout'); ta.value=text; ta.focus(); try{ta.select();}catch(e){}
+    D.getElementById('txtcopy').onclick=()=>{let ok=false;try{ta.select();ok=D.execCommand('copy');}catch(e){}try{navigator.clipboard.writeText(text);ok=true;}catch(e){}D.getElementById('txtmsg').textContent=ok?'コピーしました':'テキストを選択してコピーしてください';};
+    D.getElementById('txtclose').onclick=()=>m.remove();
+    m.addEventListener('click',ev=>{if(ev.target===m)m.remove();});
+  }
+  const cpBtn=D.getElementById('ki-copy');
+  if(cpBtn)cpBtn.onclick=()=>{
+    const short=nm=>String(nm).replace(/^NOTIME/,'').replace(/店$/,'');
+    const maxLen=Math.max(1,...panelRows.map(r=>short(r.name).length));
+    const padName=nm=>{const s=short(nm);return s+'　'.repeat(Math.max(0,maxLen-s.length));};
+    let tQty=0,tEx=0, lines=['【直営】'];
+    panelRows.forEach(r=>{ const hasData=r.landEx>0, u=auNum(r.id)||r.autoUnit||0, qty=hasData?(u>0?Math.round(r.landEx/u):r.landQty):0;
+      if(hasData){tQty+=qty;tEx+=r.landEx;}
+      lines.push(hasData?`${padName(r.name)}　${NUM(qty)}点 ／ ${(r.landEx/10000).toFixed(1)}万円 ／ 単価${NUM(u)}円`
+                        :`${padName(r.name)}　（データなし）`); });
+    lines.push(`　直営合計　${NUM(tQty)}点 ／ ${(tEx/10000).toFixed(1)}万円`);
+    const text=lines.join('\n');
+    try{navigator.clipboard.writeText(text);}catch(e){}
+    showTextModal(text);
+  };
   if(loaded.src)D.getElementById("ki-status").textContent=(loaded.src==="server"?"サーバーの保存値を表示中":"この端末の保存値を表示中");
   D.getElementById("ki-auto").onclick=()=>{
     for(const id in auto.storeEx)["prev","cur","next"].forEach(c=>{const e=gel("sx|"+id+"|"+c);if(e)e.value=auto.storeEx[id][c];});
