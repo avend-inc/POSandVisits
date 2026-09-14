@@ -871,7 +871,7 @@ async function authBoot(url,anon){
   SUPA.url=String(url||"").replace(/\/+$/,""); SUPA.anon=anon;   // AI呼び出しの直接fetch用に控える
   SB=window.supabase.createClient(url,anon,{
     auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,
-      flowType:"pkce",storageKey:"notime-auth"},
+      flowType:"pkce",storageKey:(function(){try{var r=new URL(CONFIG_URL).hostname.split(".")[0];var k="sb-"+r+"-auth-token";function h(x){try{var v=localStorage.getItem(x);return !!(v&&v.length>2&&v!=="null"&&v!=="undefined");}catch(e){return false;}}return h("notime-auth")?"notime-auth":(h(k)?k:"notime-auth");}catch(e){return "notime-auth";}})()},
   });
   const {data:{session}}=await SB.auth.getSession();
   if(!session){showLogin();return;}

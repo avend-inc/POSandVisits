@@ -162,7 +162,7 @@ async function boot(){
     let cfg=null; try{cfg=await (await fetch(CONFIG_URL,{cache:"no-store"})).json();}catch(e){}
     if(!cfg||cfg.mode!=="auth"){ screen('<div class="gate"><div class="logo">経営レポート</div><div class="t">ログインが必要です</div><div class="m">この画面は管理者専用です。Googleログインの設定が完了すると利用できます。</div><div style="margin-top:14px"><a class="navlink" href="index.html">← ダッシュボードへ</a></div></div>'); return; }
     await ensureSupabase();
-    SB=window.supabase.createClient(cfg.url,cfg.anon,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,flowType:"pkce",storageKey:"notime-auth"}});
+    SB=window.supabase.createClient(cfg.url,cfg.anon,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,flowType:"pkce",storageKey:(function(){try{var r=new URL(CONFIG_URL).hostname.split(".")[0];var k="sb-"+r+"-auth-token";function h(x){try{var v=localStorage.getItem(x);return !!(v&&v.length>2&&v!=="null"&&v!=="undefined");}catch(e){return false;}}return h("notime-auth")?"notime-auth":(h(k)?k:"notime-auth");}catch(e){return "notime-auth";}})()}});
     const {data:{session}}=await SB.auth.getSession();
     if(!session){showLogin();return;}
     ME.email=(session.user&&session.user.email||"").toLowerCase();
