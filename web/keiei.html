@@ -168,6 +168,12 @@ async function loadAupOv(ym){const m={}; if(!SB)return m;
   return m;}
 async function saveAupOv(ym,id,val){ if(!SB)return; try{await SB.from("plan_data").upsert({page:"keiei_aup",scope:String(id),ym,data:{aup:val},updated_at:new Date().toISOString(),updated_by:(ME&&ME.email)||null},{onConflict:"page,scope,ym"});}catch(e){} }
 async function delAupOv(ym,id){ if(!SB)return; try{await SB.from("plan_data").delete().eq("page","keiei_aup").eq("scope",String(id)).eq("ym",ym);}catch(e){} }
+// 新店舗（データ無し）の「税抜売上・着地見込」の手入力上書き。plan_data page="keiei_land"。
+async function loadLandOv(ym){const m={}; if(!SB)return m;
+  try{const {data}=await SB.from("plan_data").select("scope,data").eq("page","keiei_land").eq("ym",ym);
+    (data||[]).forEach(r=>{const v=r.data&&r.data.ex; if(Number.isFinite(+v))m[String(r.scope)]=+v;});}catch(e){}
+  return m;}
+async function saveLandOv(ym,id,val){ if(!SB)return; try{await SB.from("plan_data").upsert({page:"keiei_land",scope:String(id),ym,data:{ex:val},updated_at:new Date().toISOString(),updated_by:(ME&&ME.email)||null},{onConflict:"page,scope,ym"});}catch(e){} }
 
 // ---- 認証（管理者のみ）＋データ読込 ----
 async function ensureSupabase(){ if(window.supabase)return; await new Promise((res,rej)=>{const s=document.createElement("script");
@@ -271,6 +277,7 @@ async function renderKeiei(){
   const newTgtEx={};
   for(const ns of NEWSTORES){ try{const {data}=await SB.rpc("new_store_sales_target",{p_open_ym:ns.open,p_ym:cur}); newTgtEx[ns.id]=Number.isFinite(+data)?Math.round(+data):null; }catch(e){ newTgtEx[ns.id]=null; } }
   const aupOv=await loadAupOv(cur);   // 商品単価の手入力上書き（着地見込）
+  const landOv=await loadLandOv(cur); // 新店舗の税抜売上・着地見込の手入力上書き
   const plBud={};   // "ym|scope" -> 予実タブ保存の税抜予算 b_ex
   if(SB){ try{ const {data}=await SB.from("plan_data").select("scope,ym,data").eq("page","pl").in("ym",[cur,next]);
     (data||[]).forEach(r=>{const v=r.data&&r.data.b_ex; if(Number.isFinite(v))plBud[r.ym+"|"+r.scope]=Math.round(v);}); }catch(e){} }
@@ -331,33 +338,39 @@ async function renderKeiei(){
     const idset=new Set([r.id]);
     const so=curEnd?sumIds(idset,cf,curEnd):{ex:0,it:0}; r.actEx=Math.round(so.ex||0); r.actIt=Math.round(so.it||0);
     let L={ex:0,it:0}; try{L=fcLandingEx(r.id,cur)||L;}catch(e){} r.landEx=Math.round(L.ex||0); r.landIt=Math.round(L.it||0);
+    r.tgt=r.neu?newTgtEx[r.id]:budgetEx(r.id,cur);
+    r.actUnit=r.actIt>0?Math.round(r.actEx/r.actIt):null;
+    // 新店舗（データ無し）は着地売上を手入力で持つ（初期値＝上書き値→無ければ目標）。既存店は landing.js。
+    r.ovLand=(r.neu&&landOv[String(r.id)]!=null)?Math.round(landOv[String(r.id)]):null;
+    if(r.neu && r.landEx<=0) r.landEx = (r.ovLand!=null? r.ovLand : (r.tgt!=null? r.tgt : 0));
     r.autoUnit=r.landIt>0?Math.round(r.landEx/r.landIt):0;
     r.ovUnit=(aupOv[String(r.id)]!=null)?Math.round(aupOv[String(r.id)]):null;
     r.unit=r.ovUnit!=null?r.ovUnit:r.autoUnit;
-    r.landQty=r.unit>0?Math.round(r.landEx/r.unit):r.landIt;
-    r.tgt=r.neu?newTgtEx[r.id]:budgetEx(r.id,cur);
-    r.actUnit=r.actIt>0?Math.round(r.actEx/r.actIt):null;
+    r.landQty=(r.landEx>0&&r.unit>0)?Math.round(r.landEx/r.unit):(r.landIt||0);
     return r;});
   {
     const dash='<span class="sub">—</span>';
-    let tTgt=0,anyTgt=false,tLandEx=0,tActEx=0,tActIt=0, body="";
+    let tTgt=0,anyTgt=false,tActEx=0,tActIt=0, body="";
     panelRows.forEach(r=>{
-      if(r.tgt!=null){tTgt+=r.tgt;anyTgt=true;} tLandEx+=r.landEx; tActEx+=r.actEx; tActIt+=r.actIt;
-      const edit=r.landEx?` <a class="edlink" href="index.html?g=own&store=${r.id}" title="着地見込みを店舗ページで変更">編集</a>`:"";
+      if(r.tgt!=null){tTgt+=r.tgt;anyTgt=true;} tActEx+=r.actEx; tActIt+=r.actIt;
+      // 税抜売上・着地見込：既存店は表示＋店舗ページ編集リンク／新店舗は手入力
+      const salesCell = r.neu
+        ? `<span class="yenin">¥<input class="ld ki" data-ld="${r.id}" value="${r.landEx||''}" inputmode="decimal" style="width:96px"></span>`
+        : (r.landEx?yf(r.landEx)+` <a class="edlink" href="index.html?g=own&store=${r.id}" title="着地見込みを店舗ページで変更">編集</a>`:dash);
       const unitCell=`<span class="yenin">¥<input class="au ki" data-au="${r.id}" value="${r.unit||''}" inputmode="decimal" style="width:74px"></span> <button type="button" class="aureset" data-aur="${r.id}" title="自動に戻す">↺</button>`;
       body+=`<tr><td>${esc(r.name)}${r.neu?' <span class="sub">（新店舗）</span>':''}</td>`
-        +`<td>${r.tgt!=null?yf(r.tgt):dash}</td><td>${r.landEx?yf(r.landEx)+edit:dash}</td><td>${r.actEx?yf(r.actEx):dash}</td>`
-        +`<td>${r.landEx?unitCell:dash}</td><td>${r.actUnit!=null?yf(r.actUnit):dash}</td>`
-        +`<td id="qt-${r.id}">${r.landEx?NUM(r.landQty)+"点":dash}</td><td>${r.actIt?NUM(r.actIt)+"点":dash}</td></tr>`;});
+        +`<td>${r.tgt!=null?yf(r.tgt):dash}</td><td>${salesCell}</td><td>${r.actEx?yf(r.actEx):dash}</td>`
+        +`<td>${unitCell}</td><td>${r.actUnit!=null?yf(r.actUnit):dash}</td>`
+        +`<td id="qt-${r.id}">${r.landQty?NUM(r.landQty)+"点":dash}</td><td>${r.actIt?NUM(r.actIt)+"点":dash}</td></tr>`;});
     const tuA=tActIt>0?Math.round(tActEx/tActIt):null;
-    body+=`<tr class="total"><td>合計</td><td>${anyTgt?yf(tTgt):'—'}</td><td>${yf(tLandEx)}</td><td>${yf(tActEx)}</td><td id="au-tot">—</td><td>${tuA!=null?yf(tuA):'—'}</td><td id="qt-tot">—</td><td>${NUM(tActIt)}点</td></tr>`;
+    body+=`<tr class="total"><td>合計</td><td>${anyTgt?yf(tTgt):'—'}</td><td id="ld-tot">—</td><td>${yf(tActEx)}</td><td id="au-tot">—</td><td>${tuA!=null?yf(tuA):'—'}</td><td id="qt-tot">—</td><td>${NUM(tActIt)}点</td></tr>`;
     h+=`<div class="panel"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h2 style="margin:0">■ 直営：目標・着地見込・実績（${ml(cur)}）</h2>
       <button type="button" id="ki-copy" class="themebtn" style="margin-left:auto">テキスト化（Slack用）</button></div>
       <div class="tblwrap" style="margin-top:8px"><table style="min-width:820px"><thead>
       <tr><th rowspan="2">店舗</th><th colspan="3">税抜売上</th><th colspan="2">商品単価</th><th colspan="2">商品販売数</th></tr>
       <tr><th>目標</th><th>着地見込</th><th>実績</th><th>着地見込</th><th>実績</th><th>着地見込</th><th>実績</th></tr>
       </thead><tbody>${body}</tbody></table></div>
-      <div class="note">税抜売上の目標＝事業計画（既存店＝bizplan／新店舗＝新店舗モデル＋オープン景気）。着地見込＝ダッシュボードと同じ（①②③）、<b>「編集」で店舗ページの見込設定へ</b>。実績＝当月の締日までの取込。<b>商品単価の着地見込は自動入力＋手で上書き可（↺で自動に戻す）</b>。商品販売数の着地見込＝税抜売上着地÷商品単価（単価を変えると再計算）。単価・販売数の目標は無し。新店舗はオープン月から表示（データが無い期間は「—」）。</div></div>`;
+      <div class="note">税抜売上の目標＝事業計画（既存店＝bizplan／新店舗＝新店舗モデル＋オープン景気）。着地見込：既存店＝ダッシュボードと同じ（①②③）で<b>「編集」から店舗ページの見込設定へ</b>／<b>新店舗＝手入力（初期値＝目標）</b>。実績＝当月の締日までの取込。<b>商品単価は自動入力＋手で上書き可（↺で自動に戻す）</b>。商品販売数の着地見込＝税抜売上着地÷商品単価（売上・単価を変えると再計算）。単価・販売数の目標は無し。新店舗はオープン月から表示。</div></div>`;
   }
   // ■ 予算達成の見込み（目標 vs 着地）※月次予実Excelから取込んだ目標を店舗に紐付け
   const trows=Object.keys(T).map(tok=>{ const cand=usableStores().filter(s=>(s.name||"").indexOf(tok)>=0); return {tok,st:cand.find(s=>ownOf(s.id)==="直営")||cand[0]}; }).filter(x=>x.st&&T[x.tok][cur]);
@@ -417,15 +430,21 @@ async function renderKeiei(){
       const exT=budgetEx(st.id,cur); const tr=D.getElementById("trate-"+st.id); if(tr)tr.textContent=exT?(Math.round(land/exT*100)+"%"):"—"; });
   };
   D.querySelectorAll(".ki").forEach(e=>e.addEventListener("input",recalc)); recalc();
-  // ---- 直営表：商品単価（着地見込）の手入力→販売数・合計を再計算。↺で自動に戻す ----
+  // ---- 直営表：着地見込（売上・単価）の手入力→販売数・合計を再計算。↺で単価を自動に戻す ----
   const auNum=id=>{const e=D.querySelector('[data-au="'+id+'"]');const v=e?parseFloat(String(e.value).replace(/[^0-9.]/g,'')):NaN;return (Number.isFinite(v)&&v>0)?v:null;};
-  function recalcAup(){ let tQty=0,tEx=0;
-    panelRows.forEach(r=>{ if(!r.landEx)return; const u=auNum(r.id)||r.autoUnit||0; const qty=u>0?Math.round(r.landEx/u):r.landQty;
-      const qe=D.getElementById('qt-'+r.id); if(qe)qe.textContent=NUM(qty)+'点'; tQty+=qty; tEx+=r.landEx; });
+  const ldNum=id=>{const e=D.querySelector('[data-ld="'+id+'"]');if(!e)return null;const v=parseFloat(String(e.value).replace(/[^0-9.]/g,''));return (Number.isFinite(v)&&v>0)?v:null;};
+  const salesOf=r=>{ if(r.neu){const v=ldNum(r.id); return v!=null?v:(r.tgt!=null?r.tgt:0);} return r.landEx; };
+  function recalcAup(){ let tExAll=0,tExCnt=0,tQty=0;
+    panelRows.forEach(r=>{ const base=salesOf(r), u=auNum(r.id)||r.autoUnit||0, ok=base>0&&u>0, qty=ok?Math.round(base/u):0;
+      const qe=D.getElementById('qt-'+r.id); if(qe)qe.textContent=ok?NUM(qty)+'点':'—';
+      if(base>0)tExAll+=base; if(ok){tExCnt+=base;tQty+=qty;} });
+    const lt=D.getElementById('ld-tot'); if(lt)lt.textContent=yf(tExAll);
     const qt=D.getElementById('qt-tot'); if(qt)qt.textContent=NUM(tQty)+'点';
-    const at=D.getElementById('au-tot'); if(at)at.textContent=tQty>0?yf(Math.round(tEx/tQty)):'—'; }
+    const at=D.getElementById('au-tot'); if(at)at.textContent=tQty>0?yf(Math.round(tExCnt/tQty)):'—'; }
   D.querySelectorAll('.au').forEach(e=>{ e.addEventListener('input',recalcAup);
     e.addEventListener('change',()=>{const id=e.dataset.au,v=auNum(id); if(v!=null){saveAupOv(cur,id,v);}else{delAupOv(cur,id);}}); });
+  D.querySelectorAll('.ld').forEach(e=>{ e.addEventListener('input',recalcAup);
+    e.addEventListener('change',()=>{const id=e.dataset.ld,v=ldNum(id); if(v!=null)saveLandOv(cur,id,v);}); });
   D.querySelectorAll('.aureset').forEach(b=>{ b.addEventListener('click',async()=>{const id=b.dataset.aur,r=panelRows.find(x=>String(x.id)===String(id));
     await delAupOv(cur,id); const e=D.querySelector('[data-au="'+id+'"]'); if(e)e.value=(r&&r.autoUnit)||''; recalcAup(); }); });
   recalcAup();
@@ -450,10 +469,10 @@ async function renderKeiei(){
     const maxLen=Math.max(1,...panelRows.map(r=>short(r.name).length));
     const padName=nm=>{const s=short(nm);return s+'　'.repeat(Math.max(0,maxLen-s.length));};
     let tQty=0,tEx=0, lines=['【直営】'];
-    panelRows.forEach(r=>{ const hasData=r.landEx>0, u=auNum(r.id)||r.autoUnit||0, qty=hasData?(u>0?Math.round(r.landEx/u):r.landQty):0;
-      if(hasData){tQty+=qty;tEx+=r.landEx;}
-      lines.push(hasData?`${padName(r.name)}　${NUM(qty)}点 ／ ${(r.landEx/10000).toFixed(1)}万円 ／ 単価${NUM(u)}円`
-                        :`${padName(r.name)}　（データなし）`); });
+    panelRows.forEach(r=>{ const base=salesOf(r), u=auNum(r.id)||r.autoUnit||0, ok=base>0&&u>0, qty=ok?Math.round(base/u):0;
+      if(ok){tQty+=qty;tEx+=base;}
+      lines.push(ok?`${padName(r.name)}　${NUM(qty)}点 ／ ${(base/10000).toFixed(1)}万円 ／ 単価${NUM(u)}円`
+                   :(base>0?`${padName(r.name)}　${(base/10000).toFixed(1)}万円 ／ 単価未設定`:`${padName(r.name)}　（データなし）`)); });
     lines.push(`　直営合計　${NUM(tQty)}点 ／ ${(tEx/10000).toFixed(1)}万円`);
     const text=lines.join('\n');
     try{navigator.clipboard.writeText(text);}catch(e){}
