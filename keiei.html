@@ -249,6 +249,11 @@ async function renderKeiei(){
   const BIZ={};   // ym -> [{pos_store_name, amount(税抜)}]
   async function loadBiz(ym){ if(BIZ[ym]||!SB)return; try{const {data,error}=await SB.rpc("bizplan_store_sales",{p_ym:ym});BIZ[ym]=error?[]:(data||[]);}catch(e){BIZ[ym]=[];} }
   await loadBiz(cur); await loadBiz(next);
+  // 福井より後の新店舗（オープン月に達したら表示）。data.json未反映でもIDで載せる。
+  // 税抜売上の目標＝新店舗モデル＋オープン景気（new_store_sales_target RPC）。今後の新店もここに追加。
+  const NEWSTORES=[{id:50,name:"NOTIME長野店",open:"2026-09"}].filter(x=>x.open<=cur);
+  const newTgtEx={};
+  for(const ns of NEWSTORES){ try{const {data}=await SB.rpc("new_store_sales_target",{p_open_ym:ns.open,p_ym:cur}); newTgtEx[ns.id]=Number.isFinite(+data)?Math.round(+data):null; }catch(e){ newTgtEx[ns.id]=null; } }
   const plBud={};   // "ym|scope" -> 予実タブ保存の税抜予算 b_ex
   if(SB){ try{ const {data}=await SB.from("plan_data").select("scope,ym,data").eq("page","pl").in("ym",[cur,next]);
     (data||[]).forEach(r=>{const v=r.data&&r.data.b_ex; if(Number.isFinite(v))plBud[r.ym+"|"+r.scope]=Math.round(v);}); }catch(e){} }
@@ -299,6 +304,32 @@ async function renderKeiei(){
       <a class="navlink homebtn" href="../" title="アプリのトップへ">ホーム</a>
     </header>`;
   h+=`<div class="note">前月＝実績確定／当月＝<b>ダッシュボードと同じ着地見込み（①②③）</b>／翌月以降＝<b>予算（事業計画 bizplan）</b>を着地見込みに（予算が無い店のみ前年同月比で推定）。自動入力ですが編集できます（「保存する」で全員に共有）。</div>`;
+  // ■ 直営：店舗×指標（目標・着地見込・実績）＝ご指定の並び（下北沢/山形/いわき/福井/長野/合計）
+  {
+    const DIRECT_SEQ=["下北沢","山形","いわき","福井"];
+    const seqStores=DIRECT_SEQ.map(tok=>dstores.find(s=>(s.name||"").indexOf(tok)>=0)).filter(Boolean);
+    const rows=[...seqStores.map(s=>({id:s.id,name:s.name,neu:false})), ...NEWSTORES.map(ns=>({id:ns.id,name:ns.name,neu:true}))];
+    const dash='<span class="sub">—</span>';
+    const rowVals=id=>{const idset=new Set([id]);
+      const so=curEnd?sumIds(idset,cf,curEnd):{ex:0,it:0}; const actEx=Math.round(so.ex||0),actIt=Math.round(so.it||0);
+      let L={ex:0,it:0}; try{L=fcLandingEx(id,cur)||L;}catch(e){} const landEx=Math.round(L.ex||0),landIt=Math.round(L.it||0);
+      return {actEx,actIt,landEx,landIt};};
+    let tTgt=0,anyTgt=false,tLandEx=0,tActEx=0,tLandIt=0,tActIt=0, body="";
+    rows.forEach(r=>{const v=rowVals(r.id); const tg=r.neu?newTgtEx[r.id]:budgetEx(r.id,cur);
+      if(tg!=null){tTgt+=tg;anyTgt=true;} tLandEx+=v.landEx; tActEx+=v.actEx; tLandIt+=v.landIt; tActIt+=v.actIt;
+      const uL=v.landIt>0?Math.round(v.landEx/v.landIt):null, uA=v.actIt>0?Math.round(v.actEx/v.actIt):null;
+      body+=`<tr><td>${esc(r.name)}${r.neu?' <span class="sub">（新店舗）</span>':''}</td>`
+        +`<td>${tg!=null?yf(tg):dash}</td><td>${v.landEx?yf(v.landEx):dash}</td><td>${v.actEx?yf(v.actEx):dash}</td>`
+        +`<td>${uL!=null?yf(uL):dash}</td><td>${uA!=null?yf(uA):dash}</td>`
+        +`<td>${v.landIt?NUM(v.landIt)+"点":dash}</td><td>${v.actIt?NUM(v.actIt)+"点":dash}</td></tr>`;});
+    const tuL=tLandIt>0?Math.round(tLandEx/tLandIt):null, tuA=tActIt>0?Math.round(tActEx/tActIt):null;
+    body+=`<tr class="total"><td>合計</td><td>${anyTgt?yf(tTgt):'—'}</td><td>${yf(tLandEx)}</td><td>${yf(tActEx)}</td><td>${tuL!=null?yf(tuL):'—'}</td><td>${tuA!=null?yf(tuA):'—'}</td><td>${NUM(tLandIt)}点</td><td>${NUM(tActIt)}点</td></tr>`;
+    h+=`<div class="panel"><h2>■ 直営：目標・着地見込・実績（${ml(cur)}）</h2><div class="tblwrap"><table style="min-width:760px"><thead>
+      <tr><th rowspan="2">店舗</th><th colspan="3">税抜売上</th><th colspan="2">商品単価</th><th colspan="2">商品販売数</th></tr>
+      <tr><th>目標</th><th>着地見込</th><th>実績</th><th>着地見込</th><th>実績</th><th>着地見込</th><th>実績</th></tr>
+      </thead><tbody>${body}</tbody></table></div>
+      <div class="note">税抜売上の目標＝事業計画（既存店＝bizplan、新店舗＝新店舗モデル＋オープン景気）。着地見込＝ダッシュボードと同じ（①②③）。実績＝当月の締日までの取込。商品単価＝税抜売上÷商品販売数。単価・販売数は目標なし（着地見込・実績のみ）。新店舗はオープン月から表示（データが無い期間は「—」）。</div></div>`;
+  }
   // ■ 予算達成の見込み（目標 vs 着地）※月次予実Excelから取込んだ目標を店舗に紐付け
   const trows=Object.keys(T).map(tok=>{ const cand=usableStores().filter(s=>(s.name||"").indexOf(tok)>=0); return {tok,st:cand.find(s=>ownOf(s.id)==="直営")||cand[0]}; }).filter(x=>x.st&&T[x.tok][cur]);
   if(trows.length){
