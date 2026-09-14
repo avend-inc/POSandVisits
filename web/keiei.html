@@ -75,7 +75,6 @@
 <nav class="tabbar"><div class="tabbar-in">
   <a href="index.html?g=own" id="tab-own">直営</a>
   <a href="index.html?g=fc" id="tab-fc">FC</a>
-  <a href="pl.html">予実</a>
   <a href="unei.html" id="tab-unei">運営</a>
   <a href="keiei.html" id="tab-keiei" class="on">経営</a>
   <a href="admin.html" id="tab-admin" style="display:none">管理</a>
@@ -372,34 +371,7 @@ async function renderKeiei(){
       </thead><tbody>${body}</tbody></table></div>
       <div class="note">税抜売上の目標＝事業計画（既存店＝bizplan／新店舗＝新店舗モデル＋オープン景気）。着地見込：既存店＝ダッシュボードと同じ（①②③）で<b>「編集」から店舗ページの見込設定へ</b>／<b>新店舗＝手入力（初期値＝目標）</b>。実績＝当月の締日までの取込。<b>商品単価は自動入力＋手で上書き可（↺で自動に戻す）</b>。商品販売数の着地見込＝税抜売上着地÷商品単価（売上・単価を変えると再計算）。単価・販売数の目標は無し。新店舗はオープン月から表示。</div></div>`;
   }
-  // ■ 予算達成の見込み（目標 vs 着地）※月次予実Excelから取込んだ目標を店舗に紐付け
-  const trows=Object.keys(T).map(tok=>{ const cand=usableStores().filter(s=>(s.name||"").indexOf(tok)>=0); return {tok,st:cand.find(s=>ownOf(s.id)==="直営")||cand[0]}; }).filter(x=>x.st&&T[x.tok][cur]);
-  if(trows.length){
-    const rate=(a,b)=>b?Math.round(a/b*100)+"%":"—";
-    h+=`<div class="panel"><h2>■ 予算達成の見込み（${ml(cur)}・目標 vs 着地）</h2><div class="tblwrap"><table><thead><tr><th>店舗</th><th>税抜売上 目標</th><th>着地見込</th><th>達成率</th><th>来店 目標</th><th>着地見込</th><th>達成率</th></tr></thead><tbody>`;
-    trows.forEach(({tok,st})=>{ const idset=new Set([st.id]);
-      // 税抜売上の着地見込＝ダッシュボードと同一の着地見込み定義（landingExForIds＝①②③）。直営は上の表の編集値と連動。
-      const exLand=M.storeEx[st.id]?M.storeEx[st.id].cur:Math.round(landingExForIds(idset,cur));
-      const so=curEnd?sumIds(idset,cf,curEnd):{v:0,hasV:false}; const vLand=so.hasV?Math.round(proj(so.v||0)):null;
-      const tg=T[tok][cur]||{}; const exT=budgetEx(st.id,cur), vT=tg.visitors?Math.round(tg.visitors):null;
-      h+=`<tr><td>${esc(st.name)}</td><td>${exT?yf(exT):"—"}</td><td id="tex-${st.id}">${yf(exLand)}</td><td><b id="trate-${st.id}">${exT?rate(exLand,exT):"—"}</b></td><td>${vT?NUM(vT)+"人":"—"}</td><td>${vLand!=null?NUM(vLand)+"人":"—"}</td><td><b>${(vT&&vLand!=null)?rate(vLand,vT):"—"}</b></td></tr>`;
-    });
-    h+=`</tbody></table></div><div class="note">目標＝<b>事業計画（bizplan_monthly）</b>を正に、店舗ページの売上予算と同じ引き方（①事業計画→②予実タブ保存→③月次予実targets）。税抜売上の着地見込＝<b>ダッシュボード（店舗ページ）の着地見込みと同じ計算（①②③）</b>。来店＝当月実績の日割り。達成率＝着地÷目標。</div></div>`;
-  }
-  // 直営 各店：税抜売上・商品販売数・平均商品単価（月ごと）
-  h+=`<div class="panel"><h2>■ 直営：各店の着地見込（税抜売上・商品販売数・平均商品単価）</h2><div class="tblwrap"><table><thead><tr><th>店舗 / 指標</th><th>${ml(prev)}</th><th>${ml(cur)}</th><th>${ml(next)}</th></tr></thead><tbody>`;
-  dstores.forEach(s=>{const e=M.storeEx[s.id], it=storeIt[s.id];
-    const aup=c=>(it[c]>0?Math.round(e[c]/it[c]):0);
-    h+=`<tr class="storehd"><td colspan="4">${esc(s.name)}</td></tr>`;
-    h+=`<tr><td>税抜売上</td><td>${niY("sx|"+s.id+"|prev",e.prev)}</td><td>${niY("sx|"+s.id+"|cur",e.cur)}</td><td>${niY("sx|"+s.id+"|next",e.next)}</td></tr>`;
-    h+=`<tr><td>商品販売数</td>`+["prev","cur","next"].map(c=>`<td id="it-${s.id}-${c}">${NUM(it[c])}点</td>`).join("")+`</tr>`;
-    h+=`<tr><td>平均商品単価</td>`+["prev","cur","next"].map(c=>`<td id="aup-${s.id}-${c}">${yf(aup(c))}</td>`).join("")+`</tr>`;});
-  h+=`<tr class="total"><td>直営 計（税抜売上）</td><td id="tot-prev"></td><td id="tot-cur"></td><td id="tot-next"></td></tr>`;
-  h+=`</tbody></table></div><div class="note">当月（${ml(cur)}）＝<b>ダッシュボードと同じ着地見込み（①②③）</b>。翌月（${ml(next)}）＝<b>予算</b>（税抜売上＝事業計画bizplan、商品販売数＝月次予実。無い店のみ前年同月比推定）。前月＝実績確定。平均商品単価＝税抜売上÷商品販売数（売上を直すと自動再計算）。</div>`;
-  // 直営 KPI
-  h+=`<div class="subhd">直営：主要KPI 着地見込（直営全体）</div><div class="tblwrap"><table><thead><tr><th>KPI</th><th>${ml(prev)}</th><th>${ml(cur)}</th><th>${ml(next)}</th></tr></thead><tbody>`;
-  KPIS.forEach(m=>{h+=`<tr><td>${m.n}${m.u?`（${m.u}）`:''}</td>`+["prev","cur","next"].map(c=>`<td>${ni("kpi|"+c+"|"+m.k,M.kpi[c][m.k])}</td>`).join("")+`</tr>`;});
-  h+=`</tbody></table></div></div>`;
+  // （旧「予算達成の見込み」「直営：各店の着地見込」パネルは廃止し、上の店舗×指標の表に統合）
   // FC
   h+=`<div class="panel"><h2>■ FC売上（本部としての売上着地見込）</h2>`;
   h+=`<div class="subhd">① ロイヤリティ</div><div class="krow">FC着地売上(税抜) ${ni("roy|base",M.roy.base)} × 率 ${ni("roy|rate",M.roy.rate)}% ＝ <b id="roy-res" style="font-size:15px"></b></div>`;
@@ -415,19 +387,12 @@ async function renderKeiei(){
   screen(h);
   const D=document, gel=k=>D.querySelector('[data-k="'+k+'"]'), num=k=>{const e=gel(k);return e?(parseFloat(String(e.value).replace(/[^0-9.\-]/g,''))||0):0;};
   const recalc=()=>{
-    ["prev","cur","next"].forEach(c=>{let t=0;dstores.forEach(s=>t+=num("sx|"+s.id+"|"+c));const e=D.getElementById("tot-"+c);if(e)e.textContent=yf(t);});
-    // 平均商品単価＝税抜売上÷商品販売数（売上の編集に追従）
-    dstores.forEach(s=>["prev","cur","next"].forEach(c=>{const q=storeIt[s.id]?storeIt[s.id][c]:0;const ae=D.getElementById("aup-"+s.id+"-"+c);if(ae)ae.textContent=q>0?yf(Math.round(num("sx|"+s.id+"|"+c)/q)):"—";}));
     const roy=num("roy|base")*num("roy|rate")/100; D.getElementById("roy-res").textContent=yf(roy);
     let wtot=0,wqty=0;WH.forEach(([k])=>{const q=num("wh|"+k+"|qty"),u=num("wh|"+k+"|unit");const sub=q*u;wtot+=sub;wqty+=q;const e=D.getElementById("wsub-"+k);if(e)e.textContent=yf(sub);});
     D.getElementById("wtot").textContent=yf(wtot);
     {const qe=D.getElementById("wqty-tot");if(qe)qe.textContent=NUM(wqty);const ae=D.getElementById("wunit-avg");if(ae)ae.textContent=wqty>0?yf(Math.round(wtot/wqty)):"—";}
     const con=num("con|qty")*num("con|price")*num("con|rate")/100; const ce=D.getElementById("con-res");if(ce)ce.textContent=yf(con);
     D.getElementById("honbu").textContent=yf(roy+wtot+con);
-    // 予算達成パネルの税抜売上着地＝直営の当月着地(編集値)と連動
-    trows.forEach(({tok,st})=>{ if(ownOf(st.id)!=="直営")return; const land=num("sx|"+st.id+"|cur");
-      const te=D.getElementById("tex-"+st.id); if(te)te.textContent=yf(land);
-      const exT=budgetEx(st.id,cur); const tr=D.getElementById("trate-"+st.id); if(tr)tr.textContent=exT?(Math.round(land/exT*100)+"%"):"—"; });
   };
   D.querySelectorAll(".ki").forEach(e=>e.addEventListener("input",recalc)); recalc();
   // ---- 直営表：着地見込（売上・単価）の手入力→販売数・合計を再計算。↺で単価を自動に戻す ----
@@ -480,14 +445,10 @@ async function renderKeiei(){
   };
   if(loaded.src)D.getElementById("ki-status").textContent=(loaded.src==="server"?"サーバーの保存値を表示中":"この端末の保存値を表示中");
   D.getElementById("ki-auto").onclick=()=>{
-    for(const id in auto.storeEx)["prev","cur","next"].forEach(c=>{const e=gel("sx|"+id+"|"+c);if(e)e.value=auto.storeEx[id][c];});
-    ["prev","cur","next"].forEach(c=>KPIS.forEach(m=>{const e=gel("kpi|"+c+"|"+m.k);if(e)e.value=auto.kpi[c][m.k];}));
     const rb=gel("roy|base");if(rb)rb.value=auto.roy.base; recalc();
   };
   D.getElementById("ki-save").onclick=async()=>{
-    const payload={storeEx:{},kpi:{prev:{},cur:{},next:{}},roy:{base:num("roy|base"),rate:num("roy|rate")},wh:{},con:{qty:num("con|qty"),price:num("con|price"),rate:num("con|rate")}};
-    dstores.forEach(s=>{payload.storeEx[s.id]={prev:num("sx|"+s.id+"|prev"),cur:num("sx|"+s.id+"|cur"),next:num("sx|"+s.id+"|next")};});
-    ["prev","cur","next"].forEach(c=>KPIS.forEach(m=>{payload.kpi[c][m.k]=num("kpi|"+c+"|"+m.k);}));
+    const payload={roy:{base:num("roy|base"),rate:num("roy|rate")},wh:{},con:{qty:num("con|qty"),price:num("con|price"),rate:num("con|rate")}};
     WH.forEach(([k])=>{payload.wh[k]={qty:num("wh|"+k+"|qty"),unit:num("wh|"+k+"|unit")};});
     const b=D.getElementById("ki-save");b.disabled=true;b.textContent="保存中…";
     const server=await keieiSave(cur,payload);
