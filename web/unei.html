@@ -1083,17 +1083,17 @@ function plRecompute(){
 //  推移（トレンド）タブ ＝ 運営の2つ目の小タブ
 //
 //  ・粒度：週次（既定）／日次／月次を切り替え。
-//  ・店舗：既定は全店。全店／直営／FC／各店を選べる。
+//  ・店舗：直営だけ（FCは出さない）。既定は直営全体、各直営店を選べる選択式。
 //  ・主要KPI（来店客数・購入率・客単価・平均購入数・商品単価）の推移を
 //    数字の表／グラフで見せる（横＝日付・左が最新→右へ古い、縦＝指標）。各値に1つ前の
 //    期間比（前日比／先週比／前月比）をプラス緑・マイナス赤で添える。dash_daily から集計。
 //  ・販売カテゴリ比率：dash_category を期間粒度で集計するRPCから取り、
 //    「販売数」「売上比率」を切り替え。並びはアプリ共通の基準順(PT_CAT_ORDER)で固定（POS名のまま）。
-//    直営だけTシャツを4分類（Tシャツ／プリント／バンド／アニメ・ムービー＝小カテゴリ）で表示し、
-//    直営以外はTシャツに統合。基準に無い分類・小物・セール（擬似カテゴリ）は「その他」へ。
+//    Tシャツは4分類（Tシャツ／プリントT／バンドT／アニメ・ムービーT＝小カテゴリ）で常に表示。
+//    基準に無い分類・小物・セール（擬似カテゴリ）は「その他」へ。
 // ============================================================
 const F2=n=>(Math.round(n*100)/100).toLocaleString("ja-JP",{minimumFractionDigits:2,maximumFractionDigits:2});
-const PT={loaded:false,loading:false,err:null,gran:"week",scope:"all",catMode:"qty",view:"table",cat:null,catKey:null};
+const PT={loaded:false,loading:false,err:null,gran:"week",scope:"own",catMode:"qty",view:"table",cat:null,catKey:null};
 const PT_CFG={day:{n:45,win:60},week:{n:16,win:130},month:{n:12,win:400}};
 const PT_KPIS=[
   {k:"v",  name:"来店客数",        fmt:v=>NUM(v)+"人"},
@@ -1133,16 +1133,15 @@ function ptDeltaHtml(cur,prev){
 function ptStoresAll(){const w=new Set(PL.daily.map(r=>r.s));
   return (PL.data.stores||[]).filter(s=>s.visible!==false&&w.has(s.id))
     .sort((a,b)=>String(a.name).localeCompare(String(b.name),"ja"));}
-function ptScopeIsAll(){return PT.scope==="all";}
-function ptScopeList(){const us=ptStoresAll();const out=[{id:"all",name:"全店"}];
-  if(us.some(s=>plStoreOwn(s.id)==="直営"))out.push({id:"own",name:"直営"});
-  if(us.some(s=>plStoreOwn(s.id)==="FC"))out.push({id:"fc",name:"FC"});
-  return out.concat(us.map(s=>({id:String(s.id),name:s.name})));}
-function ptIds(){const us=ptStoresAll();
-  if(PT.scope==="all")return new Set(us.map(s=>s.id));
-  if(PT.scope==="own")return new Set(us.filter(s=>plStoreOwn(s.id)==="直営").map(s=>s.id));
-  if(PT.scope==="fc") return new Set(us.filter(s=>plStoreOwn(s.id)==="FC").map(s=>s.id));
+// 運営の推移は直営だけを対象にする（FCは出さない）。選択肢＝直営全体＋各直営店。
+function ptOwnStoresList(){return ptStoresAll().filter(s=>plStoreOwn(s.id)==="直営");}
+function ptScopeIsAll(){return false;}
+function ptScopeList(){return [{id:"own",name:"直営全体"},...ptOwnStoresList().map(s=>({id:String(s.id),name:s.name}))];}
+function ptIds(){
+  if(PT.scope==="own"||PT.scope==="all"||PT.scope==="fc")return new Set(ptOwnStoresList().map(s=>s.id));
   return new Set([Number(PT.scope)]);}
+// 保存された選択が直営以外（旧「全店/FC」等）だったら直営全体に戻す。
+function ptValidScope(){const ok=new Set(ptScopeList().map(s=>String(s.id))); if(!ok.has(String(PT.scope)))PT.scope="own";}
 
 function ptAddDays(d,n){const t=new Date(d+"T00:00:00Z");t.setUTCDate(t.getUTCDate()+n);return t.toISOString().slice(0,10);}
 function ptMaxDate(){let mx="";for(const r of PL.daily){if((r.tx||0)>0||(r.in||0)>0){if(r.d>mx)mx=r.d;}}return mx||todayStr();}
@@ -1181,7 +1180,7 @@ function ptKpiSeries(){
 function ptCatSeries(){
   const metricA=PT.catMode==="amount", own=ptScopeIsOwn(), per={}, catTot={};
   for(const r of (PT.cat||[])){ let c=ptNormCat(r.c); if(!c)continue;
-    if(!own && PT_TEE_SUB.has(c)) c="Tシャツ";      // 直営以外はTシャツを1つに統合
+    // Tシャツは常に小カテゴリ（プリント/バンド/アニメ・ムービー）に分けて表示（データにある分）。
     const val=metricA?r.a:r.q; if(!(val>0))continue;
     const b=per[r.p]||(per[r.p]={_tot:0}); b[c]=(b[c]||0)+val; b._tot+=val; catTot[c]=(catTot[c]||0)+val; }
   const keys=Object.keys(per).sort().slice(-PT_CFG[PT.gran].n);
@@ -1198,7 +1197,7 @@ function ptCatSeries(){
 async function ptLoadCat(){
   const key=PT.gran+"|"+PT.scope;
   if(PT.catKey===key&&PT.cat)return;
-  const since=ptWindowStart(PT.gran), ids=ptScopeIsAll()?null:[...ptIds()];
+  const since=ptWindowStart(PT.gran), ids=[...ptIds()];   // 直営のみ。必ず店舗を絞る
   const {data,error}=await SB.rpc("dash_category_trend",{p_since:since,p_gran:PT.gran,p_store_ids:ids});
   if(error)throw new Error("カテゴリ推移取得失敗："+error.message);
   PT.cat=(data||[]).map(r=>({p:r.period,c:r.category,q:+r.qty||0,a:+r.amount||0}));
@@ -1206,7 +1205,7 @@ async function ptLoadCat(){
 }
 async function loadTrend(){
   if(PT.loading)return; PT.loading=true; PT.err=null;
-  try{ await plEnsureBase(); await ptLoadCat(); PT.loaded=true; }
+  try{ await plEnsureBase(); ptValidScope(); await ptLoadCat(); PT.loaded=true; }
   catch(e){PT.err=String(e&&e.message||e);}
   PT.loading=false;
 }
@@ -1298,7 +1297,7 @@ function ptBodyHtml(){
   const C=ptCatSeries();
   const DR=C.rows.slice().reverse();   // 新しい→古い
   const catModeLbl=PT.catMode==="amount"?"売上":"販売数";
-  const subCls=c=>(C.own&&PT_TEE_SUB.has(c))?" class=\"subitem\"":"";
+  const subCls=c=>PT_TEE_SUB.has(c)?" class=\"subitem\"":"";
   let catInner;
   if(chart){
     const legend=C.cats.map((c,i)=>`<span class="pill" style="padding:4px 9px"><span class="catswatch" style="background:${ptCatColor(C.cats,i)}"></span>${esc(c)}</span>`).join("");
@@ -1324,7 +1323,7 @@ function ptBodyHtml(){
         <button data-m="amount"${PT.catMode==="amount"?' class="on"':""}>売上比率</button>
       </div>
       ${catInner}
-      <p class="note">各期間の${catModeLbl}に占める割合（${chart?"各棒":"列"}合計＝100%）。並びは共通の基準順。${C.own?"直営はTシャツを4分類（Tシャツ／プリント／バンド／アニメ・ムービー）で表示。":"Tシャツは1つに統合（直営を選ぶと4分類で表示）。"}基準に無い分類・小物・セール（擬似カテゴリ）は「その他」にまとめています。</p>
+      <p class="note">各期間の${catModeLbl}に占める割合（${chart?"各棒":"列"}合計＝100%）。並びは共通の基準順（POS名）。Tシャツは4分類（Tシャツ／プリントT／バンドT／アニメ・ムービーT）の小カテゴリで表示。基準に無い分類・小物・セール（擬似カテゴリ）は「その他」にまとめています。</p>
     </div>`;
 }
 function ptBind(){
