@@ -208,7 +208,7 @@ async function loadDaily(){
 }
 
 async function authBoot(url,anon){ screen('<div class="sub" style="padding:40px 0">読み込み中…</div>'); await ensureSupabase();
-  SB=window.supabase.createClient(url,anon,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,flowType:"pkce",storageKey:"notime-auth"}});
+  SB=window.supabase.createClient(url,anon,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,flowType:"pkce",storageKey:(function(){try{var r=new URL(CONFIG_URL).hostname.split(".")[0];var k="sb-"+r+"-auth-token";function h(x){try{var v=localStorage.getItem(x);return !!(v&&v.length>2&&v!=="null"&&v!=="undefined");}catch(e){return false;}}return h("notime-auth")?"notime-auth":(h(k)?k:"notime-auth");}catch(e){return "notime-auth";}})()}});
   const {data:{session}}=await SB.auth.getSession();
   if(!session){showLogin();return;}
   ME.email=(session.user&&session.user.email||"").toLowerCase();
