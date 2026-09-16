@@ -3139,6 +3139,10 @@ function drawAds(){
       let w=e.bk.get(b); if(!w){w=zero();e.bk.set(b,w);}
       adAdd(w,r);
     }
+    // 広告が1行も無い期間（配信を止めていた週など）も行を出す。出さないと、その週の
+    // 売上ごと表から消えて「データが抜けている」ように見える（2026-09 に山形の 8/31〜9/6 で指摘）。
+    // opt.buckets に期間キーの一覧を渡す。広告費は0のまま、売上・来店は下で期間ごとに足される
+    for(const b of (opt&&opt.buckets)||[])for(const [,e] of g)if(!e.bk.has(b))e.bk.set(b,zero());
     // 売上・来店は期間ごとに1回だけ足す。行の合計は、各期間ぶんを足し上げる
     // （期間どうしは重ならないので、そのまま足してよい）。
     for(const [,e] of g){
@@ -3199,10 +3203,12 @@ function drawAds(){
     const sun=addDays(mon,6);
     return [mon<state.from?state.from:mon, sun>state.to?state.to:sun];
   };
+  // 集計期間に掛かる週を全部並べる（広告の無い週も落とさない）
+  const weeks=[]; for(let m=mondayOf(state.from);m<=state.to;m=addDays(m,7))weeks.push(m);
   const wEx=adBuildTable(document.getElementById("adtbl"), adRowsAll(), mondayOf, mon=>{
     const [a,b]=weekRange(mon);
     return a===b?md(a):`${md(a)}〜${md(b)}`;
-  }, weekRange)||[];
+  }, weekRange, {buckets:weeks})||[];
   // 月次：期間に関係なく、今月を含む直近3か月。
   {
     const last=(DATA.meta||[]).reduce((a,r)=>r.d>a?r.d:a,"")||state.to;
@@ -3223,7 +3229,7 @@ function drawAds(){
         const end=new Date(Date.UTC(y,m,0)).toISOString().slice(0,10);
         return [ym+"-01", end>salesMax?salesMax:end];
       },
-      {storeTotals:false})||[];   // 3か月ぶんの合計は出さない（月の行だけ読む）
+      {storeTotals:false, buckets:yms})||[];   // 3か月ぶんの合計は出さない（月の行だけ読む）。広告の無い月も行を出す
     const mn=document.getElementById("admnote");
     if(mn)mn.innerHTML=`今月は途中までの実績です。集計期間の選択には連動しません（非表示にした店は除きます）。`+exNote(mEx);
   }
