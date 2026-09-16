@@ -3172,6 +3172,16 @@ function drawAds(){
       body=[["直営","直営店"],["FC","FC店"],[null,"区分なし"]].map(([own,label])=>{
         const part=sortEnt(all.filter(([,e])=>(e.own||null)===own));
         if(!part.length)return "";
+        // 月次は「3か月の合計」を出さず、月ごとの合計を段の頭に並べる（売上が0の店も外さず全部足す）。
+        // 3か月の合計は見ないので消してほしい、月の合計はシンプルに全店で、という指示（2026-09-16）
+        if(opt&&opt.periodTotals){
+          const bks=[...new Set([...(opt.buckets||[]),...part.flatMap(([,e])=>[...e.bk.keys()])])].sort();
+          const rowsB=bks.map(b=>{
+            const sum=part.reduce((a,[,e])=>{const w=e.bk.get(b);if(w)["sp","im","rc","ck","fl","pv","ex","vis"].forEach(k=>a[k]+=w[k]);return a;},zero());
+            return `<tr class="adsec"><td style="text-align:left">${label} ${labelOf(b)}<span class="sub" style="font-weight:500">（${part.length}店）</span></td>${cells(sum)}</tr>`;
+          }).join("");
+          return rowsB+part.map(([nm,e])=>rowsOf(nm,e)).join("");
+        }
         // 売上が無い店（オープン前・閉店）は段の合計から外す。広告費だけが
         // 足されると売上比率が実態より高く出て、判断を誤らせるため。
         // 店の行そのものは下に残す（広告費は実際に使っているので隠さない）。
@@ -3227,7 +3237,7 @@ function drawAds(){
         const end=new Date(Date.UTC(y,m,0)).toISOString().slice(0,10);
         return [ym+"-01", end>salesMax?salesMax:end];
       },
-      {storeTotals:false, buckets:yms});   // 3か月ぶんの合計は出さない（月の行だけ読む）。広告の無い月も行を出す
+      {storeTotals:false, periodTotals:true, buckets:yms});   // 3か月ぶんの合計は出さない（月ごとの合計を段の頭に）。広告の無い月も行を出す
     const mn=document.getElementById("admnote");
     if(mn)mn.innerHTML=`今月は途中までの実績です。集計期間の選択には連動しません（非表示にした店は除きます）。`;
   }
