@@ -24,12 +24,10 @@ const DAILY_LIMIT = Number(Deno.env.get("ASK_DAILY_LIMIT") || "50");
 // 既定は実際に画面を配信している場所。増えたら ASK_ALLOWED_ORIGINS で足す
 // （カンマ区切り。設定するとこの既定は使われない）。
 //   ・app.avend.co.jp … 在庫アプリの本番ドメイン。/sales/ に売上アプリが載っている
-//   ・avend-inventory.vercel.app … 旧ドメイン（移行中の互換用）
 //   ・*-hiroki-nagumo-s-projects.vercel.app … Vercelのプレビュー/別名
 //   ・avend-inc.github.io … 旧GitHub Pages（畳むまでの間）
 const ALLOWED_ORIGINS = (Deno.env.get("ASK_ALLOWED_ORIGINS") ||
   "https://app.avend.co.jp," +
-  "https://avend-inventory.vercel.app," +
   "https://avend-inventory-hiroki-nagumo-s-projects.vercel.app," +
   "https://avend-inventory-git-main-hiroki-nagumo-s-projects.vercel.app," +
   "https://avend-inc.github.io")
