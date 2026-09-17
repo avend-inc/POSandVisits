@@ -366,7 +366,7 @@ function bindDirty(section){
 //   ・users は在庫アプリと共有なので、ここで消すと在庫の権限まで巻き添えになる
 //   ・追加・削除の入口が2か所あると、どちらが本当か分からなくなる
 // 追加・削除・ロール変更は、在庫アプリの「マスタ」画面でまとめて行う。
-const IMS_MASTER_URL="https://avend-inventory.vercel.app/master";
+const IMS_MASTER_URL="https://app.avend.co.jp/master";
 async function loadUsers(){
   dirtyUsers.clear();
   const {data,error}=await SB.from("users")
