@@ -92,10 +92,7 @@
 <nav class="tabbar"><div class="tabbar-in">
   <a href="index.html?g=own" id="tab-own">直営</a>
   <a href="index.html?g=fc" id="tab-fc">FC</a>
-  <a href="pl.html">予実</a>
-  <a href="trends.html">推移</a>
-  <a href="promo.html">販促</a>
-  <a href="ask.html">分析AI</a>
+  <a href="unei.html" id="tab-unei">運営</a>
   <a href="keiei.html" id="tab-keiei">経営</a>
   <a href="admin.html" id="tab-admin" class="on">管理</a>
 </div></nav>
@@ -134,7 +131,7 @@ async function boot(){
   }
   try{
     await ensureSupabase();
-    SB=window.supabase.createClient(cfg.url,cfg.anon,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,flowType:"pkce",storageKey:"notime-auth"}});
+    SB=window.supabase.createClient(cfg.url,cfg.anon,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,flowType:"pkce",storageKey:(function(){try{var r=new URL(CONFIG_URL).hostname.split(".")[0];var k="sb-"+r+"-auth-token";function h(x){try{var v=localStorage.getItem(x);return !!(v&&v.length>2&&v!=="null"&&v!=="undefined");}catch(e){return false;}}return h("notime-auth")?"notime-auth":(h(k)?k:"notime-auth");}catch(e){return "notime-auth";}})()}});
     const {data:{session}}=await SB.auth.getSession();
     if(!session){showLogin();return;}
     ME.email=(session.user&&session.user.email||"").toLowerCase();
@@ -369,7 +366,7 @@ function bindDirty(section){
 //   ・users は在庫アプリと共有なので、ここで消すと在庫の権限まで巻き添えになる
 //   ・追加・削除の入口が2か所あると、どちらが本当か分からなくなる
 // 追加・削除・ロール変更は、在庫アプリの「マスタ」画面でまとめて行う。
-const IMS_MASTER_URL="https://avend-inventory.vercel.app/master";
+const IMS_MASTER_URL="https://app.avend.co.jp/master";
 async function loadUsers(){
   dirtyUsers.clear();
   const {data,error}=await SB.from("users")
