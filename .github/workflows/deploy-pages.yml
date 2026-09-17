@@ -26,6 +26,7 @@ on:
     branches: [feature/supabase-etl]
     paths:
       - "web/dashboard.html"
+      - "web/admin.html"
       - "web/bukken.html"
       - "web/shoken.html"
       - "web/mise.html"
@@ -68,6 +69,7 @@ jobs:
           # dashboard は index.html として、他は同名でコピー。
           # landing.js は全ページ共通の「着地見込み」実装なので、消費ページと必ず一緒に配信する。
           cp src/web/dashboard.html pages/index.html
+          cp src/web/admin.html     pages/admin.html
           cp src/web/bukken.html    pages/bukken.html
           cp src/web/shoken.html    pages/shoken.html
           cp src/web/mise.html      pages/mise.html
@@ -79,7 +81,7 @@ jobs:
           cp src/web/trends.html    pages/trends.html
           cp src/web/landing.js     pages/landing.js
           cd pages
-          FILES="index.html bukken.html shoken.html mise.html cities.html municipalities.json pl.html keiei.html unei.html trends.html landing.js"
+          FILES="index.html admin.html bukken.html shoken.html mise.html cities.html municipalities.json pl.html keiei.html unei.html trends.html landing.js"
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           # 先に stage してから差分判定する。git diff（stage前）は「新規ファイル」を
@@ -90,6 +92,6 @@ jobs:
             echo "変更はありません（配信済みと同じ内容）。"
             exit 0
           fi
-          git commit -m "デプロイ: dashboard/bukken/shoken/mise/pl/keiei/unei/trends/landing.js を配信 (${GITHUB_SHA::7})"
+          git commit -m "デプロイ: dashboard/admin/bukken/shoken/mise/pl/keiei/unei/trends/landing.js を配信 (${GITHUB_SHA::7})"
           git push
           echo "✅ 配信しました。GitHub Pages の反映まで1分ほどかかります。"
