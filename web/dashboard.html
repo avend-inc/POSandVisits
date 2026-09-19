@@ -3715,7 +3715,7 @@ function renderDetail(){
     </div>
     ${navrow}
     <div class="dtop headline${budgetShown(state.detail)?" four":""}">
-      <div class="card"><div class="k">前日の売上</div><div class="val" id="dtop-prev">—</div><div class="knote">税抜 <span id="dtop-prev-note"></span></div><div class="ksplit" id="dtop-prev-split"></div></div>
+      <div class="card"><div class="k" id="dtop-prev-k">前日の売上</div><div class="val" id="dtop-prev">—</div><div class="knote">税抜 <span id="dtop-prev-note"></span></div><div class="ksplit" id="dtop-prev-split"></div></div>
       <div class="card"><div class="k">今月の売上</div><div class="val" id="dtop-cur">—</div><div class="knote">税抜 <span id="dtop-cur-note"></span></div><div class="ksplit" id="dtop-cur-split"></div></div>
       <div class="card land"><div class="k">着地見込み</div><div class="val" id="dtop-land">—</div><div class="knote">当月の月末予測</div><div class="ksplit" id="dtop-land-split"></div></div>
       ${budgetShown(state.detail)?`<div class="card bud"><div class="k">売上予算</div><div class="val" id="dtop-bud">—</div><div class="knote">税抜 <span id="dtop-bud-note">当月</span></div><div class="ksplit" id="dtop-bud-split"></div></div>`:""}
@@ -5947,14 +5947,29 @@ function drawDetailExtras(){
   const prev=M("ex").calc(sumRows(rowsIn(sd,sd,id)));
   el.innerHTML=YEN(cur||0)+"<small>円</small>";
   const l=document.getElementById("dtop-land"); if(l)l.innerHTML=YEN(lv||0)+"<small>円</small>";
-  const pv=document.getElementById("dtop-prev"); if(pv)pv.innerHTML=YEN(prev||0)+"<small>円</small>";
   const cn=document.getElementById("dtop-cur-note"); if(cn)cn.textContent=`${+ym.slice(5,7)}/1〜${+sd.slice(5,7)}/${+sd.slice(8,10)}`;
-  const pn=document.getElementById("dtop-prev-note"); if(pn)pn.textContent=`${+sd.slice(5,7)}/${+sd.slice(8,10)}`;
+  // 本日ぶん（1時間おきの速報）があれば、このカードは「本日の売上」に入れ替える。
+  // 今月・着地見込みは確定日までの数字なので、そちらには混ぜない。
+  const td=DATA._salesToday;
+  const pv=document.getElementById("dtop-prev");
+  const pn=document.getElementById("dtop-prev-note");
+  const pk=document.getElementById("dtop-prev-k");
+  const mdOf=d=>`${+d.slice(5,7)}/${+d.slice(8,10)}`;
+  if(td){
+    const tdEx=M("ex").calc(sumRows(rowsIn(td,td,id)));
+    if(pk)pk.textContent="本日の売上";
+    if(pv)pv.innerHTML=YEN(tdEx||0)+"<small>円</small>";
+    if(pn)pn.textContent=`${mdOf(td)} 速報 ・前日 ${YEN(prev||0)}円`;
+  }else{
+    if(pk)pk.textContent="前日の売上";
+    if(pv)pv.innerHTML=YEN(prev||0)+"<small>円</small>";
+    if(pn)pn.textContent=mdOf(sd);
+  }
   // 無人／有人の内訳（2レジ運用の店だけ）。着地見込みは当月実績の比率で按分する。
   const cs=sumSplit(ym+"-01",sd,id), tot=cs?(cs.u+cs.m):0;
   fillSplit("dtop-cur-split",cs,1);
   fillSplit("dtop-land-split",(cs&&tot>0&&lv!=null)?cs:null,(cs&&tot>0&&lv!=null)?lv/tot:1);
-  fillSplit("dtop-prev-split",sumSplit(sd,sd,id),1);
+  fillSplit("dtop-prev-split",sumSplit(td||sd,td||sd,id),1);
   drawBudgetCard(ym,lv);
   drawStaffedBadge();
 }
