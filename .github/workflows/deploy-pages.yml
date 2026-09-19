@@ -37,6 +37,12 @@ on:
       - "web/unei.html"
       - "web/trends.html"
       - "web/landing.js"
+      # ask/promo/forecast は配信リストから漏れていて、gh-pages 側が長く古いままだった
+      # （2026-09 に発覚。分析AI・販促の2ページだけナビが旧版・ログイン共通化も未適用・
+      #  分析AIは会話履歴の送り方が Edge Function と食い違っていた）。
+      - "web/ask.html"
+      - "web/promo.html"
+      - "web/forecast.html"
   workflow_dispatch:
 
 # 同時に2つ走ると push がぶつかるので直列化する
@@ -80,8 +86,11 @@ jobs:
           cp src/web/unei.html      pages/unei.html
           cp src/web/trends.html    pages/trends.html
           cp src/web/landing.js     pages/landing.js
+          cp src/web/ask.html       pages/ask.html
+          cp src/web/promo.html     pages/promo.html
+          cp src/web/forecast.html  pages/forecast.html
           cd pages
-          FILES="index.html admin.html bukken.html shoken.html mise.html cities.html municipalities.json pl.html keiei.html unei.html trends.html landing.js"
+          FILES="index.html admin.html bukken.html shoken.html mise.html cities.html municipalities.json pl.html keiei.html unei.html trends.html landing.js ask.html promo.html forecast.html"
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           # 先に stage してから差分判定する。git diff（stage前）は「新規ファイル」を
@@ -92,6 +101,6 @@ jobs:
             echo "変更はありません（配信済みと同じ内容）。"
             exit 0
           fi
-          git commit -m "デプロイ: dashboard/admin/bukken/shoken/mise/pl/keiei/unei/trends/landing.js を配信 (${GITHUB_SHA::7})"
+          git commit -m "デプロイ: dashboard/admin/bukken/shoken/mise/pl/keiei/unei/trends/landing.js/ask/promo/forecast を配信 (${GITHUB_SHA::7})"
           git push
           echo "✅ 配信しました。GitHub Pages の反映まで1分ほどかかります。"
