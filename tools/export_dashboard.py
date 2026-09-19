@@ -253,6 +253,22 @@ def build_data(sb: Supabase) -> dict:
         except (TypeError, ValueError):
             return 0.0
 
+    # セット割（バンドル）は Airレジで「親行＝セール商品(金額あり)＋子行＝実商品(金額0)」で出る。
+    # このままだと売上が擬似カテゴリ「セール商品」に貯まり、実カテゴリ別/価格帯別に載らない
+    # （＝カテゴリ比率が実態とズレる）。そこで伝票×バンドル単位で親売上と子点数を先に集計し、
+    # 下の本処理で「子行(実カテゴリ)へ親売上を数量按分で載せ替え、親行は集計に入れない」を行う。
+    bundle_attr: dict[tuple, dict] = {}
+    for r in sales:
+        bcode = (r.get("bundle_code") or "").strip()
+        if not bcode:
+            continue
+        key = (r["store_id"], r.get("pos_name") or "", r["tx_id"], bcode)
+        b = bundle_attr.setdefault(key, {"p": 0.0, "cq": 0.0})
+        if r.get("is_parent"):
+            b["p"] += _num(r["line_amount"])
+        elif r.get("is_child"):
+            b["cq"] += _num(r["line_qty"])
+
     for r in sales:
         d = r["business_date"]
         if str(d) >= _today_jst:   # 進行中の当日は締めない
@@ -339,17 +355,30 @@ def build_data(sb: Supabase) -> dict:
         if c in NOCAT:
             continue
 
+        # セット割の親行（セール商品＝器）はカテゴリ/価格帯集計に入れない。
+        #  売上は下で子行(実カテゴリ)へ載せ替えるため、ここで数えると二重計上になる。
+        if r.get("is_parent"):
+            continue
+        # 子行(実商品・金額0)には、その伝票×バンドルの親売上を数量按分で載せる
+        #  （＝実際に売れたカテゴリ/価格帯として計上）。通常明細は明細金額そのまま。
+        amt_cat = amt
+        bcode2 = (r.get("bundle_code") or "").strip()
+        if bcode2 and r.get("is_child"):
+            b2 = bundle_attr.get((sid, r.get("pos_name") or "", r["tx_id"], bcode2))
+            if b2 and b2["cq"] > 0:
+                amt_cat = b2["p"] * (qty / b2["cq"])
+
         ck = (d, sid, c)
         crec = cat.setdefault(ck, {"a": 0.0, "q": 0.0})
-        crec["a"] += amt
+        crec["a"] += amt_cat
         crec["q"] += qty
 
         # 価格帯別（カテゴリ内の単価ごと）。単価＝明細金額÷点数を最寄りの円に丸める。
-        if qty > 0 and amt > 0:
-            price = int(round(amt / qty))
+        if qty > 0 and amt_cat > 0:
+            price = int(round(amt_cat / qty))
             pk = (d, sid, c, price)
             prec = catprice.setdefault(pk, {"a": 0.0, "q": 0.0})
-            prec["a"] += amt
+            prec["a"] += amt_cat
             prec["q"] += qty
 
     # --- visits: 来店客数を日別×店舗に載せる
