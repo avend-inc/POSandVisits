@@ -75,7 +75,7 @@ jobs:
       # 目印確定用：ログイン/期間/CSVの画面ダンプを成果物に残す（失敗時も必ず）
       - name: 調査用ファイルを保存
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pos-debug-${{ github.run_id }}
           path: debug/

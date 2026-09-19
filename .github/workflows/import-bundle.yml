@@ -79,7 +79,7 @@ jobs:
       # 調査用（バンドル画面の目印が未確定のうちは、画面ダンプを成果物に残す）
       - name: 調査用ファイルを保存
         if: ${{ always() && inputs.mode == 'live' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bundle-debug-${{ github.run_id }}
           path: debug/
