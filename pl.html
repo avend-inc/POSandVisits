@@ -157,7 +157,11 @@ function showError(e){screen('<div class="err">データを読み込めません
 function prep(){ if(!DATA||!DATA.daily)throw new Error("データが空です");
   const ds=DATA.daily.map(r=>r.d).sort(); DATA._min=ds[0];DATA._max=ds[ds.length-1];
   const sd=DATA.daily.filter(r=>(r.tx||0)>0||(r.in||0)>0).map(r=>r.d).sort();
-  DATA._salesMax=sd.length?sd[sd.length-1]:DATA._max; }
+  // 進行中の当日（1時間おきの速報）は締日に含めない（予実・着地見込みが下振れするため）
+  const _td=todayStr();
+  DATA._salesToday=sd.includes(_td)?_td:null;
+  const _fixed=sd.filter(d=>d<_td);
+  DATA._salesMax=_fixed.length?_fixed[_fixed.length-1]:DATA._max; }
 async function boot(){ try{
   if(window.__DATA__){DATA=window.__DATA__;prep();reload();return;}
   let cfg=null; try{cfg=await (await fetch(CONFIG_URL,{cache:"no-store"})).json();}catch(e){}

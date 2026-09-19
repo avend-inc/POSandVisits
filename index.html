@@ -813,7 +813,13 @@ function prep(){
   const ds=DATA.daily.map(r=>r.d).sort();
   DATA._min=ds[0]; DATA._max=ds[ds.length-1];
   const sd=DATA.daily.filter(r=>(r.tx||0)>0||(r.in||0)>0).map(r=>r.d).sort();
-  DATA._salesMax=sd.length?sd[sd.length-1]:DATA._max;
+  // 進行中の当日（1時間おきの速報）は _salesMax に入れない。入れると「まだ3割しか
+  // 売れていない日」が1日分の実績として着地見込み・直近平均・前日比に混ざり、
+  // どれも実態より低く出る（2026-09 に実際に起きた）。当日は _salesToday で別に持つ。
+  const _td=todayStr();
+  DATA._salesToday=sd.includes(_td)?_td:null;
+  const _fixed=sd.filter(d=>d<_td);
+  DATA._salesMax=_fixed.length?_fixed[_fixed.length-1]:DATA._max;
   mergeStaffedVisits();      // 有人時間の来店（手入力）を来店数へ合算してから各種の集計を作る
   recomputeVisitIndex();     // 来店データのある店・最新日
   // 無人／有人の売上内訳を持っている店（＝1店で2レジを使い分ける店。下北沢）。
@@ -5244,7 +5250,11 @@ const VOL_METRICS=new Set(["ex","v","qty"]);   // 数量系＝平均列では「
 function drawKpi2(){
   const el=document.getElementById("kpi2"); if(!el)return;
   const sd=DATA._salesMax||DATA._max, ym=sd.slice(0,7), mon=mondayOf(sd), w2=addDays(sd,-13);
+  // 本日の列は「まだ営業中の途中経過」。確定日（前日以前）と混ぜないよう別列にし、
+  // 平均・着地見込みの計算には入れない（入れると全部下振れする）。
+  const td=DATA._salesToday;
   const cols=[
+    ...(td?[{label:"本日", sub:mdLabel(td,td)+" 速報", from:td, to:td}]:[]),
     {label:"前日",   sub:mdLabel(sd,sd),        from:sd,       to:sd},
     {label:"今週",   sub:mdLabel(mon,sd),       from:mon,      to:sd},
     {label:"今月",   sub:mdLabel(ym+"-01",sd),  from:ym+"-01", to:sd},
@@ -5269,7 +5279,7 @@ function drawKpi2(){
   let h=`<thead><tr><th></th>${cols.map(c=>`<th class="colhdr">${c.label}<small>${c.sub}</small></th>`).join("")}</tr></thead><tbody>`;
   // 着地見込みは当月のみ算出。他列は概念上「対象外」（0ではない）。
   h+=`<tr class="land"><td>着地見込み <span class="sub" style="font-weight:500;font-size:9.5px">当月のみ</span></td>`+
-     cols.map((c,i)=>`<td>${i===2?YEN(lv||0)+"円":"対象外"}</td>`).join("")+`</tr>`;
+     cols.map(c=>`<td>${c.label==="今月"?YEN(lv||0)+"円":"対象外"}</td>`).join("")+`</tr>`;
   for(const k of KPI2_COLS){const m=M(k);
     h+=`<tr><td>${kpiLabel(k)}</td>`+cols.map(c=>{const v=cellVal(c,k);return `<td>${v==null?"—":m.fmt(v)}</td>`;}).join("")+`</tr>`;}
   el.innerHTML=h+`</tbody>`;
