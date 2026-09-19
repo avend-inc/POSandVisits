@@ -1234,6 +1234,7 @@ function presetRange(kind){
   if(kind==="d30")return clampRange(addDays(today,-29),today);
   if(kind==="d90")return clampRange(addDays(today,-89),today);
   if(kind==="prevday")return clampRange(y1,y1);
+  if(kind==="today")return clampRange(today,today);
   if(kind==="thisweek"){const mon=mondayOf(today);return clampRange(mon,addDays(mon,6));}
   if(kind==="lastweek"){const mon=addDays(mondayOf(today),-7);return clampRange(mon,addDays(mon,6));}
   if(kind==="thismonth")return clampRange(...monthSpan(today.slice(0,7)));
@@ -3614,7 +3615,7 @@ function renderMain(){
       <a class="navlink homebtn" href="../" title="アプリのトップへ">ホーム</a>
     </header>
     <div class="sub" style="margin:2px 0 6px">
-      最新データ 売上:<b style="color:var(--ink)">${DATA._salesMax}</b>／来店:<b style="color:var(--ink)">${DATA._visitMax}</b>　更新:${(DATA.generated_at||"").replace("T"," ").slice(5,16)} <span class="sub" title="表示中のアプリ版">· b195</span>
+      最新 売上:<b style="color:var(--ink)">${DATA._salesToday?mdShort(DATA._salesToday)+"(速報)":mdShort(DATA._salesMax)}</b>／来店:<b style="color:var(--ink)">${mdShort(DATA._visitMax)}</b>／更新:${genShort(DATA.generated_at)}<span class="sub" title="表示中のアプリ版"> · b195</span>
     </div>
     <div class="dtop headline four" style="margin-bottom:12px">
       <div class="card bud"><div class="k">目標税抜売上</div><div class="val" id="hd-tgt">…</div><div class="knote">当月・${GROUP_LABEL}合計</div></div>
@@ -3626,7 +3627,7 @@ function renderMain(){
     <div class="panel">
       <h2>全店のKPI <span class="sub" style="font-weight:500">（前日／今週／今月）</span></h2>
       <div class="tblwrap"><table class="kmat" id="kpi2"></table></div>
-      <p class="note" style="margin:7px 0 0">商品販売数＝実際に売れた商品の点数（レジ袋・クーポン・小物・セット割の器「セール商品」は数えない）／平均購入数＝商品販売数÷取引数／商品単価＝(税抜売上−レジ袋−小物−明細なし売上)÷商品販売数（分子・分母をそろえる）／客単価＝売上÷取引数（レジ袋・小物・明細なし売上も客が払った額なので含む）。</p>
+      <p class="note" style="margin:7px 0 0">商品販売数＝実売点数(レジ袋等除く)／平均購入数＝商品販売数÷取引数／商品単価＝商品売上÷商品販売数／客単価＝売上÷取引数(レジ袋等含む)。</p>
     </div>
 
     <div class="panel">
@@ -3641,6 +3642,7 @@ function renderMain(){
         <button class="chip pchip" data-preset="thisweek">今週</button>
         <button class="chip pchip" data-preset="lastweek">前週</button>
         <button class="chip pchip" data-preset="prevday">前日</button>
+        <button class="chip pchip" data-preset="today">本日</button>
       </div>
       <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px">
         <input type="date" id="from" min="${DATA._min}" max="${DATA._max}" value="${state.from}">
@@ -3742,7 +3744,7 @@ function renderDetail(){
         <span class="sub" id="periodlabel"></span>
       </div>
       <div class="tblwrap"><table class="kmat" id="kpi2"></table></div>
-      <p class="note" style="margin:7px 0 0">上位3店＝同ブランドの売上トップ3（下北沢除く）。商品販売数＝実際に売れた点数（レジ袋・クーポン・小物・セット割の器は数えない）／平均購入数＝商品販売数÷取引数／商品単価＝(税抜売上−レジ袋−小物−明細なし売上)÷商品販売数（分子・分母をそろえる）／客単価＝売上÷取引数（含む）。</p>
+      <p class="note" style="margin:7px 0 0">上位3店＝同ブランドの売上トップ3（下北沢除く）。商品販売数＝実売点数(レジ袋等除く)／平均購入数＝商品販売数÷取引数／商品単価＝商品売上÷商品販売数／客単価＝売上÷取引数(レジ袋等含む)。</p>
     </div>
     <div class="panel">
       <h2>販売・売上比率 <span class="sub" style="font-weight:500">（価格帯×カテゴリ）</span> <span class="sub" id="heatX-rng" style="font-weight:700;color:var(--accent)"></span></h2>
@@ -6847,7 +6849,7 @@ function drawTrend2(){
   const [sy,sm]=sdym.split("-").map(Number), dim=new Date(Date.UTC(sy,sm,0)).getUTCDate();
   const fkey=(g==="month"&&kset.has(sdym)&&dom<dim)?sdym:null;
   const valOf=(id,k)=>{const a=(map[id]&&map[id][k])||0; return (k===fkey)?(landingForIds(new Set([id]),fkey)||0):a;};
-  let rows=[...state.sel].map(id=>({name:(storeMeta(id)||{}).name||id,vals:keys.map(k=>valOf(id,k))}));
+  let rows=[...state.sel].map(id=>({name:(storeMeta(id)||{}).name||id,id,vals:keys.map(k=>valOf(id,k))}));
   rows.sort((a,b)=>b.vals.reduce((s,v)=>s+v,0)-a.vals.reduce((s,v)=>s+v,0));
   const dk=keys.slice().reverse();                 // 最新を左に
   const idx=keys.reduce((m,k,i)=>{m[k]=i;return m;},{});
@@ -6856,11 +6858,15 @@ function drawTrend2(){
   const cellHtml=(cur,prev)=>{
     let d=""; if(prev){const pct=(cur-prev)/prev*100; d=`<br><span class="${pct>=0?"delta-up":"delta-dn"}" style="font-size:9.5px">${pct>=0?"+":""}${F1(pct)}%</span>`;}
     return YEN(cur||0)+d; };
-  let h=`<thead><tr><th>店舗</th>${dk.map(k=>`<th>${lab(k)}</th>`).join("")}</tr></thead><tbody>`;
-  for(const r of rows)h+=`<tr><td>${esc(r.name)}</td>${dk.map(k=>{const i=idx[k];return `<td>${cellHtml(r.vals[i], i>0?r.vals[i-1]:null)}</td>`;}).join("")}</tr>`;
+  // 本日ぶん（1時間おきの速報）は日粒度のときだけ最新の左にもう1列出す。
+  // 集計対象の keys/anchor には混ぜない（着地見込み・前期比がゆがむため。prep()のコメント参照）。
+  const td=(g==="day")?DATA._salesToday:null;
+  const todayCol=id=>YEN(M("ex").calc(sumRows(rowsIn(td,td,id)))||0)+"<small>(速報)</small>";
+  let h=`<thead><tr><th>店舗</th>${td?`<th>${mdShort(td)}</th>`:""}${dk.map(k=>`<th>${lab(k)}</th>`).join("")}</tr></thead><tbody>`;
+  for(const r of rows)h+=`<tr><td>${esc(r.name)}</td>${td?`<td>${todayCol(r.id)}</td>`:""}${dk.map(k=>{const i=idx[k];return `<td>${cellHtml(r.vals[i], i>0?r.vals[i-1]:null)}</td>`;}).join("")}</tr>`;
   if(rows.length){const tot=keys.map((_,i)=>rows.reduce((s,r)=>s+r.vals[i],0));
-    h+=`<tr class="prow"><td>合計</td>${dk.map(k=>{const i=idx[k];return `<td>${cellHtml(tot[i], i>0?tot[i-1]:null)}</td>`;}).join("")}</tr>`;}
-  else h+=`<tr><td colspan="${keys.length+1}" class="sub">店舗が選択されていません</td></tr>`;
+    h+=`<tr class="prow"><td>合計</td>${td?`<td>${YEN(M("ex").calc(sumRows(rowsIn(td,td,"__sel__")))||0)}<small>(速報)</small></td>`:""}${dk.map(k=>{const i=idx[k];return `<td>${cellHtml(tot[i], i>0?tot[i-1]:null)}</td>`;}).join("")}</tr>`;}
+  else h+=`<tr><td colspan="${keys.length+1+(td?1:0)}" class="sub">店舗が選択されていません</td></tr>`;
   el.innerHTML=h+`</tbody>`;
   const rl=document.getElementById("trend-range"); if(rl)rl.textContent=`${lab(dk[0])} 〜 ${pLabel(dk[dk.length-1],g)}`;
   document.querySelectorAll(".gchip[data-grain]").forEach(b=>b.classList.toggle("on",b.dataset.grain===state.grain));
