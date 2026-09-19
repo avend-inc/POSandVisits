@@ -133,7 +133,7 @@ def build_data(sb: Supabase) -> dict:
     sales = _select_all(
         sb, "sales",
         "business_date,store_id,pos_name,tx_id,sales_in_tax,sales_ex_tax,tx_qty,"
-        "line_category,line_amount,line_qty,bundle_code,is_parent,is_child",
+        "line_category,line_price,line_amount,line_qty,bundle_code,is_parent,is_child",
         order="id",
     )
 
@@ -263,11 +263,14 @@ def build_data(sb: Supabase) -> dict:
         if not bcode:
             continue
         key = (r["store_id"], r.get("pos_name") or "", r["tx_id"], bcode)
-        b = bundle_attr.setdefault(key, {"p": 0.0, "cq": 0.0})
+        b = bundle_attr.setdefault(key, {"p": 0.0, "cq": 0.0, "cp": 0.0})
         if r.get("is_parent"):
             b["p"] += _num(r["line_amount"])
         elif r.get("is_child"):
             b["cq"] += _num(r["line_qty"])
+            # 子の値札価格×点数の合計。値引き後の親売上を、点数ではなく
+            # 値札価格の比で子へ按分するために使う（高い商品ほど多く配る）。
+            b["cp"] += _num(r["line_price"]) * _num(r["line_qty"])
 
     for r in sales:
         d = r["business_date"]
@@ -359,21 +362,35 @@ def build_data(sb: Supabase) -> dict:
             continue
         # 子行(実商品・金額0)には、その伝票×バンドルの親売上を数量按分で載せる
         #  （＝実際に売れたカテゴリ/価格帯として計上）。通常明細は明細金額そのまま。
+        lp = _num(r["line_price"])
         amt_cat = amt
         bcode2 = (r.get("bundle_code") or "").strip()
         if bcode2 and r.get("is_child"):
             b2 = bundle_attr.get((sid, r.get("pos_name") or "", r["tx_id"], bcode2))
-            if b2 and b2["cq"] > 0:
-                amt_cat = b2["p"] * (qty / b2["cq"])
+            if b2 and b2["cp"] > 0:
+                # セット割の値引き後合計を、子の値札価格(line_price)で按分する。
+                # （¥4,980 と ¥1,980 が同一セットでも、点数割りだと同額になってしまい
+                #   価格帯の売上がつぶれるため。値札比で配ると実態に近い。）
+                amt_cat = b2["p"] * (lp * qty / b2["cp"])
+            elif b2 and b2["cq"] > 0:
+                amt_cat = b2["p"] * (qty / b2["cq"])   # 値札が無い時は点数按分
 
         ck = (d, sid, c)
         crec = cat.setdefault(ck, {"a": 0.0, "q": 0.0})
         crec["a"] += amt_cat
         crec["q"] += qty
 
-        # 価格帯別（カテゴリ内の単価ごと）。単価＝明細金額÷点数を最寄りの円に丸める。
-        if qty > 0 and amt_cat > 0:
+        # 価格帯別（カテゴリ内の価格帯ごと）。価格帯＝商品の値札価格(line_price)。
+        # 古着(cashier)は商品名が「4980円 アウター/ジャケット」の形で、値札価格が
+        # line_price に入る（セット割の子は金額0でも値札は残る）。値引き後の金額を
+        # 金額÷点数で割ると価格帯がつぶれるので、価格帯は line_price を優先し、
+        # 値札が無い明細のときだけ 金額÷点数 で代用する。売上は amt_cat（実売上）で計上。
+        price = None
+        if lp > 0:
+            price = int(round(lp))
+        elif qty > 0 and amt_cat > 0:
             price = int(round(amt_cat / qty))
+        if price is not None and qty > 0 and amt_cat > 0:
             pk = (d, sid, c, price)
             prec = catprice.setdefault(pk, {"a": 0.0, "q": 0.0})
             prec["a"] += amt_cat
