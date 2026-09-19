@@ -1012,6 +1012,14 @@ def write_dash_tables(sb: Supabase, data: dict) -> None:
     """
     print("\n  集計結果をテーブルにも書きます（dash_*）...")
 
+    # dash_category / dash_category_price は「カテゴリ」「価格帯」がキーに入る。
+    # 値札価格の付け方などを変えると (date,store,category,price) のキーが変わり、
+    # upsert（merge-duplicates）では“古いキーの行”が消えずに残って二重計上になる。
+    # そこで今回書いた行すべてに同じ刻印(updated_at=stamp)を付け、書き込み後に
+    # 「その刻印より古い行（＝今回は作られなかった古いキー）」だけを消す。
+    # 全期間を毎回作り直しているので、今回作られなかった行は捨ててよい。
+    stamp = datetime.now(JST).isoformat()
+
     daily = [{
         "date": r["d"], "store_id": r["s"],
         "sales_in": r.get("in"), "sales_ex": r.get("ex"),
@@ -1028,10 +1036,12 @@ def write_dash_tables(sb: Supabase, data: dict) -> None:
     } for r in data.get("daily", [])]
 
     cat = [{"date": r["d"], "store_id": r["s"], "category": r["c"],
-            "amount": r.get("a"), "qty": r.get("q")} for r in data.get("cat", [])]
+            "amount": r.get("a"), "qty": r.get("q"), "updated_at": stamp}
+           for r in data.get("cat", [])]
 
     catp = [{"date": r["d"], "store_id": r["s"], "category": r["c"], "price": r["p"],
-             "amount": r.get("a"), "qty": r.get("q")} for r in data.get("catp", [])]
+             "amount": r.get("a"), "qty": r.get("q"), "updated_at": stamp}
+            for r in data.get("catp", [])]
 
     bundle = [{"date": r["d"], "store_id": r["s"], "code": r["code"],
                "n": r.get("n"), "amount": r.get("a")} for r in data.get("bundles", [])]
@@ -1064,6 +1074,7 @@ def write_dash_tables(sb: Supabase, data: dict) -> None:
         ("dash_category_price", catp, "date,store_id,category,price"),
         ("dash_bundle", bundle, "date,store_id,code"),
     ]
+    written_ok: set[str] = set()
     for table, rows, key in jobs:
         if not rows:
             print(f"    {table}: 0件（書くものがありません）")
@@ -1074,10 +1085,25 @@ def write_dash_tables(sb: Supabase, data: dict) -> None:
             # data.json と数字が合わなくなるので、その場で気づけるようにする。
             mark = "" if n == len(rows) else f"  ⚠️ {len(rows)-n:,}件が反映されていません"
             print(f"    {table}: {len(rows):,}件を書きました（{n:,}行）{mark}")
+            if n == len(rows):
+                written_ok.add(table)
         except Exception as e:                   # noqa: BLE001
             # ここで落としても data.json は既にできている。配信は続ける。
             print(f"    ⚠️ {table} に書けませんでした: {str(e)[:200]}")
             print(f"       （sql/027_dashboard_tables.sql を実行済みか確認してください）")
+
+    # 古いキーの行（今回作られなかった＝旧価格帯/旧カテゴリ）を掃除して二重計上を防ぐ。
+    # 全件を正常に書けたときだけ実行する（部分的にしか書けていない状態で消すと、
+    # 生き残らせるべき行まで消しかねないため）。今回書いた行は updated_at==stamp なので
+    # 消えない。掃除対象は価格帯・カテゴリがキーに入る2表のみ。
+    for table in ("dash_category", "dash_category_price"):
+        if table not in written_ok:
+            continue
+        try:
+            sb.delete(table, {"updated_at": f"lt.{stamp}"})
+            print(f"    {table}: 古い行（updated_at < 今回）を掃除しました")
+        except Exception as e:                   # noqa: BLE001
+            print(f"    ⚠️ {table} の古い行掃除に失敗しました: {str(e)[:200]}")
 
 
 def main() -> int:
