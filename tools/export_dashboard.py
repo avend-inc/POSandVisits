@@ -133,7 +133,7 @@ def build_data(sb: Supabase) -> dict:
     sales = _select_all(
         sb, "sales",
         "business_date,store_id,pos_name,tx_id,sales_in_tax,sales_ex_tax,tx_qty,"
-        "line_category,line_amount,line_qty,bundle_code,is_parent",
+        "line_category,line_amount,line_qty,bundle_code,is_parent,is_child",
         order="id",
     )
 
