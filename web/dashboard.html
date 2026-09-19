@@ -875,6 +875,9 @@ async function authBoot(url,anon){
   await ensureSupabase();
   SUPA.url=String(url||"").replace(/\/+$/,""); SUPA.anon=anon;   // AI呼び出しの直接fetch用に控える
   SB=window.supabase.createClient(url,anon,{
+    // ブラウザ/中継のHTTPキャッシュに古い応答を掴まされないよう、DB読み取りは常に no-store。
+    // （価格帯などが「リロードしても古いまま」になるのを防ぐ。応答は元々動的なので無害。）
+    global:{fetch:(u,o)=>fetch(u,Object.assign({},o,{cache:"no-store"}))},
     auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,
       flowType:"pkce",storageKey:(function(){try{var r=new URL(CONFIG_URL).hostname.split(".")[0];var k="sb-"+r+"-auth-token";function h(x){try{var v=localStorage.getItem(x);return !!(v&&v.length>2&&v!=="null"&&v!=="undefined");}catch(e){return false;}}return h("notime-auth")?"notime-auth":(h(k)?k:"notime-auth");}catch(e){return "notime-auth";}})()},
   });
@@ -5063,14 +5066,20 @@ function genShort(g){ if(!g)return"—"; const s=g.replace("T"," "); return `${+
 // 足りない期間を求められたら、その場では空を返し、取り終えてから描き直す。
 // 中途半端な数字を出すより、一瞬空のほうが安全。
 // ============================================================
-let CATRANGE=null;          // 取得済みの期間 {from,to}
+let CATRANGE=null;          // 直近に取得した期間 {from,to,at}
 let CATLOADING=false;
+// 「一度読んだ期間は取り直さない」だと、当日ぶんが伸びても古い数字のまま固まる
+// （オープン初日の店などで実際に発生）。そこで“取得済み扱い”は短時間(TTL)だけにし、
+// それを過ぎたら同じ期間でも最新を取り直す。TTL は「取得直後の再描画ループ」を止める
+// ためだけの猶予で、実質は常に最新を読む。
+const CAT_TTL_MS=15000;     // これより古い取得は「最新でない」とみなして取り直す
 // 加盟店は store-<id>.json（自店ぶんを全期間ぶん焼き込んだもの）で動いているので、
 // テーブルから取り直さない。取り直すと、焼き込んである比較値と食い違う。
 function catFromBundle(){ return !!window.FRANCHISEE; }
 function catCovered(f,t){
   if(catFromBundle())return true;
-  return !!(CATRANGE&&CATRANGE.from<=f&&CATRANGE.to>=t);
+  return !!(CATRANGE&&CATRANGE.from<=f&&CATRANGE.to>=t
+            &&(Date.now()-(CATRANGE.at||0))<CAT_TTL_MS);
 }
 async function catFetch(table,select,from,to){
   const out=[], PAGE=1000;
@@ -5097,7 +5106,7 @@ async function ensureCatRange(from,to){
     ]);
     DATA.cat =cat .map(r=>({d:r.date,s:r.store_id,c:r.category,a:+r.amount||0,q:+r.qty||0}));
     DATA.catp=catp.map(r=>({d:r.date,s:r.store_id,c:r.category,p:+r.price,a:+r.amount||0,q:+r.qty||0}));
-    CATRANGE={from:f,to:t};
+    CATRANGE={from:f,to:t,at:Date.now()};   // 取得時刻を控える（TTLを過ぎたら取り直す）
   }catch(e){
     console.warn("カテゴリ別の取得に失敗しました",e);
   }finally{ CATLOADING=false; }
