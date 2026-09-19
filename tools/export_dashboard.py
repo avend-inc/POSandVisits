@@ -194,11 +194,11 @@ def build_data(sb: Supabase) -> dict:
     except Exception:
         pass
 
-    # 進行中の「当日(JST)」は“途中”なのでダッシュボードには出さない（締日＝最後の
-    # 完全な日）。データ自体はDBに残す：翌朝の通常ETLが当日ぶんを「前日＝完全な日」
-    # として取り込み、翌日以降このカットオフを自然に通過して表示される。
-    # （誰かが当日を backfill しても、途中の数字を確定日と誤認させない安全弁）
-    _today_jst = datetime.now(JST).date().isoformat()
+    # 2026-09 まで「進行中の当日(JST)」はダッシュボードから除外していたが、
+    # 1時間おきの当日速報ETL（intraday-etl.yml）が当日ぶんを取り込んでも
+    # ここで毎回捨てられ、画面が更新されない不具合になっていた。
+    # 当日ぶんも他の日と同じように集計する（途中経過のまま出る＝速報なので、
+    # ETLが回るたびに数字は増えていく。これは仕様）。
 
     tx_seen: set[tuple] = set()
     daily: dict[tuple, dict] = {}     # (date, store_id) -> 伝票合計
@@ -255,8 +255,6 @@ def build_data(sb: Supabase) -> dict:
 
     for r in sales:
         d = r["business_date"]
-        if str(d) >= _today_jst:   # 進行中の当日は締めない
-            continue
         sid = r["store_id"]
         dk = (d, sid)
         rec = daily.setdefault(dk, _new())
@@ -361,8 +359,6 @@ def build_data(sb: Supabase) -> dict:
         order="id", extra={"source": "in.(digitel,staffed)"},
     )
     for r in visits:
-        if str(r["business_date"]) >= _today_jst:   # 進行中の当日は締めない
-            continue
         dk = (r["business_date"], r["store_id"])
         rec = daily.setdefault(dk, _new())
         key = "v_staffed" if r.get("source") == "staffed" else "v"

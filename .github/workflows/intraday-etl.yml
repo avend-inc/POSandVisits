@@ -1,24 +1,26 @@
 # ============================================================
-#  NOTIME 当日速報ETL（6時間おき）
+#  NOTIME 当日速報ETL（1時間おき）
 #
 #  目的：画面の「最新データ」を“前日”ではなく“当日の◯時時点”にする。
-#        営業時間帯に6時間おきで cashier / Airレジ / SIPOS / デジテール の
+#        営業時間帯に1時間おきで cashier / Airレジ / EZレジ(SIPOS) / デジテール の
 #        「当日ぶん」を取り込み直し（--force）、ダッシュボードを再配信する。
 #
 #  ・夜間のフル取り込み（daily-etl.yml＝前日ぶん・全ソース）はそのまま維持。
 #    こちらは“当日速報”専用（軽め・対象を4ソースに限定）。
-#  ・コスト（GitHub Actions 実行分）を抑えるため、深夜は動かさず日中3回に絞る。
+#  ・コスト（GitHub Actions 実行分・POS各社サイトへのログイン回数）を抑えるため、
+#    深夜は動かさず日中（10〜22時JST）に絞る。1回の処理は5〜8分程度で収まる。
 #  ・当日は毎回 --force で取り直す（ingest_log の既取得スキップを回避）。売上は
 #    (store_id,pos_name,tx_id,line_no) で upsert されるので、増えた取引だけ増える。
 #  ・1ソースが失敗しても他は継続し、取り込めた分でダッシュボードを必ず更新する。
+#  ・GitHub Actions の共有ランナーはスケジュールが数時間ずれることがある
+#    （2026-09 に実測4〜5時間遅れ）。1時間おきに設定しても、実際の反映は
+#    それより粗くなることがある。
 # ============================================================
-name: NOTIME 当日速報ETL（6時間おき）
+name: NOTIME 当日速報ETL（1時間おき）
 
 on:
   schedule:
-    - cron: "0 1 * * *"    # 10:00 JST
-    - cron: "0 7 * * *"    # 16:00 JST
-    - cron: "0 13 * * *"   # 22:00 JST
+    - cron: "0 1-13 * * *"   # 10:00〜22:00 JST（毎時0分）
   workflow_dispatch:
     inputs:
       date:
@@ -32,7 +34,7 @@ concurrency:
 
 jobs:
   intraday:
-    name: 当日ぶんを速報取得（cashier / Airレジ / SIPOS / デジテール）
+    name: 当日ぶんを速報取得（cashier / Airレジ / EZレジ(SIPOS) / デジテール）
     runs-on: ubuntu-latest
     timeout-minutes: 50
     env:
@@ -75,13 +77,17 @@ jobs:
       - name: ブラウザ(Chromium)を用意
         run: python -m playwright install --with-deps chromium
 
-      - name: 当日ぶんを速報取得（cashier / airregi / sipos / digitel・当日・強制）
+      - name: 当日ぶんを速報取得（cashier / airregi / pos(EZレジ・SIPOS) / digitel・当日・強制）
         run: |
           DATE="${{ inputs.date }}"
           if [ -z "$DATE" ]; then DATE="$(date +%F)"; fi   # env TZ=Asia/Tokyo なので当日(JST)
-          echo "当日速報：$DATE を取り込みます（cashier / airregi / sipos / digitel）"
+          echo "当日速報：$DATE を取り込みます（cashier / airregi / pos / digitel）"
           rc=0
-          for src in cashier airregi sipos digitel; do
+          # 「sipos」は etl.run_daily --only の選択肢に無く（正しくは pos＝
+          # Air/EZ等のレジ接続巡回）、以前はここで毎回exit 2になって
+          # ::warningに握りつぶされ、EZレジ(SIPOS)が当日速報に一度も
+          # 乗っていなかった（2026-09 に発覚・修正）。
+          for src in cashier airregi pos digitel; do
             echo "===== $src ====="
             python -m etl.run_daily --only "$src" --date "$DATE" --force \
               || { echo "::warning::$src の当日取得に失敗しました（他ソースは継続）"; rc=1; }
