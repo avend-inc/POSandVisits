@@ -103,7 +103,11 @@ function sumRows(rows){const p={in:0,ex:0,tx:0,txv:0,it:0,v:0,hasV:false};
   for(const r of rows){p.in+=r.in||0;p.ex+=(r.ex!=null?r.ex:0);p.tx+=r.tx||0;p.it+=(r.it!=null?r.it:0);if(kvOf(r.s)){p.txv+=r.tx||0;if(r.v!=null){p.v+=r.v;p.hasV=true;}}}
   if(!p.hasV)p.v=0;return p;}
 function prep(){const ds=DATA.daily.map(r=>r.d).sort();DATA._min=ds[0];DATA._max=ds[ds.length-1];
-  const sd=DATA.daily.filter(r=>(r.tx||0)>0||(r.in||0)>0).map(r=>r.d).sort();DATA._salesMax=sd.length?sd[sd.length-1]:DATA._max;}
+  const sd=DATA.daily.filter(r=>(r.tx||0)>0||(r.in||0)>0).map(r=>r.d).sort();
+  // 進行中の当日（1時間おきの速報）は確定日に含めない。含めると日割り推計が
+  // 「途中の1日」を丸1日として割ってしまい、着地が実態より低く出る。
+  const _td=todayStr();DATA._salesToday=sd.includes(_td)?_td:null;
+  const _fixed=sd.filter(d=>d<_td);DATA._salesMax=_fixed.length?_fixed[_fixed.length-1]:DATA._max;}
 
 // ---- 着地見込み（予実タブ pl.html と同じ計算） ----
 //  当月の税抜売上 着地見込は、予実タブ（🎯着地見込み）の計算・編集値と一致させる。

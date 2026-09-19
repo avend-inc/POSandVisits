@@ -55,7 +55,12 @@
     }
     var dates = Object.keys(byDate).sort();
     var monthDates = dates.filter(function (d) { return d >= mS && d <= mE; });
-    var cutoff = td0 < mE ? td0 : mE;
+    // 締日は「昨日まで」。進行中の当日（1時間おきの速報）を入れると三重に下振れする:
+    //   ① 途中の数字が1日分の実績として actual に乗る
+    //   ② その途中日が avg() の母集団に入り、平日/土日祝の1日平均を押し下げる
+    //   ③ 残日数（remWk/remWe）は closing の翌日から数えるので、今日が消化済み扱いになる
+    var yst = addDays(td0, -1);
+    var cutoff = yst < mE ? yst : mE;
     var closing = monthDates.filter(function (d) { return d <= cutoff; }).slice(-1)[0] || null;
     var actual = { in: 0, ex: 0, tx: 0, it: 0, v: 0, txv: 0 }; var wkN = 0, weN = 0;
     if (closing) for (var j = 0; j < monthDates.length; j++) {
@@ -80,7 +85,9 @@
     var dates = Object.keys(bd).sort();
     if (!dates.length) return null;
     var monthDates = dates.filter(function (d) { return d >= mS && d <= mE; });
-    var cutoff = td0 < mE ? td0 : mE;
+    // 締日は「昨日まで」（理由は components() のコメント）
+    var yst = addDays(td0, -1);
+    var cutoff = yst < mE ? yst : mE;
     var closing = monthDates.filter(function (d) { return d <= cutoff; }).slice(-1)[0] || null;
     var actual = 0; if (closing) for (var j = 0; j < monthDates.length; j++) { var d0 = monthDates[j]; if (d0 <= closing) actual += bd[d0]; }
     var ref = closing || cutoff, hist = dates.filter(function (d) { return d <= ref; });
