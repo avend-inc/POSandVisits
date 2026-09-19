@@ -5081,11 +5081,18 @@ function catCovered(f,t){
   return !!(CATRANGE&&CATRANGE.from<=f&&CATRANGE.to>=t
             &&(Date.now()-(CATRANGE.at||0))<CAT_TTL_MS);
 }
-async function catFetch(table,select,from,to){
+async function catFetch(table,select,from,to,orderCols){
   const out=[], PAGE=1000;
+  // ★安定した並び順で取ること。range()でのページ送りは ORDER BY が無いと
+  //   ページ間で順序が不定になり、行の取りこぼし・重複が起きる（1ページ=1000行を
+  //   超えると顕在化。セット割の実カテゴリ計上で行数が増え、価格帯の合計が実際より
+  //   小さく出る不具合になっていた）。日別はもともと order('date') 済みで無事だった。
+  //   → 一意キーの全列で並べて、ページ送りを決定的にする。
+  const ord=(orderCols||"date").split(",");
   for(let off=0;;off+=PAGE){
-    const {data,error}=await SB.from(table).select(select)
-      .gte("date",from).lte("date",to).range(off,off+PAGE-1);
+    let q=SB.from(table).select(select).gte("date",from).lte("date",to);
+    for(const c of ord) q=q.order(c,{ascending:true});
+    const {data,error}=await q.range(off,off+PAGE-1);
     if(error)throw error;
     out.push(...(data||[]));
     if(!data||data.length<PAGE)break;
@@ -5101,8 +5108,8 @@ async function ensureCatRange(from,to){
   const t=CATRANGE&&CATRANGE.to>to?CATRANGE.to:to;
   try{
     const [cat,catp]=await Promise.all([
-      catFetch("dash_category","date,store_id,category,amount,qty",f,t),
-      catFetch("dash_category_price","date,store_id,category,price,amount,qty",f,t),
+      catFetch("dash_category","date,store_id,category,amount,qty",f,t,"date,store_id,category"),
+      catFetch("dash_category_price","date,store_id,category,price,amount,qty",f,t,"date,store_id,category,price"),
     ]);
     DATA.cat =cat .map(r=>({d:r.date,s:r.store_id,c:r.category,a:+r.amount||0,q:+r.qty||0}));
     DATA.catp=catp.map(r=>({d:r.date,s:r.store_id,c:r.category,p:+r.price,a:+r.amount||0,q:+r.qty||0}));
