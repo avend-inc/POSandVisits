@@ -19,8 +19,13 @@
 name: NOTIME 当日速報ETL（1時間おき）
 
 on:
-  schedule:
-    - cron: "0 1-13 * * *"   # 10:00〜22:00 JST（毎時0分）
+  # ★ schedule は使わない（2026-09-19 に外した）
+  #   GitHub の schedule は共有ランナーの順番待ちで実測4〜5時間ずれ、JST 14時・15時の回が
+  #   1件も走らなかった。いまは Supabase の pg_cron が JST 10〜22時の毎時0分に
+  #   workflow_dispatch を叩いて起こす（送信から起動まで実測1秒）。
+  #   仕組みは avend-IMS の supabase/intraday_etl_cron.sql、
+  #   止まったときは同アプリの点検（/checkup）の「cron が止まっている」に出る。
+  #   ここに schedule を戻すと、遅れて来た回と二重に走り、POS各社サイトへのログインが余計に増える。
   workflow_dispatch:
     inputs:
       date:
